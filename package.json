@@ -1,0 +1,80 @@
+{
+  "name": "watch-vrchat-user",
+  "description": "",
+  "version": "0.0.0",
+  "author": "Tomachi <tomachi@tomacheese.com>",
+  "bugs": {
+    "url": "https://github.com/tomacheese/watch-vrchat-user/issues"
+  },
+  "devDependencies": {
+    "@book000/eslint-config": "1.12.38",
+    "@types/jest": "30.0.0",
+    "@types/node": "25.0.10",
+    "eslint": "9.39.2",
+    "eslint-config-standard": "17.1.0",
+    "eslint-plugin-import": "2.32.0",
+    "eslint-plugin-n": "17.23.2",
+    "eslint-plugin-promise": "7.2.1",
+    "jest": "30.2.0",
+    "jest-expect-message": "1.1.3",
+    "prettier": "3.8.1",
+    "run-z": "2.1.0",
+    "ts-jest": "29.4.6",
+    "tsx": "4.21.0",
+    "typed-emitter": "^2.1.0",
+    "typescript": "5.9.3"
+  },
+  "homepage": "https://github.com/tomacheese/watch-vrchat-user",
+  "jest": {
+    "setupFilesAfterEnv": [
+      "jest-expect-message"
+    ],
+    "testMatch": [
+      "**/*.test.ts"
+    ],
+    "moduleFileExtensions": [
+      "js",
+      "ts"
+    ],
+    "transform": {
+      "^.+\\.ts$": [
+        "ts-jest",
+        {
+          "tsconfig": "tsconfig.json"
+        }
+      ]
+    }
+  },
+  "license": "MIT",
+  "main": "dist/main.js",
+  "packageManager": "pnpm@9.15.4",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:tomacheese/watch-vrchat-user.git"
+  },
+  "scripts": {
+    "dev": "tsx watch ./src/main.ts",
+    "fix": "run-z fix:prettier fix:eslint",
+    "fix:eslint": "eslint . -c eslint.config.mjs --fix",
+    "fix:prettier": "prettier --write src",
+    "lint": "run-z lint:prettier,lint:eslint,lint:tsc",
+    "lint:eslint": "eslint . -c eslint.config.mjs",
+    "lint:prettier": "prettier --check src",
+    "lint:tsc": "tsc",
+    "preinstall": "npx only-allow pnpm",
+    "start": "tsx ./src/main.ts",
+    "test": "jest --runInBand --passWithNoTests --detectOpenHandles --forceExit --coverage"
+  },
+  "dependencies": {
+    "@book000/node-utils": "1.24.31",
+    "keyv": "^5.6.0",
+    "keyv-file": "^5.3.3",
+    "vrchat": "^2.20.7"
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "vrchat@2.20.7": "patches/vrchat@2.20.7.patch"
+    }
+  }
+}

@@ -1,0 +1,38 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+
+# Data files (mounted as volume)
+data
+
+# Environment files
+.env
+.env.*
+
+# IDE / Editor
+.idea
+.vscode
+*.swp
+*.swo
+
+# Git
+.git
+.gitignore
+
+# CI/CD
+.github
+
+# Development
+.devcontainer
+.serena
+
+# Misc
+*.md
+LICENSE
+renovate.json
+.depcheckrc.json
+.fixpackrc
+.prettierrc.yml
+eslint.config.mjs

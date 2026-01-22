@@ -30,6 +30,49 @@ async function promptTwoFactorCode(): Promise<string> {
 }
 
 /**
+ * Cookie データの型定義
+ */
+interface CookieData {
+  value: { name: string; value: string }[]
+}
+
+/**
+ * WebSocket (pipeline) を認証する
+ *
+ * @param vrchat VRChat クライアント
+ * @param keyvAdapter Cookie を保存している Keyv アダプタ
+ */
+async function authenticateWebSocket(
+  vrchat: VRChat,
+  keyvAdapter: KeyvFile
+): Promise<void> {
+  const cookiesData = await keyvAdapter.get('keyv:cookies')
+  if (!cookiesData) {
+    console.warn('[VRCHAT] No cookies data found, WebSocket not authenticated')
+    return
+  }
+
+  let parsed: CookieData
+  try {
+    parsed = JSON.parse(cookiesData as string) as CookieData
+  } catch {
+    console.error(
+      '[VRCHAT] Failed to parse cookies data, WebSocket not authenticated'
+    )
+    return
+  }
+
+  const authCookie = parsed.value.find((c) => c.name === 'auth')
+  if (!authCookie) {
+    console.warn('[VRCHAT] Auth cookie not found, WebSocket not authenticated')
+    return
+  }
+
+  await vrchat.pipeline.authenticate(authCookie.value)
+  console.log('[VRCHAT] WebSocket authenticated')
+}
+
+/**
  * VRChat クライアントを初期化する
  *
  * @param config アプリケーション設定
@@ -66,18 +109,7 @@ export async function createVRChatClient(config: Config): Promise<VRChat> {
     )
 
     // WebSocket (pipeline) を認証するために keyv から auth cookie を取得
-    const cookiesData = await keyvAdapter.get('keyv:cookies')
-    if (cookiesData) {
-      interface CookieData {
-        value: { name: string; value: string }[]
-      }
-      const parsed = JSON.parse(cookiesData as string) as CookieData
-      const authCookie = parsed.value.find((c) => c.name === 'auth')
-      if (authCookie) {
-        await vrchat.pipeline.authenticate(authCookie.value)
-        console.log('[VRCHAT] WebSocket authenticated')
-      }
-    }
+    await authenticateWebSocket(vrchat, keyvAdapter)
 
     return vrchat
   }
@@ -101,6 +133,9 @@ export async function createVRChatClient(config: Config): Promise<VRChat> {
   const data = loginResult.data
   const displayName = 'displayName' in data ? data.displayName : 'Unknown'
   console.log(`[VRCHAT] Logged in as ${displayName}`)
+
+  // ログイン後も WebSocket を認証する
+  await authenticateWebSocket(vrchat, keyvAdapter)
 
   return vrchat
 }

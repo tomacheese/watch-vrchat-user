@@ -54,6 +54,86 @@ interface FriendOfflineEvent {
 }
 
 /**
+ * FriendLocationEvent の型ガード
+ *
+ * @param data 検証するデータ
+ * @returns FriendLocationEvent として有効な場合は true
+ */
+function isFriendLocationEvent(data: unknown): data is FriendLocationEvent {
+  if (typeof data !== 'object' || data === null) {
+    return false
+  }
+
+  const obj = data as Record<string, unknown>
+
+  if (typeof obj.userId !== 'string') {
+    return false
+  }
+
+  if (typeof obj.location !== 'string') {
+    return false
+  }
+
+  if (typeof obj.user !== 'object' || obj.user === null) {
+    return false
+  }
+
+  const user = obj.user as Record<string, unknown>
+
+  if (typeof user.id !== 'string' || typeof user.displayName !== 'string') {
+    return false
+  }
+
+  return true
+}
+
+/**
+ * FriendOnlineEvent の型ガード
+ *
+ * @param data 検証するデータ
+ * @returns FriendOnlineEvent として有効な場合は true
+ */
+function isFriendOnlineEvent(data: unknown): data is FriendOnlineEvent {
+  if (typeof data !== 'object' || data === null) {
+    return false
+  }
+
+  const obj = data as Record<string, unknown>
+
+  if (typeof obj.userId !== 'string') {
+    return false
+  }
+
+  if (typeof obj.user !== 'object' || obj.user === null) {
+    return false
+  }
+
+  const user = obj.user as Record<string, unknown>
+
+  if (typeof user.id !== 'string' || typeof user.displayName !== 'string') {
+    return false
+  }
+
+  return true
+}
+
+/**
+ * FriendOfflineEvent の型ガード
+ *
+ * @param data 検証するデータ
+ * @returns FriendOfflineEvent として有効な場合は true
+ */
+function isFriendOfflineEvent(data: unknown): data is FriendOfflineEvent {
+  if (typeof data !== 'object' || data === null) {
+    return false
+  }
+
+  const obj = data as Record<string, unknown>
+
+  return typeof obj.userId === 'string'
+}
+
+/**
  * メインアプリケーションクラス
  */
 class WatchVRChatUser {
@@ -206,29 +286,44 @@ class WatchVRChatUser {
 
     // friend-location イベント
     pipeline.on('friend-location', (data: unknown) => {
-      this.handleFriendLocation(data as FriendLocationEvent).catch(
-        (error: unknown) => {
-          console.error('[MAIN] Error handling friend-location event:', error)
-        }
-      )
+      if (!isFriendLocationEvent(data)) {
+        console.error(
+          '[MAIN] Invalid friend-location event data:',
+          JSON.stringify(data)
+        )
+        return
+      }
+      this.handleFriendLocation(data).catch((error: unknown) => {
+        console.error('[MAIN] Error handling friend-location event:', error)
+      })
     })
 
     // friend-online イベント
     pipeline.on('friend-online', (data: unknown) => {
-      this.handleFriendOnline(data as FriendOnlineEvent).catch(
-        (error: unknown) => {
-          console.error('[MAIN] Error handling friend-online event:', error)
-        }
-      )
+      if (!isFriendOnlineEvent(data)) {
+        console.error(
+          '[MAIN] Invalid friend-online event data:',
+          JSON.stringify(data)
+        )
+        return
+      }
+      this.handleFriendOnline(data).catch((error: unknown) => {
+        console.error('[MAIN] Error handling friend-online event:', error)
+      })
     })
 
     // friend-offline イベント
     pipeline.on('friend-offline', (data: unknown) => {
-      this.handleFriendOffline(data as FriendOfflineEvent).catch(
-        (error: unknown) => {
-          console.error('[MAIN] Error handling friend-offline event:', error)
-        }
-      )
+      if (!isFriendOfflineEvent(data)) {
+        console.error(
+          '[MAIN] Invalid friend-offline event data:',
+          JSON.stringify(data)
+        )
+        return
+      }
+      this.handleFriendOffline(data).catch((error: unknown) => {
+        console.error('[MAIN] Error handling friend-offline event:', error)
+      })
     })
 
     console.log('[MAIN] WebSocket event handlers registered.')

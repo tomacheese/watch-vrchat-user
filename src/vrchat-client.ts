@@ -52,12 +52,23 @@ async function authenticateWebSocket(
     return
   }
 
+  // keyvAdapter.get の戻り値は string または object の可能性がある
   let parsed: CookieData
-  try {
-    parsed = JSON.parse(cookiesData as string) as CookieData
-  } catch {
+  if (typeof cookiesData === 'string') {
+    try {
+      parsed = JSON.parse(cookiesData) as CookieData
+    } catch {
+      console.error(
+        '[VRCHAT] Failed to parse cookies data, WebSocket not authenticated'
+      )
+      return
+    }
+  } else if (typeof cookiesData === 'object') {
+    // すでに object として保存されている場合
+    parsed = cookiesData as CookieData
+  } else {
     console.error(
-      '[VRCHAT] Failed to parse cookies data, WebSocket not authenticated'
+      '[VRCHAT] Unexpected cookies data type, WebSocket not authenticated'
     )
     return
   }
@@ -128,11 +139,16 @@ export async function createVRChatClient(config: Config): Promise<VRChat> {
     throw new Error(`Failed to login: ${loginResult.error.message}`)
   }
 
-  // loginResult.data は CurrentUser | RequiresTwoFactorAuth の可能性があるため、
-  // displayName プロパティの存在を確認
+  // SDK は 2FA が必要な場合に内部で自動処理するため、
+  // 成功時は CurrentUser が返される。防御的に displayName の存在を確認
   const data = loginResult.data
-  const displayName = 'displayName' in data ? data.displayName : 'Unknown'
-  console.log(`[VRCHAT] Logged in as ${displayName}`)
+  if (!('displayName' in data)) {
+    // 通常発生しないが、SDK の動作が変わった場合に備える
+    throw new Error(
+      'Login succeeded but user data is incomplete (no displayName)'
+    )
+  }
+  console.log(`[VRCHAT] Logged in as ${data.displayName}`)
 
   // ログイン後も WebSocket を認証する
   await authenticateWebSocket(vrchat, keyvAdapter)
@@ -152,7 +168,15 @@ export async function isFriend(
   userId: string
 ): Promise<boolean> {
   const result = await vrchat.getFriendStatus({ path: { userId } })
-  return result.data?.isFriend ?? false
+
+  if (result.error) {
+    console.error(
+      `[VRCHAT] Failed to get friend status for ${userId}: ${result.error.message}`
+    )
+    return false
+  }
+
+  return result.data.isFriend
 }
 
 /**
@@ -188,7 +212,10 @@ export async function getUser(
 ): Promise<UserInfo | null> {
   const result = await vrchat.getUser({ path: { userId } })
 
-  if (!result.data) {
+  if (result.error) {
+    console.error(
+      `[VRCHAT] Failed to get user ${userId}: ${result.error.message}`
+    )
     return null
   }
 
@@ -223,7 +250,10 @@ export async function getFriendIds(vrchat: VRChat): Promise<string[]> {
       query: { n: limit, offset },
     })
 
-    if (!result.data) {
+    if (result.error) {
+      console.error(
+        `[VRCHAT] Failed to get friends (offset=${offset}): ${result.error.message}`
+      )
       break
     }
 

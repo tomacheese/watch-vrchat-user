@@ -326,6 +326,10 @@ class WatchVRChatUser {
       })
     })
 
+    // NOTE: VRChat SDK は WebSocket 切断時の自動再接続を行わない。
+    // 長時間運用では、外部からのプロセス再起動（Docker restart など）で対応する。
+    // 将来的には SDK の拡張または独自の再接続ロジックが必要になる可能性がある。
+
     console.log('[MAIN] WebSocket event handlers registered.')
   }
 

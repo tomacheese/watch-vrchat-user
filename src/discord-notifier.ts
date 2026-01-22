@@ -1,7 +1,3 @@
-/**
- * Discord 通知を管理するモジュール
- */
-
 import { Discord, type DiscordEmbed } from '@book000/node-utils'
 import type { Config } from './config'
 
@@ -160,18 +156,40 @@ export class DiscordNotifier {
   }
 
   /**
-   * Embed を送信する
+   * Embed を送信する（リトライ機能付き）
    *
    * @param embed Discord Embed
+   * @param attempt 現在の試行回数
    */
-  private async sendEmbed(embed: DiscordEmbed): Promise<void> {
+  private async sendEmbed(embed: DiscordEmbed, attempt = 1): Promise<void> {
+    const maxAttempts = 3
+
     try {
       await this.discord.sendMessage({
         embeds: [embed],
       })
     } catch (error) {
-      // Discord 通知の失敗は致命的ではないため、ログ出力のみ
-      console.error('[DISCORD] Failed to send notification:', error)
+      console.error(
+        `[DISCORD] Failed to send notification (attempt ${attempt}/${maxAttempts}):`,
+        error
+      )
+
+      if (attempt < maxAttempts) {
+        // リトライ前に待機（試行回数に応じて増加）
+        await this.delay(1000 * attempt)
+        return this.sendEmbed(embed, attempt + 1)
+      }
+
+      // これ以上リトライしない。エラーはログにのみ出力して呼び出し元には伝播しない。
     }
+  }
+
+  /**
+   * 指定したミリ秒だけ待機するヘルパー
+   *
+   * @param ms 待機するミリ秒
+   */
+  private async delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms))
   }
 }

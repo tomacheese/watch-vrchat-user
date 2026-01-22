@@ -8,6 +8,7 @@
     "eslint-plugin-promise",
     "@types/jest",
     "keyv",
-    "typed-emitter"
+    "typed-emitter",
+    "fixpack"
   ]
 }

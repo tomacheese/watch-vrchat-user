@@ -1,9 +1,3 @@
-/**
- * watch-vrchat-user
- *
- * VRChat ユーザーの Location 変更を監視し、Discord に通知するアプリケーション
- */
-
 import { loadConfig, type Config } from './config'
 import { DiscordNotifier } from './discord-notifier'
 import { LocationStore } from './location-store'

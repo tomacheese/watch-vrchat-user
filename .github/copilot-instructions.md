@@ -29,6 +29,10 @@ VRChat ユーザーの Location 変更を監視し、Discord に通知する Nod
 - `any` 型の使用は避け、適切な型定義を行う
 - ESLint / Prettier のルールに従う
 
+### コードレビュー
+
+- プルリクエストのレビュー時には**日本語**でレビューすること
+
 ### コミット規約
 
 - [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) に従う

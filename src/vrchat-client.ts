@@ -1,14 +1,11 @@
-/**
- * VRChat クライアントを管理するモジュール
- */
-
 import * as readline from 'node:readline'
 import { KeyvFile } from 'keyv-file'
 import { VRChat } from 'vrchat'
 import type { Config } from './config'
 
-/** Cookie ファイルのパス */
-const COOKIE_FILE_PATH = 'data/vrchat-cookies.json'
+/** Cookie ファイルのパス（環境変数で上書き可能） */
+const COOKIE_FILE_PATH =
+  process.env.COOKIE_FILE_PATH ?? 'data/vrchat-cookies.json'
 
 /**
  * readline を使って 2FA コードを入力させる
@@ -79,8 +76,15 @@ async function authenticateWebSocket(
     return
   }
 
-  await vrchat.pipeline.authenticate(authCookie.value)
-  console.log('[VRCHAT] WebSocket authenticated')
+  try {
+    await vrchat.pipeline.authenticate(authCookie.value)
+    console.log('[VRCHAT] WebSocket authenticated')
+  } catch (error) {
+    console.error(
+      '[VRCHAT] Failed to authenticate WebSocket:',
+      error instanceof Error ? error.message : error
+    )
+  }
 }
 
 /**
@@ -235,6 +239,9 @@ export async function getUser(
 
 /**
  * フレンド一覧を取得する
+ *
+ * 現在は未使用だが、将来的に全フレンドの Location 監視機能を
+ * 追加する際に使用する予定
  *
  * @param vrchat VRChat クライアント
  * @returns フレンドのユーザー ID の配列

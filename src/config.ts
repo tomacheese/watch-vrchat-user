@@ -1,8 +1,4 @@
 /**
- * アプリケーション設定を管理するモジュール
- */
-
-/**
  * VRChat 認証情報の設定
  */
 interface VRChatConfig {

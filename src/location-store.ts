@@ -1,12 +1,9 @@
-/**
- * ユーザーの Location 状態を管理するモジュール
- */
-
 import * as fs from 'node:fs'
 import path from 'node:path'
 
-/** Location データファイルのパス */
-const LOCATION_FILE_PATH = 'data/user-locations.json'
+/** Location データファイルのパス（環境変数で上書き可能） */
+const LOCATION_FILE_PATH =
+  process.env.LOCATION_FILE_PATH ?? 'data/user-locations.json'
 
 /** 保存の debounce 時間（ミリ秒） */
 const SAVE_DEBOUNCE_MS = 1000
@@ -73,7 +70,18 @@ export class LocationStore {
 
       if (fs.existsSync(LOCATION_FILE_PATH)) {
         const content = fs.readFileSync(LOCATION_FILE_PATH, 'utf8')
-        this.data = JSON.parse(content) as LocationStoreData
+        const parsed: unknown = JSON.parse(content)
+
+        // データ構造のバリデーション
+        if (!this.isValidLocationStoreData(parsed)) {
+          console.warn(
+            '[LOCATION-STORE] Invalid data structure in file, starting with empty data'
+          )
+          this.data = { users: {} }
+          return
+        }
+
+        this.data = parsed
         console.log(
           `[LOCATION-STORE] Loaded ${Object.keys(this.data.users).length} user(s) from file`
         )
@@ -82,6 +90,25 @@ export class LocationStore {
       console.error('[LOCATION-STORE] Failed to load data:', error)
       this.data = { users: {} }
     }
+  }
+
+  /**
+   * データ構造が LocationStoreData として有効かを検証する
+   *
+   * @param data 検証するデータ
+   * @returns 有効な場合は true
+   */
+  private isValidLocationStoreData(data: unknown): data is LocationStoreData {
+    if (typeof data !== 'object' || data === null) {
+      return false
+    }
+
+    const obj = data as Record<string, unknown>
+    if (typeof obj.users !== 'object' || obj.users === null) {
+      return false
+    }
+
+    return true
   }
 
   /**

@@ -1,6 +1,6 @@
 {
   "name": "watch-vrchat-user",
-  "image": "mcr.microsoft.com/devcontainers/typescript-node:0-18",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:0-24",
   "remoteUser": "node",
   "otherPortsAttributes": {
     "onAutoForward": "silent"

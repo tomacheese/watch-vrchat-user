@@ -1,0 +1,44 @@
+# 任意のレジストリに Docker image を公開orビルドする。
+# プルリクの作成・更新時に動作する。
+
+name: Docker
+
+on:
+  pull_request:
+    branches:
+      - main
+      - master
+    types:
+      - opened
+      - synchronize
+    paths:
+      - .github/workflows/docker.yml
+  pull_request_target:
+    branches:
+      - main
+      - master
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - closed
+  merge_group:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.merged == true && github.base_ref || github.event.pull_request.head.sha }}
+
+jobs:
+  docker-ci:
+    name: Docker CI
+    uses: book000/templates/.github/workflows/reusable-docker.yml@master
+    with:
+      targets: >-
+        [
+          { imageName: "tomacheese/watch-vrchat-user", context: ".", file: "Dockerfile", packageName: "watch-vrchat-user" }
+        ]
+      # registry: registry.hub.docker.com # default: ghcr.io
+      # platforms: linux/amd64 # default: linux/amd64,linux/arm64
+    secrets:
+      DOCKER_USERNAME: ${{ github.actor }}
+      DOCKER_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+

@@ -1,0 +1,12 @@
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index b2cf019580659dc2431d9250eb09f196f73c474c..03de2ab587296514e6dccb52f16a7399bac07ee3 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -2,6 +2,6 @@ export { iG as AcceptFriendRequest, iI as AcceptFriendRequestError, iH as Accept
+ import 'keyv';
+ import 'typed-emitter';
+ 
+-var version = "2.20.7";
++declare const version = "2.20.7";
+ 
+ export { version };

@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      - VRCHAT_USERNAME=${VRCHAT_USERNAME}
+      - VRCHAT_PASSWORD=${VRCHAT_PASSWORD}
+      - VRCHAT_TOTP_SECRET=${VRCHAT_TOTP_SECRET:-}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
+      - TARGET_USER_IDS=${TARGET_USER_IDS}
+    volumes:
+      - ./data:/data

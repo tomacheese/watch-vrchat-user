@@ -1,4 +1,4 @@
-# GitHub Copilot Instructions
+# GitHub Copilot 指示
 
 ## プロジェクト概要
 - 目的: VRChat ユーザーの Location 変更を監視し、Discord に通知する
@@ -30,7 +30,7 @@ pnpm install
 # 開発
 pnpm dev
 
-# ビルド (TS実行)
+# 本番実行
 pnpm start
 
 # Lint
@@ -58,4 +58,4 @@ pnpm test
 - GEMINI.md: コンテキスト変更時
 
 ## リポジトリ固有
-- VRChat SDK にパッチ (`patches/vrchat@2.20.7.patch`) を適用しているため、更新時は注意する。
+- vrchat パッケージにパッチ (`patches/vrchat@2.20.7.patch`) を適用しているため、更新時は注意する。

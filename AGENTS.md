@@ -1,108 +1,31 @@
-# OpenAI Codex Agent 指示
+# AI Agents Guidelines
 
-## プロジェクト概要
+## 目的
+このドキュメントは、汎用 AI エージェント向けの基本方針とプロジェクトルールを定義するものです。
 
-VRChat ユーザーの Location 変更を監視し、Discord に通知する Node.js アプリケーションです。
+## 基本方針
+- **会話言語**: 日本語
+- **コメント言語**: 日本語
+- **エラーメッセージ**: 英語
+- **コミット規約**: Conventional Commits (description は日本語)
+- **記述ルール**: 日本語と英数字の間に半角スペースを挿入
 
-## 技術スタック
+## 判断記録のルール
+1. 判断内容の要約
+2. 検討した代替案
+3. 採用しなかった案とその理由
+4. 前提条件・仮定・不確実性
 
-- **ランタイム**: Node.js 24
-- **言語**: TypeScript 5.x
-- **パッケージマネージャ**: pnpm 9.x（必須、npm/yarn は使用不可）
-- **主要ライブラリ**:
-  - `vrchat` - VRChat API SDK（パッチ適用済み）
-  - `@book000/node-utils` - Discord Webhook 送信
-  - `keyv-file` - Cookie 永続化
+## 開発手順（概要）
+1. **プロジェクト理解**: ファイル構成と `package.json` を確認
+2. **準備**: `pnpm install` で依存関係をインストール
+3. **実装**: テスト駆動開発を推奨。`src/` 以下のコードを変更
+4. **検証**: `pnpm test` および `pnpm lint` を実行
 
-## ディレクトリ構成
+## セキュリティ / 機密情報
+- `.env` ファイルや `data/` ディレクトリ内のファイルをコミットしない
+- ログに認証トークンなどの機密情報を出力しない
 
-```text
-src/
-  config.ts          # 環境変数の読み込み・検証
-  vrchat-client.ts   # VRChat SDK 初期化・認証
-  discord-notifier.ts # Discord 通知送信
-  location-store.ts  # ユーザー Location 状態管理
-  main.ts            # エントリポイント
-data/                # 永続化データ（Cookie、Location 履歴）
-patches/             # pnpm パッチファイル
-```
-
-## コーディング規約
-
-### 言語ルール
-
-- コード内のコメント・JSDoc は**日本語**で記載すること
-- エラーメッセージは**英語**で記載すること
-- 日本語と英数字の間には**半角スペース**を挿入すること
-
-### TypeScript ルール
-
-- 関数・インターフェースには JSDoc を必ず記載すること
-- `skipLibCheck` を有効にして型エラーを回避してはならない
-- `any` 型の使用は避け、適切な型定義を行うこと
-- ESLint / Prettier のルールに従うこと
-
-### コミット規約
-
-- [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) に従うこと
-- `<description>` は日本語で記載すること
-- 例: `feat: ユーザー状態の初期取得機能を追加`
-
-### ブランチ規約
-
-- [Conventional Branch](https://conventional-branch.github.io) に従うこと
-- `<type>` は短縮形（feat, fix）で記載すること
-- 例: `feat/initial-status-fetch`
-
-## 開発コマンド
-
-```bash
-# 依存パッケージのインストール
-pnpm install
-
-# 開発モード（ホットリロード）
-pnpm dev
-
-# 本番実行
-pnpm start
-
-# Lint チェック
-pnpm lint
-
-# Lint 修正
-pnpm fix
-
-# テスト実行
-pnpm test
-```
-
-## 注意事項
-
-### 機密情報
-
-以下のファイル・ディレクトリには機密情報が含まれるため、絶対にコミットしてはならない：
-
-- `.env` - 環境変数（VRChat 認証情報、Discord Webhook URL）
-- `data/` - Cookie、Location 履歴
-
-### VRChat SDK パッチ
-
-`vrchat` パッケージには型定義のバグがあり、`patches/vrchat@2.20.7.patch` で修正しています。パッケージを更新する際はパッチの互換性を確認してください。
-
-### Docker
-
-Docker で実行する場合は `compose.yaml` を使用してください：
-
-```bash
-docker compose up -d
-```
-
-## レビュー観点
-
-コードレビュー時は以下を確認してください：
-
-1. JSDoc が日本語で記載されているか
-2. 型定義が適切か（`any` を使用していないか）
-3. エラーハンドリングが適切か
-4. 機密情報がハードコードされていないか
-5. Conventional Commits に従っているか
+## リポジトリ固有
+- パッケージマネージャーは `pnpm` を使用 (npm/yarn 禁止)
+- `vrchat` パッケージ (VRChat API ライブラリ) にはパッチが適用されている

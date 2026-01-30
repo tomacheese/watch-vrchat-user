@@ -1,67 +1,61 @@
 # GitHub Copilot 指示
 
 ## プロジェクト概要
+- 目的: VRChat ユーザーの Location 変更を監視し、Discord に通知する
+- 主な機能: VRChat API 監視、Discord 通知、Cookie 永続化
+- 対象ユーザー: 開発者
 
-VRChat ユーザーの Location 変更を監視し、Discord に通知する Node.js アプリケーションです。
+## 共通ルール
+- 会話は日本語で行う。
+- PR とコミットは Conventional Commits に従う。
+- 日本語と英数字の間には半角スペースを入れる。
 
 ## 技術スタック
-
-- **ランタイム**: Node.js 24
-- **言語**: TypeScript 5.x
-- **パッケージマネージャ**: pnpm 9.x（必須）
-- **主要ライブラリ**:
-  - `vrchat` - VRChat API SDK
-  - `@book000/node-utils` - Discord Webhook 送信
-  - `keyv-file` - Cookie 永続化
+- 言語: TypeScript
+- ランタイム: Node.js 24
+- パッケージマネージャー: pnpm
+- 主要ライブラリ: vrchat, @book000/node-utils, keyv-file
 
 ## コーディング規約
-
-### 言語
-
-- コード内のコメント・JSDoc は**日本語**で記載する
-- エラーメッセージは**英語**で記載する
-- 日本語と英数字の間には**半角スペース**を挿入する
-
-### TypeScript
-
-- 関数・インターフェースには JSDoc を必ず記載する
-- `skipLibCheck` を有効にして型エラーを回避してはならない
-- `any` 型の使用は避け、適切な型定義を行う
-- ESLint / Prettier のルールに従う
-
-### コードレビュー
-
-- プルリクエストのレビュー時には**日本語**でレビューすること
-
-### コミット規約
-
-- [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) に従う
-- `<description>` は日本語で記載する
-- 例: `feat: ユーザー状態の初期取得機能を追加`
-
-## ディレクトリ構成
-
-```text
-src/
-  config.ts          # 環境変数の読み込み・検証
-  vrchat-client.ts   # VRChat SDK 初期化・認証
-  discord-notifier.ts # Discord 通知送信
-  location-store.ts  # ユーザー Location 状態管理
-  main.ts            # エントリポイント
-```
+- フォーマット: Prettier
+- Lint: ESLint
+- 型チェック: TypeScript (skipLibCheck 禁止)
+- ドキュメント: JSDoc (日本語)
 
 ## 開発コマンド
-
 ```bash
-pnpm dev      # 開発モード
-pnpm start    # 本番実行
-pnpm lint     # Lint チェック
-pnpm fix      # Lint 修正
-pnpm test     # テスト実行
+# 依存関係のインストール
+pnpm install
+
+# 開発
+pnpm dev
+
+# 本番実行
+pnpm start
+
+# Lint
+pnpm lint
+
+# Format
+pnpm fix
+
+# テスト
+pnpm test
 ```
 
-## 注意事項
+## テスト方針
+- テストフレームワーク: Jest
+- テストコマンド: `pnpm test`
+- カバレッジ計測: `pnpm test` (デフォルトで有効)
 
-- `.env` ファイルには機密情報が含まれるため、コミットしてはならない
-- `data/` ディレクトリには Cookie が保存されるため、コミットしてはならない
-- `vrchat` パッケージにはパッチが適用されている（`patches/` ディレクトリ参照）
+## セキュリティ / 機密情報
+- .env ファイルに環境変数を保存し、コミットしない。
+- data/ ディレクトリの Cookie や履歴をコミットしない。
+- ログに認証トークンや個人情報を出力しない。
+
+## ドキュメント更新
+- README.md: 機能変更時
+- GEMINI.md: コンテキスト変更時
+
+## リポジトリ固有
+- vrchat パッケージにパッチ (`patches/vrchat@2.20.7.patch`) を適用しているため、更新時は注意する。

@@ -1,92 +1,117 @@
-# watch-vrchat-user プロジェクト指示
+# Claude Code Guidelines
+
+## 目的
+このドキュメントは、Claude Code の作業方針とプロジェクト固有ルールを示すものです。
+
+## 判断記録のルール
+1. 判断内容の要約を記載する
+2. 検討した代替案を列挙する
+3. 採用しなかった案とその理由を明記する
+4. 前提条件・仮定・不確実性を明示する
+5. 他エージェントによるレビュー可否を示す
+
+前提・仮定・不確実性を明示し、仮定を事実のように扱わないでください。
 
 ## プロジェクト概要
+- 目的: VRChat ユーザーの Location 変更を監視し、Discord に通知する
+- 主な機能: VRChat WebSocket イベント監視 (補助的に VRChat API ポーリング)、Discord Webhook 通知
 
-VRChat ユーザーの Location 変更を監視し、Discord に通知する Node.js アプリケーションです。
+## 重要ルール
+- **会話言語**: 日本語
+- **コミット規約**: Conventional Commits (`<type>(<scope>): <description>`, description は日本語)
+- **コメント言語**: 日本語
+- **エラーメッセージ**: 英語
+- **記述ルール**: 日本語と英数字の間に半角スペースを挿入
 
-## 技術スタック
+## 環境のルール
+- **ブランチ命名**: Conventional Branch (`feat/xxx`, `fix/xxx`)
+- **GitHub 調査**: 必要に応じてテンポラリディレクトリに clone して調査
+- **Renovate**: Renovate PR には直接コミットしない
+  - 理由: Renovate が管理するブランチに手動変更を加えると、再生成時のコンフリクト増加や履歴の不整合を招くため
+  - 対応方針:
+    - Renovate PR は「変更内容の確認・テスト」のみに用い、コード修正や設定変更は通常の `feat/xxx` / `fix/xxx` ブランチで行う
+    - Renovate が提案した変更を採用する場合は、同内容を手動で別ブランチに反映し、通常の PR を作成してマージする
+    - 依存関係をまとめて更新したい場合は、該当 Renovate PR を Close し、手動で依存更新用ブランチを切って対応する
 
-- **ランタイム**: Node.js 24
-- **言語**: TypeScript 5.x
-- **パッケージマネージャ**: pnpm 9.x（必須）
-- **主要ライブラリ**:
-  - `vrchat` - VRChat API SDK（パッチ適用済み）
-  - `@book000/node-utils` - Discord Webhook 送信
-  - `keyv-file` - Cookie 永続化
+## コード改修時のルール
+- **エラーメッセージ**: 絵文字を使用する場合、メッセージ全体で統一する
+- **TypeScript**: `skipLibCheck` は使用禁止
+- **ドキュメント**: 関数・インターフェースに日本語の JSDoc を記載
 
-## ディレクトリ構成
-
-```text
-src/
-  config.ts          # 環境変数の読み込み・検証
-  vrchat-client.ts   # VRChat SDK 初期化・認証
-  discord-notifier.ts # Discord 通知送信
-  location-store.ts  # ユーザー Location 状態管理
-  main.ts            # エントリポイント
-data/                # 永続化データ（Cookie、Location 履歴）
-patches/             # pnpm パッチファイル
-```
-
-## 開発ルール
-
-### 言語
-
-- コード内のコメント・JSDoc は日本語で記載する
-- エラーメッセージは英語で記載する
-- 日本語と英数字の間には半角スペースを挿入する
-
-### コーディング規約
-
-- 関数・インターフェースには JSDoc を必ず記載する
-- `skipLibCheck` を有効にして型エラーを回避してはならない
-- ESLint / Prettier のルールに従う
-
-### コミット規約
-
-- [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) に従う
-- `<description>` は日本語で記載する
-- 例: `feat: ユーザー状態の初期取得機能を追加`
-
-### ブランチ規約
-
-- [Conventional Branch](https://conventional-branch.github.io) に従う
-- `<type>` は短縮形（feat, fix）で記載する
-- 例: `feat/initial-status-fetch`
+## 相談ルール
+- **Claude Code**: 実装レビュー、局所設計、整合性確認に使用
+- **Gemini CLI**: 外部仕様、最新情報確認に使用
+- **指摘対応**: 指摘は黙殺せず、必ず対応または議論を行う
 
 ## 開発コマンド
-
 ```bash
-# 開発モード（ホットリロード）
+# 依存関係インストール
+pnpm install
+
+# 開発サーバー (ホットリロード)
 pnpm dev
 
 # 本番実行
 pnpm start
 
-# Lint チェック
+# Lint 実行
 pnpm lint
 
-# Lint 修正
+# 自動修正 (Format & Lint Fix)
 pnpm fix
 
 # テスト実行
 pnpm test
 ```
 
-## 注意事項
+## アーキテクチャと主要ファイル
+- `src/main.ts`: エントリーポイント
+- `src/vrchat-client.ts`: VRChat API クライアント (SDK ラッパー)
+- `src/discord-notifier.ts`: Discord 通知処理
+- `src/location-store.ts`: ユーザー位置情報の管理
+- `src/config.ts`: 設定読み込み
+- `data/`: 永続化データ保存先 (Cookie 等)
 
-### VRChat SDK パッチ
+## 実装パターン
+- **VRChat API**: `vrchat` パッケージを使用 (パッチ適用済み)
+- **永続化**: `keyv-file` を使用してローカルファイルに保存
 
-`vrchat` パッケージには型定義のバグがあり、`patches/vrchat@2.20.7.patch` で修正しています。パッケージを更新する際はパッチの互換性を確認してください。
+## テスト
+- **フレームワーク**: Jest
+- **方針**: ロジック部分は可能な限りテストを作成する
+- **コマンド**: `pnpm test`
 
-### 認証情報
+## ドキュメント更新ルール
+- **タイミング**: 機能追加・変更時、コンテキスト変更時
+- **対象**: `README.md`, `GEMINI.md` 等
 
-- `.env` ファイルには機密情報が含まれるため、コミットしてはならない
-- `data/` ディレクトリにも Cookie が保存されるため、コミットしてはならない
+## 作業チェックリスト
 
-### Docker
+### 新規改修時
+1. プロジェクトを理解する
+2. 作業ブランチが適切であることを確認する
+3. 最新のリモートブランチに基づいた新規ブランチであることを確認する
+4. クローズされた PR の不要ブランチが削除済みであることを確認する
+5. 指定されたパッケージマネージャー (`pnpm`) で依存関係をインストールする
 
-Docker で実行する場合は `compose.yaml` を使用してください。
+### コミット・プッシュ前
+1. Conventional Commits に従っていることを確認する
+2. センシティブな情報が含まれていないことを確認する
+3. Lint / Format エラーがないことを確認する
+4. 動作確認を行う
 
-```bash
-docker compose up -d
-```
+### PR 作成前
+1. PR 作成の依頼があることを確認する
+2. センシティブな情報が含まれていないことを確認する
+3. コンフリクトの恐れがないことを確認する
+
+### PR 作成後
+1. コンフリクトがないことを確認する
+2. PR 本文が最新のコミットに含まれる変更内容を正確に反映していることを確認する
+3. `gh pr checks <PR ID> --watch` で CI を確認する
+4. Copilot レビューに対応し、コメントに返信する
+5. Claude Code によるコードレビューを実施し、指摘対応を行う
+6. PR 本文の崩れがないことを確認する
+
+## リポジトリ固有
+- `patches/vrchat@2.20.7.patch` によるパッチが適用されているため、`vrchat` パッケージの更新時はパッチの整合性を確認する。

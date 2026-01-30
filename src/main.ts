@@ -1,7 +1,9 @@
 import { loadConfig, type Config } from './config'
 import { DiscordNotifier } from './discord-notifier'
+import { HealthServer } from './health-server'
 import { LocationStore } from './location-store'
-import { createVRChatClient, getUser, isFriend } from './vrchat-client'
+import { getUser, isFriend } from './vrchat-client'
+import { WebSocketMonitor } from './websocket-monitor'
 import type { VRChat } from 'vrchat'
 
 /**
@@ -135,6 +137,8 @@ class WatchVRChatUser {
   private vrchat: VRChat | null = null
   private notifier: DiscordNotifier
   private locationStore: LocationStore
+  private monitor: WebSocketMonitor
+  private healthServer: HealthServer
   private isShuttingDown = false
 
   /**
@@ -146,6 +150,8 @@ class WatchVRChatUser {
     this.config = config
     this.notifier = new DiscordNotifier(config)
     this.locationStore = new LocationStore()
+    this.monitor = new WebSocketMonitor(config)
+    this.healthServer = new HealthServer(this.monitor)
   }
 
   /**
@@ -157,17 +163,20 @@ class WatchVRChatUser {
     // シグナルハンドラを設定
     this.setupSignalHandlers()
 
-    // VRChat クライアントを初期化
-    this.vrchat = await createVRChatClient(this.config)
+    // ヘルスチェックサーバーを開始
+    this.healthServer.start()
 
-    // ターゲットユーザーがフレンドかどうかを検証
-    await this.validateTargetUsers()
-
-    // ターゲットユーザーの初期状態を取得
-    await this.fetchInitialUserStatuses()
-
-    // WebSocket イベントを登録
-    this.setupWebSocketEvents()
+    // WebSocket 接続監視を開始
+    await this.monitor.start(
+      (vrchat: VRChat) => {
+        this.handleConnected(vrchat).catch((error: unknown) => {
+          console.error('[MAIN] Error in handleConnected:', error)
+        })
+      },
+      () => {
+        this.handleDisconnected()
+      }
+    )
 
     console.log('[MAIN] Application started. Listening for events...')
   }
@@ -187,10 +196,11 @@ class WatchVRChatUser {
       // Location ストアをフラッシュ
       this.locationStore.flush()
 
-      // WebSocket を閉じる
-      if (this.vrchat) {
-        this.vrchat.pipeline.close()
-      }
+      // WebSocket 監視を停止
+      this.monitor.stop()
+
+      // ヘルスチェックサーバーを停止
+      this.healthServer.stop()
 
       console.log('[MAIN] Goodbye!')
       // eslint-disable-next-line unicorn/no-process-exit
@@ -269,6 +279,36 @@ class WatchVRChatUser {
   }
 
   /**
+   * WebSocket 接続確立時の処理
+   *
+   * @param vrchat VRChat クライアント
+   */
+  private async handleConnected(vrchat: VRChat): Promise<void> {
+    console.log('[MAIN] WebSocket connected, initializing...')
+
+    this.vrchat = vrchat
+
+    // ターゲットユーザーがフレンドかどうかを検証
+    await this.validateTargetUsers()
+
+    // ターゲットユーザーの初期状態を取得
+    await this.fetchInitialUserStatuses()
+
+    // WebSocket イベントを登録
+    this.setupWebSocketEvents()
+
+    console.log('[MAIN] WebSocket initialized successfully')
+  }
+
+  /**
+   * WebSocket 切断時の処理
+   */
+  private handleDisconnected(): void {
+    console.warn('[MAIN] WebSocket disconnected')
+    this.vrchat = null
+  }
+
+  /**
    * WebSocket イベントを設定する
    */
   private setupWebSocketEvents(): void {
@@ -278,8 +318,16 @@ class WatchVRChatUser {
 
     const pipeline = this.vrchat.pipeline
 
+    // 既存のリスナーをすべて削除（重複登録を防ぐ）
+    pipeline.removeAllListeners('friend-location')
+    pipeline.removeAllListeners('friend-online')
+    pipeline.removeAllListeners('friend-offline')
+
     // friend-location イベント
     pipeline.on('friend-location', (data: unknown) => {
+      // 最後のイベント受信時刻を更新
+      this.monitor.updateLastEventTime()
+
       if (!isFriendLocationEvent(data)) {
         console.error(
           '[MAIN] Invalid friend-location event data:',
@@ -294,6 +342,9 @@ class WatchVRChatUser {
 
     // friend-online イベント
     pipeline.on('friend-online', (data: unknown) => {
+      // 最後のイベント受信時刻を更新
+      this.monitor.updateLastEventTime()
+
       if (!isFriendOnlineEvent(data)) {
         console.error(
           '[MAIN] Invalid friend-online event data:',
@@ -308,6 +359,9 @@ class WatchVRChatUser {
 
     // friend-offline イベント
     pipeline.on('friend-offline', (data: unknown) => {
+      // 最後のイベント受信時刻を更新
+      this.monitor.updateLastEventTime()
+
       if (!isFriendOfflineEvent(data)) {
         console.error(
           '[MAIN] Invalid friend-offline event data:',
@@ -319,10 +373,6 @@ class WatchVRChatUser {
         console.error('[MAIN] Error handling friend-offline event:', error)
       })
     })
-
-    // NOTE: VRChat SDK は WebSocket 切断時の自動再接続を行わない。
-    // 長時間運用では、外部からのプロセス再起動（Docker restart など）で対応する。
-    // 将来的には SDK の拡張または独自の再接続ロジックが必要になる可能性がある。
 
     console.log('[MAIN] WebSocket event handlers registered.')
   }

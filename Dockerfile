@@ -31,7 +31,7 @@ ENV PATH="$PNPM_HOME/bin:$PATH"
 # hadolint ignore=DL3018
 RUN apk update && \
   apk upgrade && \
-  apk add --update --no-cache tzdata && \
+  apk add --update --no-cache tzdata curl && \
   cp /usr/share/zoneinfo/Asia/Tokyo /etc/localtime && \
   echo "Asia/Tokyo" > /etc/timezone && \
   apk del tzdata && \

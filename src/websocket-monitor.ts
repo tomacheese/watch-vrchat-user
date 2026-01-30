@@ -145,6 +145,9 @@ export class WebSocketMonitor {
       // 既存の VRChat インスタンスをクリーンアップ
       if (this.vrchat) {
         try {
+          // イベントリスナーを削除してからクローズ
+          this.vrchat.pipeline.removeAllListeners('close')
+          this.vrchat.pipeline.removeAllListeners('error')
           this.vrchat.pipeline.close()
         } catch {
           // クリーンアップ時のエラーは無視
@@ -257,13 +260,14 @@ export class WebSocketMonitor {
 
     return new Promise((resolve) => {
       this.reconnectTimer = setTimeout(() => {
-        this.isReconnecting = false
         this.connect()
           .then(() => {
+            this.isReconnecting = false
             resolve()
           })
           .catch((error: unknown) => {
             console.error('[MONITOR] Error during reconnect:', error)
+            this.isReconnecting = false
             resolve()
           })
       }, delay)
@@ -290,6 +294,11 @@ export class WebSocketMonitor {
    * ヘルスチェックを開始する
    */
   private startHealthCheck(): void {
+    // 既存のタイマーがあればクリア
+    if (this.healthCheckTimer) {
+      clearInterval(this.healthCheckTimer)
+    }
+
     this.healthCheckTimer = setInterval(() => {
       this.performHealthCheck()
     }, this.HEALTH_CHECK_INTERVAL)

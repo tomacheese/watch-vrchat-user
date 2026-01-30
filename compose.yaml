@@ -13,7 +13,7 @@ services:
     volumes:
       - ./data:/data
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/health"]
+      test: ["CMD", "sh", "-c", "curl -f http://$${HEALTH_HOST:-127.0.0.1}:$${HEALTH_PORT:-3000}/health || exit 1"]
       interval: 1m
       timeout: 10s
       retries: 3

@@ -246,6 +246,9 @@ class WatchVRChatUser {
 
   /**
    * ターゲットユーザーの初期状態を取得する
+   *
+   * 前回保存された状態と現在の状態を比較し、変化があれば通知を送信する。
+   * 初回起動時など、前回の状態が存在しない場合は初期状態として保存するのみで通知は行わない。
    */
   private async fetchInitialUserStatuses(): Promise<void> {
     console.log('[MAIN] Fetching initial user statuses...')
@@ -262,14 +265,51 @@ class WatchVRChatUser {
         continue
       }
 
-      // Location ストアに初期状態を保存（通知なし）
+      // 前回の状態を取得
+      const previousLocation =
+        this.locationStore.getLocation(userId)?.location ?? null
+      const currentLocation = userInfo.location
+
+      // 初期状態を保存
       this.locationStore.setInitialLocation(
         userId,
         userInfo.displayName,
-        userInfo.location
+        currentLocation
       )
 
-      const locationDisplay = userInfo.location ?? 'offline'
+      // 状態変化があれば通知
+      if (previousLocation !== currentLocation) {
+        console.log(
+          `[MAIN] State changed during downtime: ${userInfo.displayName} (${userId}) - ${previousLocation ?? 'offline'} -> ${currentLocation ?? 'offline'}`
+        )
+
+        // 状態変化に応じて通知を送信
+        if (currentLocation === null) {
+          // オンライン -> オフライン
+          await this.notifier.notifyOffline({
+            displayName: userInfo.displayName,
+            userId,
+          })
+        } else if (previousLocation === null) {
+          // オフライン -> オンライン
+          await this.notifier.notifyOnline({
+            displayName: userInfo.displayName,
+            userId,
+          })
+        } else {
+          // ロケーション間移動
+          await this.notifier.notifyLocationChange({
+            displayName: userInfo.displayName,
+            userId,
+            previousLocation,
+            currentLocation,
+            worldName: undefined, // 起動時は取得しない
+            thumbnailUrl: undefined,
+          })
+        }
+      }
+
+      const locationDisplay = currentLocation ?? 'offline'
       console.log(
         `[MAIN] Initial status: ${userInfo.displayName} (${userId}) - ${userInfo.status} @ ${locationDisplay}`
       )

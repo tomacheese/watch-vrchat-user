@@ -246,6 +246,9 @@ class WatchVRChatUser {
 
   /**
    * ターゲットユーザーの初期状態を取得する
+   *
+   * 前回保存された状態と現在の状態を比較し、変化があれば通知を送信する。
+   * 初回起動時など、前回の状態が存在しない場合は初期状態として保存するのみで通知は行わない。
    */
   private async fetchInitialUserStatuses(): Promise<void> {
     console.log('[MAIN] Fetching initial user statuses...')
@@ -275,27 +278,35 @@ class WatchVRChatUser {
       )
 
       // 状態変化があれば通知
-      if (previousLocation !== null && previousLocation !== currentLocation) {
+      if (previousLocation !== currentLocation) {
         console.log(
-          `[MAIN] State changed during downtime: ${userInfo.displayName} (${userId}) - ${previousLocation} -> ${currentLocation}`
+          `[MAIN] State changed during downtime: ${userInfo.displayName} (${userId}) - ${previousLocation ?? 'offline'} -> ${currentLocation ?? 'offline'}`
         )
 
         // 状態変化に応じて通知を送信
-        await (currentLocation === null
-          ? // オンライン -> オフライン
-            this.notifier.notifyOffline({
-              displayName: userInfo.displayName,
-              userId,
-            })
-          : // ロケーション変更（オフライン -> オンライン または ロケーション間移動）
-            this.notifier.notifyLocationChange({
-              displayName: userInfo.displayName,
-              userId,
-              previousLocation,
-              currentLocation,
-              worldName: undefined, // 起動時は取得しない
-              thumbnailUrl: undefined,
-            }))
+        if (currentLocation === null) {
+          // オンライン -> オフライン
+          await this.notifier.notifyOffline({
+            displayName: userInfo.displayName,
+            userId,
+          })
+        } else if (previousLocation === null) {
+          // オフライン -> オンライン
+          await this.notifier.notifyOnline({
+            displayName: userInfo.displayName,
+            userId,
+          })
+        } else {
+          // ロケーション間移動
+          await this.notifier.notifyLocationChange({
+            displayName: userInfo.displayName,
+            userId,
+            previousLocation,
+            currentLocation,
+            worldName: undefined, // 起動時は取得しない
+            thumbnailUrl: undefined,
+          })
+        }
       }
 
       const locationDisplay = currentLocation ?? 'offline'

@@ -262,14 +262,43 @@ class WatchVRChatUser {
         continue
       }
 
-      // Location ストアに初期状態を保存（通知なし）
+      // 前回の状態を取得
+      const previousLocation =
+        this.locationStore.getLocation(userId)?.location ?? null
+      const currentLocation = userInfo.location
+
+      // 初期状態を保存
       this.locationStore.setInitialLocation(
         userId,
         userInfo.displayName,
-        userInfo.location
+        currentLocation
       )
 
-      const locationDisplay = userInfo.location ?? 'offline'
+      // 状態変化があれば通知
+      if (previousLocation !== null && previousLocation !== currentLocation) {
+        console.log(
+          `[MAIN] State changed during downtime: ${userInfo.displayName} (${userId}) - ${previousLocation} -> ${currentLocation}`
+        )
+
+        // 状態変化に応じて通知を送信
+        await (currentLocation === null
+          ? // オンライン -> オフライン
+            this.notifier.notifyOffline({
+              displayName: userInfo.displayName,
+              userId,
+            })
+          : // ロケーション変更（オフライン -> オンライン または ロケーション間移動）
+            this.notifier.notifyLocationChange({
+              displayName: userInfo.displayName,
+              userId,
+              previousLocation,
+              currentLocation,
+              worldName: undefined, // 起動時は取得しない
+              thumbnailUrl: undefined,
+            }))
+      }
+
+      const locationDisplay = currentLocation ?? 'offline'
       console.log(
         `[MAIN] Initial status: ${userInfo.displayName} (${userId}) - ${userInfo.status} @ ${locationDisplay}`
       )

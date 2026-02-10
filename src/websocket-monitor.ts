@@ -161,7 +161,17 @@ export class WebSocketMonitor {
 
     // WebSocket を閉じて handleDisconnect() をトリガー
     if (this.vrchat) {
-      this.vrchat.pipeline.close()
+      try {
+        this.vrchat.pipeline.close()
+      } catch (error) {
+        console.error(
+          '[MONITOR] Failed to close WebSocket pipeline for forced reconnect:',
+          error
+        )
+
+        // フォールバック: 直接 handleDisconnect() を呼び出す
+        this.handleDisconnect()
+      }
     }
   }
 

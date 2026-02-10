@@ -217,6 +217,14 @@ export async function getUser(
   const result = await vrchat.getUser({ path: { userId } })
 
   if (result.error) {
+    // 429 エラー（レート制限）の場合は例外を投げる
+    if (
+      result.error.message.includes('429') ||
+      result.error.message.toLowerCase().includes('rate limit')
+    ) {
+      throw new Error(`Rate limit error (429): ${result.error.message}`)
+    }
+
     console.error(
       `[VRCHAT] Failed to get user ${userId}: ${result.error.message}`
     )

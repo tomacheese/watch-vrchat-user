@@ -577,7 +577,9 @@ class WatchVRChatUser {
 
     console.log('[MAIN] Polling users status...')
 
-    if (!this.vrchat) {
+    // VRChat クライアントのスナップショット（ループ中に null になることを防ぐ）
+    const vrchat = this.vrchat
+    if (!vrchat) {
       console.warn(
         '[MAIN] VRChat client is not initialized, skipping API polling'
       )
@@ -588,7 +590,7 @@ class WatchVRChatUser {
     for (const userId of this.config.targetUserIds) {
       try {
         // API からユーザー状態を取得
-        const userInfo = await getUser(this.vrchat, userId)
+        const userInfo = await getUser(vrchat, userId)
 
         if (!userInfo) {
           console.warn(`[MAIN] Failed to fetch user info for ${userId}`)

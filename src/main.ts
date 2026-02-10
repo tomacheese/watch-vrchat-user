@@ -141,7 +141,6 @@ class WatchVRChatUser {
   private healthServer: HealthServer
   private isShuttingDown = false
   private apiPollerTimer: NodeJS.Timeout | null = null
-  private lastApiPollTime: Date | null = null
   private skipNextApiPoll = false
 
   /**
@@ -555,7 +554,6 @@ class WatchVRChatUser {
     }
 
     console.log('[MAIN] Polling users status...')
-    this.lastApiPollTime = new Date()
 
     if (!this.vrchat) {
       console.warn(

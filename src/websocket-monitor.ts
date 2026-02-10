@@ -35,7 +35,7 @@ export class WebSocketMonitor {
   private readonly HEALTH_CHECK_INTERVAL = 60 * 1000 // 1分
 
   /** イベント未受信の警告閾値（ミリ秒） */
-  private readonly EVENT_TIMEOUT_WARNING = 24 * 60 * 60 * 1000 // 24時間
+  private readonly EVENT_TIMEOUT_WARNING = 6 * 60 * 60 * 1000 // 6時間
 
   /** コールバック関数 */
   private onConnected: ((vrchat: VRChat) => void) | null = null
@@ -127,6 +127,34 @@ export class WebSocketMonitor {
    */
   getVRChatClient(): VRChat | null {
     return this.vrchat
+  }
+
+  /**
+   * 強制的に再接続を要求する
+   *
+   * @param reason 再接続の理由
+   */
+  requestReconnect(reason: string): void {
+    // 既に再接続中の場合はスキップ
+    if (this.isReconnecting) {
+      console.warn(
+        '[MONITOR] Reconnect already in progress, skipping forced reconnect'
+      )
+      return
+    }
+
+    // stopped 状態の場合はスキップ
+    if (this.state === 'stopped') {
+      console.warn('[MONITOR] Monitor is stopped, skipping forced reconnect')
+      return
+    }
+
+    console.warn(`[MONITOR] Forced reconnect: ${reason}`)
+
+    // WebSocket を閉じて handleDisconnect() をトリガー
+    if (this.vrchat) {
+      this.vrchat.pipeline.close()
+    }
   }
 
   /**

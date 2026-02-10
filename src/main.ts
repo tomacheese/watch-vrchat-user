@@ -140,6 +140,9 @@ class WatchVRChatUser {
   private monitor: WebSocketMonitor
   private healthServer: HealthServer
   private isShuttingDown = false
+  private apiPollerTimer: NodeJS.Timeout | null = null
+  private lastApiPollTime: Date | null = null
+  private skipNextApiPoll = false
 
   /**
    * アプリケーションを初期化する
@@ -178,6 +181,9 @@ class WatchVRChatUser {
       }
     )
 
+    // API ポーリングを開始
+    this.startApiPoller()
+
     console.log('[MAIN] Application started. Listening for events...')
   }
 
@@ -192,6 +198,12 @@ class WatchVRChatUser {
       this.isShuttingDown = true
 
       console.log('\n[MAIN] Shutting down...')
+
+      // API ポーリングを停止
+      if (this.apiPollerTimer) {
+        clearInterval(this.apiPollerTimer)
+        this.apiPollerTimer = null
+      }
 
       // Location ストアをフラッシュ
       this.locationStore.flush()
@@ -513,6 +525,128 @@ class WatchVRChatUser {
       displayName,
       userId,
     })
+  }
+
+  /**
+   * API ポーリングを開始する
+   */
+  private startApiPoller(): void {
+    // 1 時間ごとに API ポーリングを実行
+    const POLLING_INTERVAL = 60 * 60 * 1000 // 1時間
+
+    this.apiPollerTimer = setInterval(() => {
+      this.pollUsersStatus().catch((error: unknown) => {
+        console.error('[MAIN] Error in API polling:', error)
+      })
+    }, POLLING_INTERVAL)
+
+    console.log('[MAIN] API polling started (interval: 1 hour)')
+  }
+
+  /**
+   * ユーザーの状態を API でポーリングする
+   */
+  private async pollUsersStatus(): Promise<void> {
+    // 429 エラーによるクールダウン中はスキップ
+    if (this.skipNextApiPoll) {
+      console.log('[MAIN] Skipping API polling due to cooldown (429)')
+      this.skipNextApiPoll = false
+      return
+    }
+
+    console.log('[MAIN] Polling users status...')
+    this.lastApiPollTime = new Date()
+
+    if (!this.vrchat) {
+      console.warn(
+        '[MAIN] VRChat client is not initialized, skipping API polling'
+      )
+      return
+    }
+
+    // 各ユーザーに対して逐次実行（バースト防止）
+    for (const userId of this.config.targetUserIds) {
+      try {
+        // API からユーザー状態を取得
+        const userInfo = await getUser(this.vrchat, userId)
+
+        if (!userInfo) {
+          console.warn(`[MAIN] Failed to fetch user info for ${userId}`)
+          continue
+        }
+
+        // LocationStore から最新の Location を取得
+        const storeLocation =
+          this.locationStore.getLocation(userId)?.location ?? null
+        const apiLocation = userInfo.location
+
+        // Location の乖離を検出
+        if (apiLocation !== storeLocation) {
+          console.log(
+            `[MAIN] Location mismatch detected for ${userInfo.displayName} (${userId}): API=${apiLocation ?? 'offline'}, Store=${storeLocation ?? 'offline'}`
+          )
+
+          // サイレント接続死の判定
+          this.checkSilentDeath(userId, apiLocation, storeLocation)
+        }
+      } catch (error) {
+        // 429 エラー（レート制限）の場合はクールダウン
+        if (error instanceof Error && error.message.includes('429')) {
+          console.warn(
+            '[MAIN] API rate limit error (429), skipping next polling'
+          )
+          this.skipNextApiPoll = true
+          break
+        }
+
+        // その他のエラーはログ出力のみ
+        console.error(`[MAIN] Error fetching user info for ${userId}:`, error)
+      }
+    }
+
+    console.log('[MAIN] API polling completed')
+  }
+
+  /**
+   * サイレント接続死の判定を行う
+   *
+   * @param userId ユーザー ID
+   * @param apiLocation API で取得した Location
+   * @param storeLocation LocationStore に保存された Location
+   */
+  private checkSilentDeath(
+    userId: string,
+    apiLocation: string | null,
+    storeLocation: string | null
+  ): void {
+    // 条件 1: WebSocket が接続状態であること
+    if (this.monitor.getState() !== 'connected') {
+      return
+    }
+
+    // 条件 2: 最後のイベント受信時刻が 6 時間以上古いこと
+    const lastEventTime = this.monitor.getLastEventTime()
+    if (!lastEventTime) {
+      // まだイベントを受信していない場合はスキップ
+      return
+    }
+
+    const now = new Date()
+    const timeSinceLastEvent = now.getTime() - lastEventTime.getTime()
+    const SIX_HOURS = 6 * 60 * 60 * 1000
+
+    if (timeSinceLastEvent < SIX_HOURS) {
+      return
+    }
+
+    // 条件 3: Location が異なること（すでに呼び出し元で確認済み）
+
+    // すべての条件を満たす場合、強制再接続
+    console.warn(
+      `[MAIN] Silent death detected for user ${userId}: API=${apiLocation ?? 'offline'}, Store=${storeLocation ?? 'offline'}, Time since last event=${timeSinceLastEvent / 1000 / 60 / 60} hours`
+    )
+
+    this.monitor.requestReconnect('Silent death detected')
   }
 }
 

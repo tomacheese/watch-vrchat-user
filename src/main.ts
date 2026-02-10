@@ -141,7 +141,13 @@ class WatchVRChatUser {
   private healthServer: HealthServer
   private isShuttingDown = false
   private apiPollerTimer: NodeJS.Timeout | null = null
-  private skipNextApiPoll = false
+  private apiPollCooldownUntil: Date | null = null
+
+  /** イベント未受信の閾値（ミリ秒） - WebSocketMonitor の EVENT_TIMEOUT_WARNING と一致 */
+  private readonly SIX_HOURS = 6 * 60 * 60 * 1000
+
+  /** 429 エラー発生時のクールダウン時間（ミリ秒） */
+  private readonly RATE_LIMIT_COOLDOWN = 30 * 60 * 1000 // 30分
 
   /**
    * アプリケーションを初期化する
@@ -530,6 +536,12 @@ class WatchVRChatUser {
    * API ポーリングを開始する
    */
   private startApiPoller(): void {
+    // 既に API ポーリングが開始されている場合はスキップ
+    if (this.apiPollerTimer) {
+      console.warn('[MAIN] API polling already started, skipping')
+      return
+    }
+
     // 1 時間ごとに API ポーリングを実行
     const POLLING_INTERVAL = 60 * 60 * 1000 // 1時間
 
@@ -547,10 +559,20 @@ class WatchVRChatUser {
    */
   private async pollUsersStatus(): Promise<void> {
     // 429 エラーによるクールダウン中はスキップ
-    if (this.skipNextApiPoll) {
-      console.log('[MAIN] Skipping API polling due to cooldown (429)')
-      this.skipNextApiPoll = false
-      return
+    if (this.apiPollCooldownUntil) {
+      const now = new Date()
+      if (now < this.apiPollCooldownUntil) {
+        const remainingMinutes = Math.ceil(
+          (this.apiPollCooldownUntil.getTime() - now.getTime()) / 1000 / 60
+        )
+        console.log(
+          `[MAIN] Skipping API polling due to rate limit cooldown (${remainingMinutes} minutes remaining)`
+        )
+        return
+      }
+
+      // クールダウン期間が終了した場合はリセット
+      this.apiPollCooldownUntil = null
     }
 
     console.log('[MAIN] Polling users status...')
@@ -590,10 +612,12 @@ class WatchVRChatUser {
       } catch (error) {
         // 429 エラー（レート制限）の場合はクールダウン
         if (error instanceof Error && error.message.includes('429')) {
-          console.warn(
-            '[MAIN] API rate limit error (429), skipping next polling'
+          this.apiPollCooldownUntil = new Date(
+            Date.now() + this.RATE_LIMIT_COOLDOWN
           )
-          this.skipNextApiPoll = true
+          console.warn(
+            `[MAIN] API rate limit error (429), cooling down for ${this.RATE_LIMIT_COOLDOWN / 1000 / 60} minutes`
+          )
           break
         }
 
@@ -631,9 +655,8 @@ class WatchVRChatUser {
 
     const now = new Date()
     const timeSinceLastEvent = now.getTime() - lastEventTime.getTime()
-    const SIX_HOURS = 6 * 60 * 60 * 1000
 
-    if (timeSinceLastEvent < SIX_HOURS) {
+    if (timeSinceLastEvent < this.SIX_HOURS) {
       return
     }
 

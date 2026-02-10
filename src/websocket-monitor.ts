@@ -34,7 +34,12 @@ export class WebSocketMonitor {
   /** ヘルスチェックの間隔（ミリ秒） */
   private readonly HEALTH_CHECK_INTERVAL = 60 * 1000 // 1分
 
-  /** イベント未受信の警告閾値（ミリ秒） */
+  /**
+   * イベント未受信の警告閾値（ミリ秒）
+   *
+   * 6 時間以上イベントを受信していない場合、performHealthCheck() で警告を出力する。
+   * また、この値は Main クラスの checkSilentDeath() でサイレント接続死の判定にも使用される。
+   */
   private readonly EVENT_TIMEOUT_WARNING = 6 * 60 * 60 * 1000 // 6時間
 
   /** コールバック関数 */
@@ -131,6 +136,9 @@ export class WebSocketMonitor {
 
   /**
    * 強制的に再接続を要求する
+   *
+   * WebSocket を閉じて handleDisconnect() をトリガーすることで、
+   * 既存の再接続ロジック（エクスポネンシャルバックオフ、単一フライト制御）に合流します。
    *
    * @param reason 再接続の理由
    */

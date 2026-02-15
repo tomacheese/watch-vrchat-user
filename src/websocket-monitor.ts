@@ -21,6 +21,8 @@ export class WebSocketMonitor {
   private reconnectTimer: NodeJS.Timeout | null = null
   private healthCheckTimer: NodeJS.Timeout | null = null
   private isReconnecting = false
+  private closeEventReceived = false
+  private closeTimeout: NodeJS.Timeout | null = null
 
   /** 再接続の初回待機時間（ミリ秒） */
   private readonly INITIAL_BACKOFF = 1000
@@ -41,6 +43,14 @@ export class WebSocketMonitor {
    * また、この値は Main クラスの checkSilentDeath() でサイレント接続死の判定にも使用される。
    */
   private readonly EVENT_TIMEOUT_WARNING = 6 * 60 * 60 * 1000 // 6時間
+
+  /**
+   * pipeline.close() 後の close イベント待機タイムアウト（ミリ秒）
+   *
+   * requestReconnect() で pipeline.close() を呼び出した後、この時間内に close イベントが
+   * 発火しない場合、handleDisconnect() を直接呼び出してフォールバックする。
+   */
+  private readonly CLOSE_TIMEOUT = 5000 // 5秒
 
   /** コールバック関数 */
   private onConnected: ((vrchat: VRChat) => void) | null = null
@@ -135,6 +145,24 @@ export class WebSocketMonitor {
   }
 
   /**
+   * 現在の再接続試行回数を取得する
+   *
+   * @returns 再接続試行回数
+   */
+  getReconnectAttempts(): number {
+    return this.reconnectAttempts
+  }
+
+  /**
+   * 再接続処理中かどうかを取得する
+   *
+   * @returns 再接続処理中の場合は true
+   */
+  getIsReconnecting(): boolean {
+    return this.isReconnecting
+  }
+
+  /**
    * 強制的に再接続を要求する
    *
    * WebSocket を閉じて handleDisconnect() をトリガーすることで、
@@ -159,10 +187,24 @@ export class WebSocketMonitor {
 
     console.warn(`[MONITOR] Forced reconnect: ${reason}`)
 
+    // close イベント受信フラグをリセット
+    this.closeEventReceived = false
+
     // WebSocket を閉じて handleDisconnect() をトリガー
     if (this.vrchat) {
       try {
+        console.log('[MONITOR] Closing WebSocket pipeline for forced reconnect')
         this.vrchat.pipeline.close()
+
+        // タイムアウトを設定（close イベントが発火しない場合のフォールバック）
+        this.closeTimeout = setTimeout(() => {
+          if (!this.closeEventReceived) {
+            console.warn(
+              `[MONITOR] WARNING: Close event timeout after ${this.CLOSE_TIMEOUT}ms, forcing handleDisconnect()`
+            )
+            this.handleDisconnect()
+          }
+        }, this.CLOSE_TIMEOUT)
       } catch (error) {
         console.error(
           '[MONITOR] Failed to close WebSocket pipeline for forced reconnect:',
@@ -206,6 +248,16 @@ export class WebSocketMonitor {
       // pipeline イベントハンドラを登録
       this.vrchat.pipeline.on('close', () => {
         console.warn('[MONITOR] WebSocket closed')
+
+        // close イベント受信フラグを設定
+        this.closeEventReceived = true
+
+        // タイムアウトをクリア
+        if (this.closeTimeout) {
+          clearTimeout(this.closeTimeout)
+          this.closeTimeout = null
+        }
+
         this.handleDisconnect()
       })
 
@@ -267,6 +319,15 @@ export class WebSocketMonitor {
     }
 
     console.warn('[MONITOR] Handling WebSocket disconnect...')
+
+    // close イベント受信フラグをリセット
+    this.closeEventReceived = false
+
+    // タイムアウトをクリア
+    if (this.closeTimeout) {
+      clearTimeout(this.closeTimeout)
+      this.closeTimeout = null
+    }
 
     // 切断コールバックを呼び出す
     if (this.onDisconnected) {

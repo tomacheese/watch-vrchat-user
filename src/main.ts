@@ -382,7 +382,7 @@ class WatchVRChatUser {
 
     // friend-location イベント
     pipeline.on('friend-location', (data: unknown) => {
-      // 最後のイベント受信時刻を更新
+      // 最後のイベント受信時刻を更新（フィルタ前）
       this.monitor.updateLastEventTime()
 
       if (!isFriendLocationEvent(data)) {
@@ -399,7 +399,7 @@ class WatchVRChatUser {
 
     // friend-online イベント
     pipeline.on('friend-online', (data: unknown) => {
-      // 最後のイベント受信時刻を更新
+      // 最後のイベント受信時刻を更新（フィルタ前）
       this.monitor.updateLastEventTime()
 
       if (!isFriendOnlineEvent(data)) {
@@ -416,7 +416,7 @@ class WatchVRChatUser {
 
     // friend-offline イベント
     pipeline.on('friend-offline', (data: unknown) => {
-      // 最後のイベント受信時刻を更新
+      // 最後のイベント受信時刻を更新（フィルタ前）
       this.monitor.updateLastEventTime()
 
       if (!isFriendOfflineEvent(data)) {

@@ -23,6 +23,7 @@ export class WebSocketMonitor {
   private isReconnecting = false
   private closeEventReceived = false
   private closeTimeout: NodeJS.Timeout | null = null
+  private lastWarningTime: Date | null = null
 
   /** 再接続の初回待機時間（ミリ秒） */
   private readonly INITIAL_BACKOFF = 1000
@@ -42,7 +43,14 @@ export class WebSocketMonitor {
    * 6 時間以上イベントを受信していない場合、performHealthCheck() で警告を出力する。
    * また、この値は Main クラスの checkSilentDeath() でサイレント接続死の判定にも使用される。
    */
-  private readonly EVENT_TIMEOUT_WARNING = 6 * 60 * 60 * 1000 // 6時間
+  private readonly EVENT_TIMEOUT_WARNING = 6 * 60 * 60 * 1000 // 6 時間
+
+  /**
+   * 警告の再出力間隔（ミリ秒）
+   *
+   * 同じ警告を繰り返し出力しないために、最後の警告から この時間が経過するまで警告を抑制する。
+   */
+  private readonly WARNING_REPEAT_INTERVAL = 60 * 60 * 1000 // 1 時間
 
   /**
    * pipeline.close() 後の close イベント待機タイムアウト（ミリ秒）
@@ -50,7 +58,7 @@ export class WebSocketMonitor {
    * requestReconnect() で pipeline.close() を呼び出した後、この時間内に close イベントが
    * 発火しない場合、handleDisconnect() を直接呼び出してフォールバックする。
    */
-  private readonly CLOSE_TIMEOUT = 5000 // 5秒
+  private readonly CLOSE_TIMEOUT = 5000 // 5 秒
 
   /** コールバック関数 */
   private onConnected: ((vrchat: VRChat) => void) | null = null
@@ -101,6 +109,12 @@ export class WebSocketMonitor {
     if (this.healthCheckTimer) {
       clearInterval(this.healthCheckTimer)
       this.healthCheckTimer = null
+    }
+
+    // closeTimeout をクリア
+    if (this.closeTimeout) {
+      clearTimeout(this.closeTimeout)
+      this.closeTimeout = null
     }
 
     // WebSocket を閉じる
@@ -233,6 +247,12 @@ export class WebSocketMonitor {
       // 既存の VRChat インスタンスをクリーンアップ
       if (this.vrchat) {
         try {
+          // closeTimeout をクリア
+          if (this.closeTimeout) {
+            clearTimeout(this.closeTimeout)
+            this.closeTimeout = null
+          }
+
           // イベントリスナーを削除してからクローズ
           this.vrchat.pipeline.removeAllListeners('close')
           this.vrchat.pipeline.removeAllListeners('error')
@@ -424,9 +444,24 @@ export class WebSocketMonitor {
     const timeSinceLastEvent = now.getTime() - this.lastEventTime.getTime()
 
     if (timeSinceLastEvent > this.EVENT_TIMEOUT_WARNING) {
+      // 最後の警告から WARNING_REPEAT_INTERVAL 経過していない場合はスキップ（ログスパム防止）
+      if (
+        this.lastWarningTime &&
+        now.getTime() - this.lastWarningTime.getTime() <
+          this.WARNING_REPEAT_INTERVAL
+      ) {
+        return
+      }
+
       console.warn(
         `[MONITOR] WARNING: No events received for ${timeSinceLastEvent / 1000 / 60 / 60} hours. Last event: ${this.lastEventTime.toISOString()}`
       )
+
+      // 警告時刻を記録
+      this.lastWarningTime = now
+    } else {
+      // イベントが受信されたら警告時刻をリセット
+      this.lastWarningTime = null
     }
   }
 }

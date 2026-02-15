@@ -22,9 +22,13 @@ export class HealthServer {
   /**
    * イベント未受信の unhealthy 閾値（ミリ秒）
    *
-   * 最後のイベント受信時刻がこの時間以上古い場合、unhealthy と判定する
+   * 最後のイベント受信時刻がこの時間以上古い場合、unhealthy と判定する。
+   *
+   * 注: WebSocketMonitor の EVENT_TIMEOUT_WARNING (6 時間) やサイレント接続死の判定 (6 時間) とは
+   * 異なる閾値を使用している。これは、ヘルスチェックでより早く異常を検出し、外部監視システムに
+   * 通知するための設計。自動再接続は 6 時間後に発動する。
    */
-  private readonly EVENT_TIMEOUT_UNHEALTHY = 3 * 60 * 60 * 1000 // 3時間
+  private readonly EVENT_TIMEOUT_UNHEALTHY = 3 * 60 * 60 * 1000 // 3 時間
 
   /**
    * ヘルスチェックサーバーを初期化する

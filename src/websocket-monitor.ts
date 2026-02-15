@@ -201,6 +201,12 @@ export class WebSocketMonitor {
 
     console.warn(`[MONITOR] Forced reconnect: ${reason}`)
 
+    // 既存の closeTimeout をクリア（連続呼び出し時のタイマー重複を防止）
+    if (this.closeTimeout) {
+      clearTimeout(this.closeTimeout)
+      this.closeTimeout = null
+    }
+
     // close イベント受信フラグをリセット
     this.closeEventReceived = false
 

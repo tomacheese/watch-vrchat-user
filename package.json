@@ -34,7 +34,7 @@
     "vrchat": "2.20.7"
   },
   "devDependencies": {
-    "@book000/eslint-config": "1.13.11",
+    "@book000/eslint-config": "1.13.12",
     "@types/jest": "30.0.0",
     "@types/node": "25.3.3",
     "eslint": "10.0.2",

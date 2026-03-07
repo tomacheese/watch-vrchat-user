@@ -441,6 +441,14 @@ export class WebSocketMonitor {
    * ヘルスチェックを実行する
    */
   private performHealthCheck(): void {
+    // VRChat SDK は WebSocket の close/error イベントを EventEmitter に転送しないため、
+    // pipeline.connected を毎分チェックして切断を早期検出する
+    if (this.vrchat && !this.vrchat.pipeline.connected) {
+      console.warn('[MONITOR] WebSocket is not connected, triggering reconnect')
+      this.handleDisconnect()
+      return
+    }
+
     if (!this.lastEventTime) {
       // まだイベントを受信していない場合はスキップ
       return

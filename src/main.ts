@@ -494,6 +494,20 @@ class WatchVRChatUser {
 
     console.log(`[MAIN] Friend online event: ${displayName} (${userId})`)
 
+    // 既にオンライン状態（location が非 null）の場合は重複通知を防ぐ
+    const currentLocation = this.locationStore.getLocation(userId)
+    if (
+      currentLocation?.location !== null &&
+      currentLocation?.location !== undefined
+    ) {
+      console.log(
+        `[MAIN] User ${displayName} (${userId}) already online, skipping notification`
+      )
+      // 表示名のみ更新
+      this.locationStore.updateDisplayName(userId, displayName)
+      return
+    }
+
     // 表示名を更新
     this.locationStore.updateDisplayName(userId, displayName)
 
@@ -523,7 +537,15 @@ class WatchVRChatUser {
     console.log(`[MAIN] Friend offline event: ${displayName} (${userId})`)
 
     // Location を null に更新
-    this.locationStore.updateLocation(userId, displayName, null)
+    const result = this.locationStore.updateLocation(userId, displayName, null)
+
+    // 既にオフライン状態の場合は重複通知を防ぐ
+    if (!result.changed) {
+      console.log(
+        `[MAIN] User ${displayName} (${userId}) already offline, skipping notification`
+      )
+      return
+    }
 
     // Discord に通知
     await this.notifier.notifyOffline({

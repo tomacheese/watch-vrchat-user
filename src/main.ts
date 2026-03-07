@@ -150,6 +150,16 @@ class WatchVRChatUser {
   private readonly RATE_LIMIT_COOLDOWN = 30 * 60 * 1000 // 30分
 
   /**
+   * friend-online イベント受信後に LocationStore へ書き込むセンチネル値
+   *
+   * VRChat は実際の Location が確定する前に friend-online を複数回送信することがある。
+   * 1 回目の受信時にこの値を location として記録し、2 回目以降の重複通知を防ぐ。
+   * friend-location イベントが届いた際、previousLocation がこの値であれば
+   * オンライン遷移の初期化として扱い、location-change 通知は送信しない。
+   */
+  private readonly ONLINE_SENTINEL = 'online'
+
+  /**
    * アプリケーションを初期化する
    *
    * @param config アプリケーション設定
@@ -467,6 +477,11 @@ class WatchVRChatUser {
       return
     }
 
+    // friend-online 直後のセンチネル値からの遷移はオンライン通知済みのためスキップ
+    if (result.previousLocation === this.ONLINE_SENTINEL) {
+      return
+    }
+
     // Discord に通知
     await this.notifier.notifyLocationChange({
       displayName,
@@ -495,21 +510,18 @@ class WatchVRChatUser {
     console.log(`[MAIN] Friend online event: ${displayName} (${userId})`)
 
     // 既にオンライン状態（location が非 null）の場合は重複通知を防ぐ
-    const currentLocation = this.locationStore.getLocation(userId)
-    if (
-      currentLocation?.location !== null &&
-      currentLocation?.location !== undefined
-    ) {
+    const result = this.locationStore.updateLocation(
+      userId,
+      displayName,
+      this.ONLINE_SENTINEL
+    )
+
+    if (!result.changed) {
       console.log(
         `[MAIN] User ${displayName} (${userId}) already online, skipping notification`
       )
-      // 表示名のみ更新
-      this.locationStore.updateDisplayName(userId, displayName)
       return
     }
-
-    // 表示名を更新
-    this.locationStore.updateDisplayName(userId, displayName)
 
     // Discord に通知
     await this.notifier.notifyOnline({

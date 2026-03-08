@@ -26,7 +26,7 @@ interface RawWebSocket {
  * WebSocket 接続監視クラス
  *
  * VRChat SDK の WebSocket (pipeline) 接続を監視し、切断時に自動再接続を行う。
- * ping/pong ハートビートにより ~35 秒以内にサイレントデスを検知する。
+ * ping/pong ハートビートにより最大 PING_INTERVAL × 2 程度でサイレントデスを検知する。
  */
 export class WebSocketMonitor {
   private config: Config
@@ -46,6 +46,9 @@ export class WebSocketMonitor {
   /** pong 待機タイムアウトタイマー */
   private pingTimeoutTimer: NodeJS.Timeout | null = null
 
+  /** 現在の接続の raw ws インスタンス（stopPingPong で pong リスナーを削除するために保持） */
+  private rawWs: RawWebSocket | null = null
+
   /** 再接続の初回待機時間（ミリ秒） */
   private readonly INITIAL_BACKOFF = 1000
 
@@ -64,15 +67,16 @@ export class WebSocketMonitor {
    * VRChat WebSocket サーバーに対して定期的に WebSocket プロトコルレベルの
    * ping フレームを送信し、pong が返ることで接続の生存を確認する。
    */
-  private readonly PING_INTERVAL = 30 * 1000 // 30秒
+  private readonly PING_INTERVAL = 30 * 1000 // 30 秒
 
   /**
    * pong 待機タイムアウト（ミリ秒）
    *
    * ping 送信後この時間内に pong が返らない場合、サイレントデスと判断して再接続する。
-   * PING_INTERVAL より少し長く設定してネットワーク遅延を考慮する。
+   * sendPing() は前回の ping が未応答のまま次の interval が来た時点でも即再接続するため、
+   * 実際の検知時間は最大で PING_INTERVAL × 2 程度となる。
    */
-  private readonly PING_TIMEOUT = 35 * 1000 // 35秒
+  private readonly PING_TIMEOUT = 35 * 1000 // 35 秒
 
   /**
    * イベント未受信時のバックアップ再接続閾値（ミリ秒）
@@ -81,7 +85,7 @@ export class WebSocketMonitor {
    * 安全網として、アプリケーションレベルのイベントが一定時間来ない場合も再接続する。
    * 全フレンドのイベントで更新されるため、10 分無音は WebSocket 異常を強く示唆する。
    */
-  private readonly EVENT_TIMEOUT_RECONNECT = 10 * 60 * 1000 // 10分
+  private readonly EVENT_TIMEOUT_RECONNECT = 10 * 60 * 1000 // 10 分
 
   /**
    * pipeline.close() 後の close イベント待機タイムアウト（ミリ秒）
@@ -526,9 +530,9 @@ export class WebSocketMonitor {
   /**
    * ping/pong ハートビートを開始する
    *
-   * VRChat WebSocket サーバーに 30 秒ごとに WebSocket プロトコルレベルの ping フレームを送信し、
-   * 35 秒以内に pong が返らない場合はサイレントデスと判断して再接続する。
-   * これにより ~35 秒以内にデッドコネクションを検知できる。
+   * VRChat WebSocket サーバーに PING_INTERVAL ごとに WebSocket プロトコルレベルの ping フレームを送信する。
+   * 前回の ping に対する pong が返っていない状態で次の ping タイミングが来た場合、
+   * または PING_TIMEOUT 以内に pong が返らない場合にサイレントデスと判断して再接続する。
    */
   private startPingPong(): void {
     this.stopPingPong()
@@ -538,7 +542,8 @@ export class WebSocketMonitor {
     }
 
     // VRChat SDK 内部の raw ws インスタンスを取得（isomorphic-ws = Node.js では ws ライブラリ）
-    // pipeline.websocket は SDK の public フィールドであり、ws.WebSocket インスタンスを保持する
+    // pipeline.websocket は TypeScript 型定義上は private フィールドだが、
+    // JavaScript ランタイムにはアクセス制御がないため型アサーションで強制アクセスする
     const rawWs = (
       this.vrchat.pipeline as unknown as { websocket: RawWebSocket | undefined }
     ).websocket
@@ -549,6 +554,9 @@ export class WebSocketMonitor {
       )
       return
     }
+
+    // rawWs をフィールドに保存（stopPingPong で pong リスナーを削除するために必要）
+    this.rawWs = rawWs
 
     // pong イベントリスナーを登録（重複を防ぐため先に削除）
     rawWs.removeAllListeners('pong')
@@ -562,14 +570,14 @@ export class WebSocketMonitor {
 
     console.log('[MONITOR] Starting ping/pong heartbeat (interval: 30s)')
 
-    // 30 秒ごとに ping を送信
+    // PING_INTERVAL ごとに ping を送信
     this.pingTimer = setInterval(() => {
       this.sendPing(rawWs)
     }, this.PING_INTERVAL)
   }
 
   /**
-   * ping/pong タイマーをすべて停止する
+   * ping/pong タイマーをすべて停止し、pong リスナーを削除する
    */
   private stopPingPong(): void {
     if (this.pingTimer) {
@@ -581,10 +589,19 @@ export class WebSocketMonitor {
       clearTimeout(this.pingTimeoutTimer)
       this.pingTimeoutTimer = null
     }
+
+    // 古い接続の rawWs に登録した pong リスナーを削除してメモリリークを防ぐ
+    if (this.rawWs) {
+      this.rawWs.removeAllListeners('pong')
+      this.rawWs = null
+    }
   }
 
   /**
    * ping フレームを送信し、pong 待機タイムアウトを設定する
+   *
+   * 前回の ping に対する pong がまだ返っていない（`pingTimeoutTimer` が生きている）場合は、
+   * 接続がサイレントデス状態と判断して即座に再接続を要求する。
    *
    * @param rawWs raw ws WebSocket インスタンス
    */
@@ -593,10 +610,13 @@ export class WebSocketMonitor {
       return
     }
 
-    // 既存のタイムアウトをクリア（前回の ping が未応答でも上書き）
+    // 前回の ping に対する pong がまだ返っていない場合、接続がサイレントデス状態と判断する
     if (this.pingTimeoutTimer) {
-      clearTimeout(this.pingTimeoutTimer)
-      this.pingTimeoutTimer = null
+      console.warn(
+        '[MONITOR] Previous ping unanswered. Connection is silently dead.'
+      )
+      this.requestReconnect('Previous ping unanswered')
+      return
     }
 
     try {

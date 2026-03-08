@@ -18,15 +18,16 @@ interface RawWebSocket {
   ping(data?: Buffer, cb?: (err: Error) => void): void
   /** イベントリスナーを登録する */
   on(event: 'pong', listener: () => void): this
-  /** 特定イベントのリスナーをすべて削除する */
-  removeAllListeners(event: 'pong'): this
+  /** 特定のリスナーを削除する */
+  removeListener(event: 'pong', listener: () => void): this
 }
 
 /**
  * WebSocket 接続監視クラス
  *
  * VRChat SDK の WebSocket (pipeline) 接続を監視し、切断時に自動再接続を行う。
- * ping/pong ハートビートにより最大 PING_INTERVAL × 2 程度でサイレントデスを検知する。
+ * 接続確立直後に即座に ping を送信し、以降 PING_INTERVAL ごとに継続する。
+ * pong が返らない場合は最大 PING_TIMEOUT 以内にサイレントデスを検知して再接続する。
  */
 export class WebSocketMonitor {
   private config: Config
@@ -48,6 +49,9 @@ export class WebSocketMonitor {
 
   /** 現在の接続の raw ws インスタンス（stopPingPong で pong リスナーを削除するために保持） */
   private rawWs: RawWebSocket | null = null
+
+  /** 登録済みの pong イベントハンドラ（removeListener で正確に解除するために保持） */
+  private pongHandler: (() => void) | null = null
 
   /** 再接続の初回待機時間（ミリ秒） */
   private readonly INITIAL_BACKOFF = 1000
@@ -558,17 +562,20 @@ export class WebSocketMonitor {
     // rawWs をフィールドに保存（stopPingPong で pong リスナーを削除するために必要）
     this.rawWs = rawWs
 
-    // pong イベントリスナーを登録（重複を防ぐため先に削除）
-    rawWs.removeAllListeners('pong')
-    rawWs.on('pong', () => {
+    // pong ハンドラをフィールドに保持し、removeListener で正確に解除できるようにする
+    this.pongHandler = () => {
       // pong 受信 → タイムアウトをキャンセル（接続は生きている）
       if (this.pingTimeoutTimer) {
         clearTimeout(this.pingTimeoutTimer)
         this.pingTimeoutTimer = null
       }
-    })
+    }
+    rawWs.on('pong', this.pongHandler)
 
     console.log('[MONITOR] Starting ping/pong heartbeat (interval: 30s)')
+
+    // 接続直後に即座に ping を送り、最初のサイクルの検知遅延（最大 PING_INTERVAL）をなくす
+    this.sendPing(rawWs)
 
     // PING_INTERVAL ごとに ping を送信
     this.pingTimer = setInterval(() => {
@@ -590,11 +597,13 @@ export class WebSocketMonitor {
       this.pingTimeoutTimer = null
     }
 
-    // 古い接続の rawWs に登録した pong リスナーを削除してメモリリークを防ぐ
-    if (this.rawWs) {
-      this.rawWs.removeAllListeners('pong')
-      this.rawWs = null
+    // 古い接続の rawWs に登録した pong ハンドラを正確に解除してメモリリークを防ぐ
+    if (this.rawWs && this.pongHandler) {
+      // removeAllListeners ではなく登録したハンドラのみを解除し、他のリスナーに影響しない
+      this.rawWs.removeListener('pong', this.pongHandler)
     }
+    this.rawWs = null
+    this.pongHandler = null
   }
 
   /**

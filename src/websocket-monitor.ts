@@ -8,9 +8,25 @@ import type { VRChat } from 'vrchat'
 type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'stopped'
 
 /**
+ * `ws` ライブラリの WebSocket インスタンスが持つ、ping/pong に必要なメソッドの型
+ *
+ * VRChat SDK 内部フィールド (`pipeline.websocket`) から取得する raw ws インスタンスを
+ * 型安全に扱うための最小限インターフェース。
+ */
+interface RawWebSocket {
+  /** ping フレームを送信する */
+  ping(data?: Buffer, cb?: (err: Error) => void): void
+  /** イベントリスナーを登録する */
+  on(event: 'pong', listener: () => void): this
+  /** 特定イベントのリスナーをすべて削除する */
+  removeAllListeners(event: 'pong'): this
+}
+
+/**
  * WebSocket 接続監視クラス
  *
- * VRChat SDK の WebSocket (pipeline) 接続を監視し、切断時に自動再接続を行う
+ * VRChat SDK の WebSocket (pipeline) 接続を監視し、切断時に自動再接続を行う。
+ * ping/pong ハートビートにより ~35 秒以内にサイレントデスを検知する。
  */
 export class WebSocketMonitor {
   private config: Config
@@ -23,7 +39,12 @@ export class WebSocketMonitor {
   private isReconnecting = false
   private closeEventReceived = false
   private closeTimeout: NodeJS.Timeout | null = null
-  private lastWarningTime: Date | null = null
+
+  /** ping タイマー */
+  private pingTimer: NodeJS.Timeout | null = null
+
+  /** pong 待機タイムアウトタイマー */
+  private pingTimeoutTimer: NodeJS.Timeout | null = null
 
   /** 再接続の初回待機時間（ミリ秒） */
   private readonly INITIAL_BACKOFF = 1000
@@ -38,19 +59,29 @@ export class WebSocketMonitor {
   private readonly HEALTH_CHECK_INTERVAL = 60 * 1000 // 1分
 
   /**
-   * イベント未受信の警告閾値（ミリ秒）
+   * ping フレームの送信間隔（ミリ秒）
    *
-   * 6 時間以上イベントを受信していない場合、performHealthCheck() で警告を出力する。
-   * また、この値は Main クラスの checkSilentDeath() でサイレント接続死の判定にも使用される。
+   * VRChat WebSocket サーバーに対して定期的に WebSocket プロトコルレベルの
+   * ping フレームを送信し、pong が返ることで接続の生存を確認する。
    */
-  private readonly EVENT_TIMEOUT_WARNING = 6 * 60 * 60 * 1000 // 6 時間
+  private readonly PING_INTERVAL = 30 * 1000 // 30秒
 
   /**
-   * 警告の再出力間隔（ミリ秒）
+   * pong 待機タイムアウト（ミリ秒）
    *
-   * 同じ警告を繰り返し出力しないために、最後の警告から この時間が経過するまで警告を抑制する。
+   * ping 送信後この時間内に pong が返らない場合、サイレントデスと判断して再接続する。
+   * PING_INTERVAL より少し長く設定してネットワーク遅延を考慮する。
    */
-  private readonly WARNING_REPEAT_INTERVAL = 60 * 60 * 1000 // 1 時間
+  private readonly PING_TIMEOUT = 35 * 1000 // 35秒
+
+  /**
+   * イベント未受信時のバックアップ再接続閾値（ミリ秒）
+   *
+   * ping/pong が機能しない環境（VRChat サーバーが pong を返さない等）への
+   * 安全網として、アプリケーションレベルのイベントが一定時間来ない場合も再接続する。
+   * 全フレンドのイベントで更新されるため、10 分無音は WebSocket 異常を強く示唆する。
+   */
+  private readonly EVENT_TIMEOUT_RECONNECT = 10 * 60 * 1000 // 10分
 
   /**
    * pipeline.close() 後の close イベント待機タイムアウト（ミリ秒）
@@ -116,6 +147,9 @@ export class WebSocketMonitor {
       clearTimeout(this.closeTimeout)
       this.closeTimeout = null
     }
+
+    // ping/pong タイマーを停止
+    this.stopPingPong()
 
     // WebSocket を閉じる
     if (this.vrchat) {
@@ -201,6 +235,9 @@ export class WebSocketMonitor {
 
     console.warn(`[MONITOR] Forced reconnect: ${reason}`)
 
+    // ping/pong タイマーを停止
+    this.stopPingPong()
+
     // 既存の closeTimeout をクリア（連続呼び出し時のタイマー重複を防止）
     if (this.closeTimeout) {
       clearTimeout(this.closeTimeout)
@@ -259,6 +296,9 @@ export class WebSocketMonitor {
             this.closeTimeout = null
           }
 
+          // ping/pong タイマーを停止
+          this.stopPingPong()
+
           // イベントリスナーを削除してからクローズ
           this.vrchat.pipeline.removeAllListeners('close')
           this.vrchat.pipeline.removeAllListeners('error')
@@ -294,7 +334,14 @@ export class WebSocketMonitor {
 
       this.state = 'connected'
       this.reconnectAttempts = 0
+
+      // 再接続後に lastEventTime をリセットして新しい接続に新鮮な計測ウィンドウを与える
+      this.lastEventTime = null
+
       console.log('[MONITOR] Connected to VRChat WebSocket')
+
+      // ping/pong ハートビートを開始
+      this.startPingPong()
 
       // 接続確立コールバックを呼び出す
       if (this.onConnected) {
@@ -345,6 +392,9 @@ export class WebSocketMonitor {
     }
 
     console.warn('[MONITOR] Handling WebSocket disconnect...')
+
+    // ping/pong タイマーを停止
+    this.stopPingPong()
 
     // close イベント受信フラグをリセット
     this.closeEventReceived = false
@@ -439,6 +489,11 @@ export class WebSocketMonitor {
 
   /**
    * ヘルスチェックを実行する
+   *
+   * 毎分実行し、以下を確認する:
+   * 1. pipeline.connected が false → 即座に再接続（既存の切断検出）
+   * 2. アプリケーションレベルのイベントが 10 分以上来ない → バックアップ再接続
+   *    （ping/pong が機能しない環境への安全網）
    */
   private performHealthCheck(): void {
     // VRChat SDK は WebSocket の close/error イベントを EventEmitter に転送しないため、
@@ -457,25 +512,105 @@ export class WebSocketMonitor {
     const now = new Date()
     const timeSinceLastEvent = now.getTime() - this.lastEventTime.getTime()
 
-    if (timeSinceLastEvent > this.EVENT_TIMEOUT_WARNING) {
-      // 最後の警告から WARNING_REPEAT_INTERVAL 経過していない場合はスキップ（ログスパム防止）
-      if (
-        this.lastWarningTime &&
-        now.getTime() - this.lastWarningTime.getTime() <
-          this.WARNING_REPEAT_INTERVAL
-      ) {
-        return
-      }
-
+    if (timeSinceLastEvent > this.EVENT_TIMEOUT_RECONNECT) {
+      // 全フレンドのイベントが 10 分以上来ない = WebSocket が実質的に死んでいる可能性が高い
+      // ping/pong のバックアップとして強制再接続する
+      const minutes = Math.floor(timeSinceLastEvent / 1000 / 60)
       console.warn(
-        `[MONITOR] WARNING: No events received for ${timeSinceLastEvent / 1000 / 60 / 60} hours. Last event: ${this.lastEventTime.toISOString()}`
+        `[MONITOR] No events received for ${minutes} minutes (last: ${this.lastEventTime.toISOString()}). Triggering backup reconnect.`
       )
+      this.requestReconnect(`No events received for ${minutes} minutes`)
+    }
+  }
 
-      // 警告時刻を記録
-      this.lastWarningTime = now
-    } else {
-      // イベントが受信されたら警告時刻をリセット
-      this.lastWarningTime = null
+  /**
+   * ping/pong ハートビートを開始する
+   *
+   * VRChat WebSocket サーバーに 30 秒ごとに WebSocket プロトコルレベルの ping フレームを送信し、
+   * 35 秒以内に pong が返らない場合はサイレントデスと判断して再接続する。
+   * これにより ~35 秒以内にデッドコネクションを検知できる。
+   */
+  private startPingPong(): void {
+    this.stopPingPong()
+
+    if (!this.vrchat) {
+      return
+    }
+
+    // VRChat SDK 内部の raw ws インスタンスを取得（isomorphic-ws = Node.js では ws ライブラリ）
+    // pipeline.websocket は SDK の public フィールドであり、ws.WebSocket インスタンスを保持する
+    const rawWs = (
+      this.vrchat.pipeline as unknown as { websocket: RawWebSocket | undefined }
+    ).websocket
+
+    if (!rawWs) {
+      console.warn(
+        '[MONITOR] Raw WebSocket instance not available, skipping ping/pong setup'
+      )
+      return
+    }
+
+    // pong イベントリスナーを登録（重複を防ぐため先に削除）
+    rawWs.removeAllListeners('pong')
+    rawWs.on('pong', () => {
+      // pong 受信 → タイムアウトをキャンセル（接続は生きている）
+      if (this.pingTimeoutTimer) {
+        clearTimeout(this.pingTimeoutTimer)
+        this.pingTimeoutTimer = null
+      }
+    })
+
+    console.log('[MONITOR] Starting ping/pong heartbeat (interval: 30s)')
+
+    // 30 秒ごとに ping を送信
+    this.pingTimer = setInterval(() => {
+      this.sendPing(rawWs)
+    }, this.PING_INTERVAL)
+  }
+
+  /**
+   * ping/pong タイマーをすべて停止する
+   */
+  private stopPingPong(): void {
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer)
+      this.pingTimer = null
+    }
+
+    if (this.pingTimeoutTimer) {
+      clearTimeout(this.pingTimeoutTimer)
+      this.pingTimeoutTimer = null
+    }
+  }
+
+  /**
+   * ping フレームを送信し、pong 待機タイムアウトを設定する
+   *
+   * @param rawWs raw ws WebSocket インスタンス
+   */
+  private sendPing(rawWs: RawWebSocket): void {
+    if (this.state !== 'connected' || !this.vrchat) {
+      return
+    }
+
+    // 既存のタイムアウトをクリア（前回の ping が未応答でも上書き）
+    if (this.pingTimeoutTimer) {
+      clearTimeout(this.pingTimeoutTimer)
+      this.pingTimeoutTimer = null
+    }
+
+    try {
+      rawWs.ping()
+
+      // pong が返ってこない場合のタイムアウトを設定
+      this.pingTimeoutTimer = setTimeout(() => {
+        console.warn(
+          `[MONITOR] Ping timeout: no pong received within ${this.PING_TIMEOUT / 1000}s. Connection is silently dead.`
+        )
+        this.requestReconnect('Ping timeout')
+      }, this.PING_TIMEOUT)
+    } catch (error) {
+      console.error('[MONITOR] Failed to send ping:', error)
     }
   }
 }

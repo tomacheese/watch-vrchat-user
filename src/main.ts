@@ -143,7 +143,13 @@ class WatchVRChatUser {
   private apiPollerTimer: NodeJS.Timeout | null = null
   private apiPollCooldownUntil: Date | null = null
 
-  /** イベント未受信の閾値（ミリ秒） - WebSocketMonitor の EVENT_TIMEOUT_WARNING と一致 */
+  /**
+   * サイレントデス判定の時間閾値（ミリ秒）
+   *
+   * WebSocketMonitor の ping/pong ハートビートが主系の検知機構だが、
+   * API ポーリングでのミスマッチ検出による副系としてこの閾値を使用する。
+   * ping/pong が正常動作していればこの条件が先に満たされることはほぼない。
+   */
   private readonly SIX_HOURS = 6 * 60 * 60 * 1000
 
   /** 429 エラー発生時のクールダウン時間（ミリ秒） */

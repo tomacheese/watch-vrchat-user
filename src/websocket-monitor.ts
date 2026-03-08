@@ -14,6 +14,11 @@ type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'stopped'
  * 型安全に扱うための最小限インターフェース。
  */
 interface RawWebSocket {
+  /**
+   * WebSocket の接続状態
+   * 0: CONNECTING, 1: OPEN, 2: CLOSING, 3: CLOSED
+   */
+  readyState: number
   /** ping フレームを送信する */
   ping(data?: Buffer, cb?: (err: Error) => void): void
   /** イベントリスナーを登録する */
@@ -625,6 +630,14 @@ export class WebSocketMonitor {
         '[MONITOR] Previous ping unanswered. Connection is silently dead.'
       )
       this.requestReconnect('Previous ping unanswered')
+      return
+    }
+
+    // raw WebSocket がまだ OPEN 状態でない場合はスキップ（接続直後の CONNECTING 状態等）
+    if (rawWs.readyState !== 1) {
+      console.log(
+        `[MONITOR] Skipping ping: WebSocket not open (readyState=${rawWs.readyState})`
+      )
       return
     }
 

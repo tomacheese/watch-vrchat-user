@@ -72,7 +72,7 @@
       ]
     }
   },
-  "packageManager": "pnpm@10.30.3",
+  "packageManager": "pnpm@10.31.0",
   "pnpm": {
     "patchedDependencies": {
       "vrchat@2.20.7": "patches/vrchat@2.20.7.patch"

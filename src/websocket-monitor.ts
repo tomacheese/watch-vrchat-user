@@ -120,6 +120,10 @@ export class WebSocketMonitor {
   /**
    * WebSocket 接続を開始する
    *
+   * 初回接続に失敗した場合はエクスポネンシャルバックオフで再接続を試み、
+   * 接続が確立されるまでこのメソッドは返らない。
+   * 接続確立後にヘルスチェックを開始する。
+   *
    * @param onConnected 接続確立時のコールバック
    * @param onDisconnected 切断時のコールバック
    */
@@ -132,7 +136,20 @@ export class WebSocketMonitor {
     this.onConnected = onConnected
     this.onDisconnected = onDisconnected
 
-    await this.connect()
+    try {
+      await this.connect()
+    } catch (error) {
+      // 初回接続失敗 - 再接続ループを開始する
+      const isAuthError = this.isAuthenticationError(error)
+      if (isAuthError) {
+        console.error(
+          `[MONITOR] Authentication error on initial connect. Cooling down for ${this.AUTH_FAILURE_COOLDOWN / 1000 / 60} minutes...`
+        )
+        await this.scheduleReconnect(this.AUTH_FAILURE_COOLDOWN)
+      } else {
+        await this.scheduleReconnect(this.calculateBackoff())
+      }
+    }
     this.startHealthCheck()
   }
 
@@ -296,6 +313,9 @@ export class WebSocketMonitor {
 
   /**
    * WebSocket に接続する
+   *
+   * 接続に失敗した場合は例外をスローする。
+   * 再接続のスケジュールは呼び出し元（scheduleReconnect のループ または start）が担う。
    */
   private async connect(): Promise<void> {
     if (this.state === 'stopped') {
@@ -369,23 +389,8 @@ export class WebSocketMonitor {
       }
     } catch (error) {
       console.error('[MONITOR] Failed to connect to VRChat WebSocket:', error)
-
-      // scheduleReconnect() 経由で呼ばれた場合、isReconnecting は既に true になっている。
-      // このまま内側の scheduleReconnect() を呼ぶと早期 return してしまうため、
-      // 一旦 false にリセットしてから再スケジュールする。
-      this.isReconnecting = false
-
-      // 認証エラーの場合は長時間クールダウン
-      const isAuthError = this.isAuthenticationError(error)
-      if (isAuthError) {
-        console.error(
-          `[MONITOR] Authentication error detected. Cooling down for ${this.AUTH_FAILURE_COOLDOWN / 1000 / 60} minutes...`
-        )
-        await this.scheduleReconnect(this.AUTH_FAILURE_COOLDOWN)
-      } else {
-        // 通常のエラーの場合はバックオフして再接続
-        await this.scheduleReconnect(this.calculateBackoff())
-      }
+      // 再接続スケジュールは呼び出し元（scheduleReconnect のループ または start）に委譲する
+      throw error
     }
   }
 
@@ -442,11 +447,16 @@ export class WebSocketMonitor {
   }
 
   /**
-   * 再接続をスケジュールする
+   * 再接続をスケジュールし、接続が確立されるまで内部でリトライループを行う
    *
-   * @param delay 待機時間（ミリ秒）
+   * - 単一フライト制御: 既に再接続中の場合は即座にリターンする
+   * - connect() が失敗した場合、エクスポネンシャルバックオフでリトライを継続する
+   * - 認証エラーの場合は AUTH_FAILURE_COOLDOWN のクールダウンを挿入する
+   * - Promise チェーンが積み上がらないよう、再試行はループで処理する
+   *
+   * @param initialDelay 最初の待機時間（ミリ秒）
    */
-  private async scheduleReconnect(delay: number): Promise<void> {
+  private async scheduleReconnect(initialDelay: number): Promise<void> {
     // 単一フライト化: 既に再接続中の場合はスキップ
     if (this.isReconnecting) {
       console.warn('[MONITOR] Reconnect already in progress, skipping')
@@ -454,32 +464,52 @@ export class WebSocketMonitor {
     }
 
     this.isReconnecting = true
-    this.state = 'reconnecting'
+    let delay = initialDelay
 
-    this.reconnectAttempts++
-    console.log(
-      `[MONITOR] Scheduling reconnect attempt #${this.reconnectAttempts} in ${delay / 1000} seconds...`
-    )
+    try {
+      // stopped チェックをループ先頭で行うことで TypeScript の型絞り込みエラーを回避する
+      while (true) {
+        if (this.state === 'stopped') break
 
-    // 既存のタイマーをクリア
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer)
+        this.state = 'reconnecting'
+        this.reconnectAttempts++
+        console.log(
+          `[MONITOR] Scheduling reconnect attempt #${this.reconnectAttempts} in ${delay / 1000} seconds...`
+        )
+
+        // 既存のタイマーをクリア
+        if (this.reconnectTimer) {
+          clearTimeout(this.reconnectTimer)
+        }
+
+        // 指定時間待機してから再接続を試みる
+        await new Promise<void>((resolve) => {
+          this.reconnectTimer = setTimeout(resolve, delay)
+        })
+
+        try {
+          await this.connect()
+          return // 接続成功 - ループ終了
+        } catch (connectError: unknown) {
+          console.error(
+            '[MONITOR] Error during reconnect attempt:',
+            connectError
+          )
+          // 認証エラーの場合は長時間クールダウン、それ以外はバックオフ
+          const isAuthError = this.isAuthenticationError(connectError)
+          if (isAuthError) {
+            console.error(
+              `[MONITOR] Authentication error detected. Cooling down for ${this.AUTH_FAILURE_COOLDOWN / 1000 / 60} minutes...`
+            )
+            delay = this.AUTH_FAILURE_COOLDOWN
+          } else {
+            delay = this.calculateBackoff()
+          }
+        }
+      }
+    } finally {
+      this.isReconnecting = false
     }
-
-    return new Promise((resolve) => {
-      this.reconnectTimer = setTimeout(() => {
-        this.connect()
-          .then(() => {
-            this.isReconnecting = false
-            resolve()
-          })
-          .catch((error: unknown) => {
-            console.error('[MONITOR] Error during reconnect:', error)
-            this.isReconnecting = false
-            resolve()
-          })
-      }, delay)
-    })
   }
 
   /**

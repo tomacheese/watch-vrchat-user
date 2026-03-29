@@ -226,8 +226,9 @@ export class WebSocketMonitor {
   /**
    * 強制的に再接続を要求する
    *
-   * WebSocket を閉じて handleDisconnect() をトリガーすることで、
+   * VRChat クライアントが存在する場合は WebSocket を閉じて handleDisconnect() をトリガーすることで、
    * 既存の再接続ロジック（エクスポネンシャルバックオフ、単一フライト制御）に合流します。
+   * VRChat クライアントが null の場合（接続失敗後など）は直接 handleDisconnect() を呼び出します。
    *
    * @param reason 再接続の理由
    */

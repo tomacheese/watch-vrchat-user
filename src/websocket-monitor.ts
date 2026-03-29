@@ -284,6 +284,12 @@ export class WebSocketMonitor {
         // フォールバック: 直接 handleDisconnect() を呼び出す
         this.handleDisconnect()
       }
+    } else {
+      // vrchat が null の場合（接続失敗後など）は直接 handleDisconnect() を呼び出す
+      console.warn(
+        '[MONITOR] VRChat client is null during forced reconnect, calling handleDisconnect directly'
+      )
+      this.handleDisconnect()
     }
   }
 
@@ -362,6 +368,11 @@ export class WebSocketMonitor {
       }
     } catch (error) {
       console.error('[MONITOR] Failed to connect to VRChat WebSocket:', error)
+
+      // scheduleReconnect() 経由で呼ばれた場合、isReconnecting は既に true になっている。
+      // このまま内側の scheduleReconnect() を呼ぶと早期 return してしまうため、
+      // 一旦 false にリセットしてから再スケジュールする。
+      this.isReconnecting = false
 
       // 認証エラーの場合は長時間クールダウン
       const isAuthError = this.isAuthenticationError(error)

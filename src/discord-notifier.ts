@@ -168,10 +168,10 @@ export class DiscordNotifier {
       await this.discord.sendMessage({
         embeds: [embed],
       })
-    } catch (error) {
+    } catch (err) {
       console.error(
         `[DISCORD] Failed to send notification (attempt ${attempt}/${maxAttempts}):`,
-        error
+        err
       )
 
       if (attempt < maxAttempts) {

@@ -138,9 +138,9 @@ export class WebSocketMonitor {
 
     try {
       await this.connect()
-    } catch (error) {
+    } catch (err) {
       // 初回接続失敗 - 再接続ループを開始する
-      const isAuthError = this.isAuthenticationError(error)
+      const isAuthError = this.isAuthenticationError(err)
       if (isAuthError) {
         console.error(
           `[MONITOR] Authentication error on initial connect. Cooling down for ${this.AUTH_FAILURE_COOLDOWN / 1000 / 60} minutes...`
@@ -293,10 +293,10 @@ export class WebSocketMonitor {
             this.handleDisconnect()
           }
         }, this.CLOSE_TIMEOUT)
-      } catch (error) {
+      } catch (err) {
         console.error(
           '[MONITOR] Failed to close WebSocket pipeline for forced reconnect:',
-          error
+          err
         )
 
         // フォールバック: 直接 handleDisconnect() を呼び出す
@@ -387,10 +387,10 @@ export class WebSocketMonitor {
       if (this.onConnected) {
         this.onConnected(this.vrchat)
       }
-    } catch (error) {
-      console.error('[MONITOR] Failed to connect to VRChat WebSocket:', error)
+    } catch (err) {
+      console.error('[MONITOR] Failed to connect to VRChat WebSocket:', err)
       // 再接続スケジュールは呼び出し元（scheduleReconnect のループ または start）に委譲する
-      throw error
+      throw err
     }
   }
 
@@ -441,8 +441,8 @@ export class WebSocketMonitor {
     }
 
     // 再接続をスケジュール
-    this.scheduleReconnect(this.calculateBackoff()).catch((error: unknown) => {
-      console.error('[MONITOR] Failed to schedule reconnect:', error)
+    this.scheduleReconnect(this.calculateBackoff()).catch((err: unknown) => {
+      console.error('[MONITOR] Failed to schedule reconnect:', err)
     })
   }
 
@@ -490,13 +490,10 @@ export class WebSocketMonitor {
         try {
           await this.connect()
           return // 接続成功 - ループ終了
-        } catch (connectError: unknown) {
-          console.error(
-            '[MONITOR] Error during reconnect attempt:',
-            connectError
-          )
+        } catch (err: unknown) {
+          console.error('[MONITOR] Error during reconnect attempt:', err)
           // 認証エラーの場合は長時間クールダウン、それ以外はバックオフ
-          const isAuthError = this.isAuthenticationError(connectError)
+          const isAuthError = this.isAuthenticationError(err)
           if (isAuthError) {
             console.error(
               `[MONITOR] Authentication error detected. Cooling down for ${this.AUTH_FAILURE_COOLDOWN / 1000 / 60} minutes...`
@@ -693,8 +690,8 @@ export class WebSocketMonitor {
         )
         this.requestReconnect('Ping timeout')
       }, this.PING_TIMEOUT)
-    } catch (error) {
-      console.error('[MONITOR] Failed to send ping:', error)
+    } catch (err) {
+      console.error('[MONITOR] Failed to send ping:', err)
     }
   }
 }

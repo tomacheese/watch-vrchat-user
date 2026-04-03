@@ -86,8 +86,8 @@ export class LocationStore {
           `[LOCATION-STORE] Loaded ${Object.keys(this.data.users).length} user(s) from file`
         )
       }
-    } catch (error) {
-      console.error('[LOCATION-STORE] Failed to load data:', error)
+    } catch (err) {
+      console.error('[LOCATION-STORE] Failed to load data:', err)
       this.data = { users: {} }
     }
   }
@@ -135,8 +135,8 @@ export class LocationStore {
       }
 
       fs.writeFileSync(LOCATION_FILE_PATH, JSON.stringify(this.data, null, 2))
-    } catch (error) {
-      console.error('[LOCATION-STORE] Failed to save data:', error)
+    } catch (err) {
+      console.error('[LOCATION-STORE] Failed to save data:', err)
     }
   }
 

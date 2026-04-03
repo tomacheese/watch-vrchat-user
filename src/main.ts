@@ -193,8 +193,8 @@ class WatchVRChatUser {
     // WebSocket 接続監視を開始
     await this.monitor.start(
       (vrchat: VRChat) => {
-        this.handleConnected(vrchat).catch((error: unknown) => {
-          console.error('[MAIN] Error in handleConnected:', error)
+        this.handleConnected(vrchat).catch((err: unknown) => {
+          console.error('[MAIN] Error in handleConnected:', err)
         })
       },
       () => {
@@ -408,8 +408,8 @@ class WatchVRChatUser {
         )
         return
       }
-      this.handleFriendLocation(data).catch((error: unknown) => {
-        console.error('[MAIN] Error handling friend-location event:', error)
+      this.handleFriendLocation(data).catch((err: unknown) => {
+        console.error('[MAIN] Error handling friend-location event:', err)
       })
     })
 
@@ -425,8 +425,8 @@ class WatchVRChatUser {
         )
         return
       }
-      this.handleFriendOnline(data).catch((error: unknown) => {
-        console.error('[MAIN] Error handling friend-online event:', error)
+      this.handleFriendOnline(data).catch((err: unknown) => {
+        console.error('[MAIN] Error handling friend-online event:', err)
       })
     })
 
@@ -442,8 +442,8 @@ class WatchVRChatUser {
         )
         return
       }
-      this.handleFriendOffline(data).catch((error: unknown) => {
-        console.error('[MAIN] Error handling friend-offline event:', error)
+      this.handleFriendOffline(data).catch((err: unknown) => {
+        console.error('[MAIN] Error handling friend-offline event:', err)
       })
     })
 
@@ -586,8 +586,8 @@ class WatchVRChatUser {
     const POLLING_INTERVAL = 60 * 60 * 1000 // 1時間
 
     this.apiPollerTimer = setInterval(() => {
-      this.pollUsersStatus().catch((error: unknown) => {
-        console.error('[MAIN] Error in API polling:', error)
+      this.pollUsersStatus().catch((err: unknown) => {
+        console.error('[MAIN] Error in API polling:', err)
       })
     }, POLLING_INTERVAL)
 
@@ -651,9 +651,9 @@ class WatchVRChatUser {
           // サイレント接続死の判定
           this.checkSilentDeath(userId, apiLocation, storeLocation)
         }
-      } catch (error) {
+      } catch (err) {
         // 429 エラー（レート制限）の場合はクールダウン
-        if (error instanceof Error && error.message.includes('429')) {
+        if (err instanceof Error && err.message.includes('429')) {
           this.apiPollCooldownUntil = new Date(
             Date.now() + this.RATE_LIMIT_COOLDOWN
           )
@@ -664,7 +664,7 @@ class WatchVRChatUser {
         }
 
         // その他のエラーはログ出力のみ
-        console.error(`[MAIN] Error fetching user info for ${userId}:`, error)
+        console.error(`[MAIN] Error fetching user info for ${userId}:`, err)
       }
     }
 
@@ -724,16 +724,16 @@ async function main(): Promise<void> {
     // アプリケーションを開始
     const app = new WatchVRChatUser(config)
     await app.start()
-  } catch (error) {
-    console.error('[MAIN] Fatal error:', error)
+  } catch (err) {
+    console.error('[MAIN] Fatal error:', err)
     // eslint-disable-next-line unicorn/no-process-exit
     process.exit(1)
   }
 }
 
 // メイン関数を実行
-main().catch((error: unknown) => {
-  console.error('[MAIN] Unhandled error:', error)
+main().catch((err: unknown) => {
+  console.error('[MAIN] Unhandled error:', err)
   // eslint-disable-next-line unicorn/no-process-exit
   process.exit(1)
 })

@@ -79,10 +79,10 @@ async function authenticateWebSocket(
   try {
     await vrchat.pipeline.authenticate(authCookie.value)
     console.log('[VRCHAT] WebSocket authenticated')
-  } catch (error) {
+  } catch (err) {
     console.error(
       '[VRCHAT] Failed to authenticate WebSocket:',
-      error instanceof Error ? error.message : error
+      err instanceof Error ? err.message : err
     )
   }
 }

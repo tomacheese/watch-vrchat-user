@@ -50,7 +50,7 @@
     "ts-jest": "29.4.9",
     "tsx": "4.21.0",
     "typed-emitter": "2.1.0",
-    "typescript": "6.0.2"
+    "typescript": "6.0.3"
   },
   "jest": {
     "setupFilesAfterEnv": [

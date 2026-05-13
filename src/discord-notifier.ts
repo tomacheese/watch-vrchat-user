@@ -70,7 +70,7 @@ export class DiscordNotifier {
    */
   async notifyLocationChange(params: LocationChangeParams): Promise<void> {
     const embed: DiscordEmbed = {
-      title: '\u{1F4CD} ロケーション変更',
+      title: `\u{1F4CD} ${params.displayName} ロケーション変更`,
       color: COLORS.locationChange,
       fields: [
         {
@@ -118,7 +118,7 @@ export class DiscordNotifier {
    */
   async notifyOnline(params: OnlineParams): Promise<void> {
     const embed: DiscordEmbed = {
-      title: '\u{1F7E2} オンライン',
+      title: `\u{1F7E2} ${params.displayName} オンライン`,
       color: COLORS.online,
       fields: [
         {
@@ -140,7 +140,7 @@ export class DiscordNotifier {
    */
   async notifyOffline(params: OfflineParams): Promise<void> {
     const embed: DiscordEmbed = {
-      title: '\u{26AB} オフライン',
+      title: `\u{26AB} ${params.displayName} オフライン`,
       color: COLORS.offline,
       fields: [
         {

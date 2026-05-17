@@ -699,9 +699,9 @@ class WatchVRChatUser {
     }
 
     const now = new Date()
-    const timeSinceLastEvent = now.getTime() - referenceTime.getTime()
+    const timeSinceReference = now.getTime() - referenceTime.getTime()
 
-    if (timeSinceLastEvent < this.SIX_HOURS) {
+    if (timeSinceReference < this.SIX_HOURS) {
       return
     }
 
@@ -709,7 +709,7 @@ class WatchVRChatUser {
 
     // すべての条件を満たす場合、強制再接続
     console.warn(
-      `[MAIN] Silent death detected for user ${userId}: API=${apiLocation ?? 'offline'}, Store=${storeLocation ?? 'offline'}, Time since last event=${timeSinceLastEvent / 1000 / 60 / 60} hours`
+      `[MAIN] Silent death detected for user ${userId}: API=${apiLocation ?? 'offline'}, Store=${storeLocation ?? 'offline'}, Time since reference=${timeSinceReference / 1000 / 60 / 60} hours`
     )
 
     this.monitor.requestReconnect('Silent death detected')

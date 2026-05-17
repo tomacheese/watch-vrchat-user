@@ -688,17 +688,20 @@ class WatchVRChatUser {
       return
     }
 
-    // 条件 2: 最後のイベント受信時刻が 6 時間以上古いこと
-    const lastEventTime = this.monitor.getLastEventTime()
-    if (!lastEventTime) {
-      // まだイベントを受信していない場合はスキップ
+    // 条件 2: 最後のイベント受信時刻（またはフォールバックとして接続確立時刻）が 6 時間以上古いこと
+    // lastEventTime が null の場合は connectedAt を基準とする。
+    // これにより、再接続後にイベントが一切来ない（サーバー側ゾンビ状態）でも
+    // サイレントデス判定が正しく機能する。
+    const referenceTime =
+      this.monitor.getLastEventTime() ?? this.monitor.getConnectedAt()
+    if (!referenceTime) {
       return
     }
 
     const now = new Date()
-    const timeSinceLastEvent = now.getTime() - lastEventTime.getTime()
+    const timeSinceReference = now.getTime() - referenceTime.getTime()
 
-    if (timeSinceLastEvent < this.SIX_HOURS) {
+    if (timeSinceReference < this.SIX_HOURS) {
       return
     }
 
@@ -706,7 +709,7 @@ class WatchVRChatUser {
 
     // すべての条件を満たす場合、強制再接続
     console.warn(
-      `[MAIN] Silent death detected for user ${userId}: API=${apiLocation ?? 'offline'}, Store=${storeLocation ?? 'offline'}, Time since last event=${timeSinceLastEvent / 1000 / 60 / 60} hours`
+      `[MAIN] Silent death detected for user ${userId}: API=${apiLocation ?? 'offline'}, Store=${storeLocation ?? 'offline'}, Time since reference=${timeSinceReference / 1000 / 60 / 60} hours`
     )
 
     this.monitor.requestReconnect('Silent death detected')

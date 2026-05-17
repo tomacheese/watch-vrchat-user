@@ -39,6 +39,8 @@ export class WebSocketMonitor {
   private state: ConnectionState = 'connecting'
   private vrchat: VRChat | null = null
   private lastEventTime: Date | null = null
+  /** 現在の接続が確立された時刻 */
+  private connectedAt: Date | null = null
   private reconnectAttempts = 0
   private reconnectTimer: NodeJS.Timeout | null = null
   private healthCheckTimer: NodeJS.Timeout | null = null
@@ -214,6 +216,15 @@ export class WebSocketMonitor {
   }
 
   /**
+   * 現在の接続が確立された時刻を取得する
+   *
+   * @returns 接続確立時刻（未接続の場合は null）
+   */
+  getConnectedAt(): Date | null {
+    return this.connectedAt
+  }
+
+  /**
    * VRChat クライアントを取得する
    *
    * @returns VRChat クライアント（未接続の場合は null）
@@ -377,6 +388,8 @@ export class WebSocketMonitor {
 
       // 再接続後に lastEventTime をリセットして新しい接続に新鮮な計測ウィンドウを与える
       this.lastEventTime = null
+      // 接続確立時刻を記録（lastEventTime が null の間のバックアップ基準時刻として使用）
+      this.connectedAt = new Date()
 
       console.log('[MONITOR] Connected to VRChat WebSocket')
 
@@ -559,20 +572,23 @@ export class WebSocketMonitor {
       return
     }
 
-    if (!this.lastEventTime) {
-      // まだイベントを受信していない場合はスキップ
+    // lastEventTime が null の場合は connectedAt を基準とする。
+    // これにより、再接続後にイベントが一切来ない（サーバー側ゾンビ状態）でも
+    // バックアップ再接続が正しく発火する。
+    const referenceTime = this.lastEventTime ?? this.connectedAt
+    if (!referenceTime) {
       return
     }
 
     const now = new Date()
-    const timeSinceLastEvent = now.getTime() - this.lastEventTime.getTime()
+    const timeSinceReference = now.getTime() - referenceTime.getTime()
 
-    if (timeSinceLastEvent > this.EVENT_TIMEOUT_RECONNECT) {
+    if (timeSinceReference > this.EVENT_TIMEOUT_RECONNECT) {
       // 全フレンドのイベントが 10 分以上来ない = WebSocket が実質的に死んでいる可能性が高い
       // ping/pong のバックアップとして強制再接続する
-      const minutes = Math.floor(timeSinceLastEvent / 1000 / 60)
+      const minutes = Math.floor(timeSinceReference / 1000 / 60)
       console.warn(
-        `[MONITOR] No events received for ${minutes} minutes (last: ${this.lastEventTime.toISOString()}). Triggering backup reconnect.`
+        `[MONITOR] No events received for ${minutes} minutes (reference: ${referenceTime.toISOString()}). Triggering backup reconnect.`
       )
       this.requestReconnect(`No events received for ${minutes} minutes`)
     }

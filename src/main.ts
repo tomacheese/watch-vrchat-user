@@ -688,15 +688,18 @@ class WatchVRChatUser {
       return
     }
 
-    // 条件 2: 最後のイベント受信時刻が 6 時間以上古いこと
-    const lastEventTime = this.monitor.getLastEventTime()
-    if (!lastEventTime) {
-      // まだイベントを受信していない場合はスキップ
+    // 条件 2: 最後のイベント受信時刻（またはフォールバックとして接続確立時刻）が 6 時間以上古いこと
+    // lastEventTime が null の場合は connectedAt を基準とする。
+    // これにより、再接続後にイベントが一切来ない（サーバー側ゾンビ状態）でも
+    // サイレントデス判定が正しく機能する。
+    const referenceTime =
+      this.monitor.getLastEventTime() ?? this.monitor.getConnectedAt()
+    if (!referenceTime) {
       return
     }
 
     const now = new Date()
-    const timeSinceLastEvent = now.getTime() - lastEventTime.getTime()
+    const timeSinceLastEvent = now.getTime() - referenceTime.getTime()
 
     if (timeSinceLastEvent < this.SIX_HOURS) {
       return

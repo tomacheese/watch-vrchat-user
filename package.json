@@ -48,7 +48,7 @@
     "prettier": "3.8.3",
     "run-z": "2.1.0",
     "ts-jest": "29.4.10",
-    "tsx": "4.22.2",
+    "tsx": "4.22.3",
     "typed-emitter": "2.1.0",
     "typescript": "6.0.3"
   },

@@ -129,6 +129,9 @@ function isFriendOfflineEvent(data: unknown): data is FriendOfflineEvent {
   return typeof obj.userId === 'string'
 }
 
+/** ワールド間移動中の Location 値 */
+const TRAVELING_LOCATION = 'traveling'
+
 /**
  * メインアプリケーションクラス
  */
@@ -303,6 +306,14 @@ class WatchVRChatUser {
         this.locationStore.getLocation(userId)?.location ?? null
       const currentLocation = userInfo.location
 
+      // traveling 中は通知を送らず、ストアも更新しない（前回の location を維持）
+      if (currentLocation === TRAVELING_LOCATION) {
+        console.log(
+          `[MAIN] Initial status: ${userInfo.displayName} (${userId}) - traveling (skipped)`
+        )
+        continue
+      }
+
       // 初期状態を保存
       this.locationStore.setInitialLocation(
         userId,
@@ -470,6 +481,14 @@ class WatchVRChatUser {
     console.log(
       `[MAIN] Friend location event: ${displayName} (${userId}) -> ${location}`
     )
+
+    // traveling 中はストアの更新・通知ともにスキップ
+    if (location === TRAVELING_LOCATION) {
+      console.log(
+        `[MAIN] User ${displayName} (${userId}) is traveling, skipping notification`
+      )
+      return
+    }
 
     // Location を更新
     const result = this.locationStore.updateLocation(
@@ -641,6 +660,14 @@ class WatchVRChatUser {
         const storeLocation =
           this.locationStore.getLocation(userId)?.location ?? null
         const apiLocation = userInfo.location
+
+        // traveling 中は乖離チェックをスキップ
+        if (apiLocation === TRAVELING_LOCATION) {
+          console.log(
+            `[MAIN] User ${userInfo.displayName} (${userId}) is traveling, skipping mismatch check`
+          )
+          continue
+        }
 
         // Location の乖離を検出
         if (apiLocation !== storeLocation) {

@@ -14,8 +14,8 @@ importers:
   .:
     dependencies:
       '@book000/node-utils':
-        specifier: 1.24.233
-        version: 1.24.233
+        specifier: 1.24.234
+        version: 1.24.234
       keyv:
         specifier: 5.6.0
         version: 5.6.0
@@ -250,8 +250,8 @@ packages:
     peerDependencies:
       eslint: 10.5.0
 
-  '@book000/node-utils@1.24.233':
-    resolution: {integrity: sha512-h75tc1HlF7UXEy1NhOzaLxE4s/jTxbgKOQoGrkGgeFixECyRMM00dFNdwpGVpvlB4zC/g/hGI0jQ6kA3365K4w==}
+  '@book000/node-utils@1.24.234':
+    resolution: {integrity: sha512-yzPjXX86mOQyQF7cucjNp9ROXR1CB5b3iZgpcutKP2F2YLcOMbZSm6EOj3BkQaAEwUDexuzt0FjfAEU0P7WKjg==}
 
   '@colors/colors@1.6.0':
     resolution: {integrity: sha512-Ir+AOibqzrIsL6ajt3Rz3LskB7OiMVHqltZmspbW/TJuTVuyOMirVqAkjfY6JISiLHgyNqicAC8AyHHGzNd/dA==}
@@ -3077,7 +3077,7 @@ snapshots:
       - supports-color
       - typescript
 
-  '@book000/node-utils@1.24.233':
+  '@book000/node-utils@1.24.234':
     dependencies:
       cycle: 1.0.3
       jsonc-parser: 3.3.1

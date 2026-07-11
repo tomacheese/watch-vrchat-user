@@ -38,11 +38,6 @@
 - **TypeScript**: `skipLibCheck` は使用禁止
 - **ドキュメント**: 関数・インターフェースに日本語の JSDoc を記載
 
-## 相談ルール
-- **Claude Code**: 実装レビュー、局所設計、整合性確認に使用
-- **Gemini CLI**: 外部仕様、最新情報確認に使用
-- **指摘対応**: 指摘は黙殺せず、必ず対応または議論を行う
-
 ## 開発コマンド
 ```bash
 # 依存関係インストール
@@ -65,25 +60,41 @@ pnpm test
 ```
 
 ## アーキテクチャと主要ファイル
-- `src/main.ts`: エントリーポイント
-- `src/vrchat-client.ts`: VRChat API クライアント (SDK ラッパー)
-- `src/discord-notifier.ts`: Discord 通知処理
-- `src/location-store.ts`: ユーザー位置情報の管理
-- `src/config.ts`: 設定読み込み
+- `src/main.ts`: エントリーポイント。各モジュールを配線し、`friend-location` / `friend-online` / `friend-offline` イベントを処理する
+- `src/websocket-monitor.ts`: VRChat パイプライン WebSocket への接続・再接続とイベント受信を管理する中核モジュール
+- `src/vrchat-client.ts`: VRChat API クライアント (SDK ラッパー)。認証・Cookie 永続化・2FA を担う
+- `src/discord-notifier.ts`: Discord 通知処理 (`location-change` / `online` / `offline`)
+- `src/location-store.ts`: ユーザー位置情報の管理・永続化 (前回値との比較で重複通知を抑制)
+- `src/health-server.ts`: localhost のみでアクセス可能なヘルスチェック HTTP サーバー (WebSocket 接続状態・最終イベント受信時刻を返す)
+- `src/config.ts`: 環境変数からの設定読み込みとバリデーション
 - `data/`: 永続化データ保存先 (Cookie 等)
 
 ## 実装パターン
 - **VRChat API**: `vrchat` パッケージを使用 (パッチ適用済み)
 - **永続化**: `keyv-file` を使用してローカルファイルに保存
 
+## セキュリティ / 機密情報
+- `.env` (認証情報) や `data/` (Cookie・履歴) は機密情報を含むためコミットしない
+- 認証トークンなどの機密情報をログに出力しない
+- パッケージマネージャーは `pnpm` のみ (npm/yarn は `preinstall` の `only-allow` で禁止)
+
+## VRChat API / WebSocket メモ
+- VRChat Web API は `vrchat` SDK 経由で利用する。`apiKey` 等のクエリパラメータは SDK が内部付与するため、アプリ側では扱わない
+- 認証はユーザー名 / パスワード + 2FA (TOTP)。取得した Cookie は `data/` に `keyv-file` で永続化し、再ログイン回数を減らす
+- リアルタイム通知は VRChat パイプラインサーバー (`wss://pipeline.vrchat.cloud/`) の WebSocket で配信される
+- 主に利用するイベント: `friend-location` (Location 変更・監視の中心)、`friend-online`、`friend-offline`、`notification`
+- Location 変更検知は `friend-location` を基準に `location-store.ts` で前回値と比較し、同一 Location の重複通知を抑制する
+- 仕様変更の可能性があるため、公式 (https://creators.vrchat.com/) / 非公式コミュニティ (https://vrchatapi.github.io/) のドキュメントを随時確認する
+
 ## テスト
-- **フレームワーク**: Jest
-- **方針**: ロジック部分は可能な限りテストを作成する
-- **コマンド**: `pnpm test`
+- **フレームワーク**: Jest (`ts-jest`)。テスト対象は `**/*.test.ts`
+- **現状**: テストファイルは未整備 (`pnpm test` は `--passWithNoTests` で通る)。ロジック部分は可能な限りテストを追加する
+- **コマンド**: `pnpm test` (カバレッジ計測込み)
 
 ## ドキュメント更新ルール
-- **タイミング**: 機能追加・変更時、コンテキスト変更時
-- **対象**: `README.md`, `GEMINI.md` 等
+- **タイミング**: 機能追加・変更時、アーキテクチャや主要ファイル構成の変更時
+- **対象**: `README.md`、`CLAUDE.md` (本ファイル)、`.github/copilot-instructions.md`
+- **CLAUDE.md 自体の更新**: `src/` の主要ファイル追加・削除、開発コマンドの変更、依存関係の大幅な更新時は本ファイルの該当セクションも更新する
 
 ## 作業チェックリスト
 

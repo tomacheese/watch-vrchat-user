@@ -36,7 +36,7 @@
   "devDependencies": {
     "@book000/eslint-config": "1.15.4",
     "@types/jest": "30.0.0",
-    "@types/node": "25.9.4",
+    "@types/node": "25.9.5",
     "eslint": "10.6.0",
     "eslint-config-standard": "17.1.0",
     "eslint-plugin-import": "2.32.0",

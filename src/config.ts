@@ -73,7 +73,8 @@ function validateEnvironmentVariables(): ValidationResult {
   ]
 
   for (const variable of requiredVariables) {
-    if (!process.env[variable]) {
+    const value = process.env[variable]
+    if (!value) {
       errors.push(`Missing required environment variable: ${variable}`)
     }
   }

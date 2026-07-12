@@ -20,7 +20,7 @@ interface RawWebSocket {
    */
   readyState: number
   /** ping フレームを送信する */
-  ping(data?: Buffer, cb?: (err: Error) => void): void
+  ping(data?: Buffer, callback?: (error: Error) => void): void
   /** イベントリスナーを登録する */
   on(event: 'pong', listener: () => void): this
   /** 特定のリスナーを削除する */
@@ -300,12 +300,14 @@ export class WebSocketMonitor {
 
         // タイムアウトを設定（close イベントが発火しない場合のフォールバック）
         this.closeTimeout = setTimeout(() => {
-          if (!this.closeEventReceived) {
-            console.warn(
-              `[MONITOR] WARNING: Close event timeout after ${this.CLOSE_TIMEOUT}ms, forcing handleDisconnect()`
-            )
-            this.handleDisconnect()
+          if (this.closeEventReceived) {
+            return
           }
+
+          console.warn(
+            `[MONITOR] WARNING: Close event timeout after ${this.CLOSE_TIMEOUT}ms, forcing handleDisconnect()`
+          )
+          this.handleDisconnect()
         }, this.CLOSE_TIMEOUT)
       } catch (error) {
         console.error(
@@ -457,9 +459,13 @@ export class WebSocketMonitor {
     }
 
     // 再接続をスケジュール
-    this.scheduleReconnect(this.calculateBackoff()).catch((error: unknown) => {
-      console.error('[MONITOR] Failed to schedule reconnect:', error)
-    })
+    ;(async () => {
+      try {
+        await this.scheduleReconnect(this.calculateBackoff())
+      } catch (error) {
+        console.error('[MONITOR] Failed to schedule reconnect:', error)
+      }
+    })()
   }
 
   /**
@@ -484,9 +490,7 @@ export class WebSocketMonitor {
 
     try {
       // stopped チェックをループ先頭で行うことで TypeScript の型絞り込みエラーを回避する
-      while (true) {
-        if (this.state === 'stopped') break
-
+      while (this.state !== 'stopped') {
         this.state = 'reconnecting'
         this.reconnectAttempts++
         console.log(
@@ -638,10 +642,12 @@ export class WebSocketMonitor {
     // pong ハンドラをフィールドに保持し、removeListener で正確に解除できるようにする
     this.pongHandler = () => {
       // pong 受信 → タイムアウトをキャンセル（接続は生きている）
-      if (this.pingTimeoutTimer) {
-        clearTimeout(this.pingTimeoutTimer)
-        this.pingTimeoutTimer = null
+      if (!this.pingTimeoutTimer) {
+        return
       }
+
+      clearTimeout(this.pingTimeoutTimer)
+      this.pingTimeoutTimer = null
     }
     rawWs.on('pong', this.pongHandler)
 

@@ -5,7 +5,7 @@ import type { Config } from './config'
 export type NotificationType = 'location-change' | 'online' | 'offline'
 
 /** Location 変更通知のパラメータ */
-export interface LocationChangeParams {
+export interface LocationChangeParameters {
   /** ユーザーの表示名 */
   displayName: string
   /** ユーザー ID */
@@ -21,7 +21,7 @@ export interface LocationChangeParams {
 }
 
 /** オンライン通知のパラメータ */
-export interface OnlineParams {
+export interface OnlineParameters {
   /** ユーザーの表示名 */
   displayName: string
   /** ユーザー ID */
@@ -29,7 +29,7 @@ export interface OnlineParams {
 }
 
 /** オフライン通知のパラメータ */
-export interface OfflineParams {
+export interface OfflineParameters {
   /** ユーザーの表示名 */
   displayName: string
   /** ユーザー ID */
@@ -66,26 +66,28 @@ export class DiscordNotifier {
   /**
    * Location 変更通知を送信する
    *
-   * @param params 通知パラメータ
+   * @param parameters 通知パラメータ
    */
-  async notifyLocationChange(params: LocationChangeParams): Promise<void> {
+  async notifyLocationChange(
+    parameters: LocationChangeParameters
+  ): Promise<void> {
     const embed: DiscordEmbed = {
-      title: `\u{1F4CD} ${params.displayName} ロケーション変更`,
+      title: `\u{1F4CD} ${parameters.displayName} ロケーション変更`,
       color: COLORS.locationChange,
       fields: [
         {
           name: 'ユーザー',
-          value: params.displayName,
+          value: parameters.displayName,
           inline: true,
         },
         {
           name: '前の場所',
-          value: params.previousLocation ?? 'N/A',
+          value: parameters.previousLocation ?? 'N/A',
           inline: true,
         },
         {
           name: '現在の場所',
-          value: params.currentLocation,
+          value: parameters.currentLocation,
           inline: true,
         },
       ],
@@ -93,18 +95,18 @@ export class DiscordNotifier {
     }
 
     // ワールド名がある場合は追加
-    if (params.worldName) {
+    if (parameters.worldName) {
       embed.fields?.push({
         name: 'ワールド',
-        value: params.worldName,
+        value: parameters.worldName,
         inline: false,
       })
     }
 
     // サムネイルがある場合は追加
-    if (params.thumbnailUrl) {
+    if (parameters.thumbnailUrl) {
       embed.thumbnail = {
-        url: params.thumbnailUrl,
+        url: parameters.thumbnailUrl,
       }
     }
 
@@ -114,16 +116,16 @@ export class DiscordNotifier {
   /**
    * オンライン通知を送信する
    *
-   * @param params 通知パラメータ
+   * @param parameters 通知パラメータ
    */
-  async notifyOnline(params: OnlineParams): Promise<void> {
+  async notifyOnline(parameters: OnlineParameters): Promise<void> {
     const embed: DiscordEmbed = {
-      title: `\u{1F7E2} ${params.displayName} オンライン`,
+      title: `\u{1F7E2} ${parameters.displayName} オンライン`,
       color: COLORS.online,
       fields: [
         {
           name: 'ユーザー',
-          value: params.displayName,
+          value: parameters.displayName,
           inline: true,
         },
       ],
@@ -136,16 +138,16 @@ export class DiscordNotifier {
   /**
    * オフライン通知を送信する
    *
-   * @param params 通知パラメータ
+   * @param parameters 通知パラメータ
    */
-  async notifyOffline(params: OfflineParams): Promise<void> {
+  async notifyOffline(parameters: OfflineParameters): Promise<void> {
     const embed: DiscordEmbed = {
-      title: `\u{26AB} ${params.displayName} オフライン`,
+      title: `\u{26AB} ${parameters.displayName} オフライン`,
       color: COLORS.offline,
       fields: [
         {
           name: 'ユーザー',
-          value: params.displayName,
+          value: parameters.displayName,
           inline: true,
         },
       ],

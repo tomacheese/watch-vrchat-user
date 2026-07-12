@@ -60,27 +60,23 @@ function isFriendLocationEvent(data: unknown): data is FriendLocationEvent {
     return false
   }
 
-  const obj = data as Record<string, unknown>
+  const object = data as Record<string, unknown>
 
-  if (typeof obj.userId !== 'string') {
+  if (typeof object.userId !== 'string') {
     return false
   }
 
-  if (typeof obj.location !== 'string') {
+  if (typeof object.location !== 'string') {
     return false
   }
 
-  if (typeof obj.user !== 'object' || obj.user === null) {
+  if (typeof object.user !== 'object' || object.user === null) {
     return false
   }
 
-  const user = obj.user as Record<string, unknown>
+  const user = object.user as Record<string, unknown>
 
-  if (typeof user.id !== 'string' || typeof user.displayName !== 'string') {
-    return false
-  }
-
-  return true
+  return typeof user.id === 'string' && typeof user.displayName === 'string'
 }
 
 /**
@@ -94,23 +90,19 @@ function isFriendOnlineEvent(data: unknown): data is FriendOnlineEvent {
     return false
   }
 
-  const obj = data as Record<string, unknown>
+  const object = data as Record<string, unknown>
 
-  if (typeof obj.userId !== 'string') {
+  if (typeof object.userId !== 'string') {
     return false
   }
 
-  if (typeof obj.user !== 'object' || obj.user === null) {
+  if (typeof object.user !== 'object' || object.user === null) {
     return false
   }
 
-  const user = obj.user as Record<string, unknown>
+  const user = object.user as Record<string, unknown>
 
-  if (typeof user.id !== 'string' || typeof user.displayName !== 'string') {
-    return false
-  }
-
-  return true
+  return typeof user.id === 'string' && typeof user.displayName === 'string'
 }
 
 /**
@@ -124,9 +116,9 @@ function isFriendOfflineEvent(data: unknown): data is FriendOfflineEvent {
     return false
   }
 
-  const obj = data as Record<string, unknown>
+  const object = data as Record<string, unknown>
 
-  return typeof obj.userId === 'string'
+  return typeof object.userId === 'string'
 }
 
 /** ワールド間移動中の Location 値 */
@@ -196,9 +188,13 @@ class WatchVRChatUser {
     // WebSocket 接続監視を開始
     await this.monitor.start(
       (vrchat: VRChat) => {
-        this.handleConnected(vrchat).catch((error: unknown) => {
-          console.error('[MAIN] Error in handleConnected:', error)
-        })
+        ;(async () => {
+          try {
+            await this.handleConnected(vrchat)
+          } catch (error) {
+            console.error('[MAIN] Error in handleConnected:', error)
+          }
+        })()
       },
       () => {
         this.handleDisconnected()
@@ -419,9 +415,13 @@ class WatchVRChatUser {
         )
         return
       }
-      this.handleFriendLocation(data).catch((error: unknown) => {
-        console.error('[MAIN] Error handling friend-location event:', error)
-      })
+      ;(async () => {
+        try {
+          await this.handleFriendLocation(data)
+        } catch (error) {
+          console.error('[MAIN] Error handling friend-location event:', error)
+        }
+      })()
     })
 
     // friend-online イベント
@@ -436,9 +436,13 @@ class WatchVRChatUser {
         )
         return
       }
-      this.handleFriendOnline(data).catch((error: unknown) => {
-        console.error('[MAIN] Error handling friend-online event:', error)
-      })
+      ;(async () => {
+        try {
+          await this.handleFriendOnline(data)
+        } catch (error) {
+          console.error('[MAIN] Error handling friend-online event:', error)
+        }
+      })()
     })
 
     // friend-offline イベント
@@ -453,9 +457,13 @@ class WatchVRChatUser {
         )
         return
       }
-      this.handleFriendOffline(data).catch((error: unknown) => {
-        console.error('[MAIN] Error handling friend-offline event:', error)
-      })
+      ;(async () => {
+        try {
+          await this.handleFriendOffline(data)
+        } catch (error) {
+          console.error('[MAIN] Error handling friend-offline event:', error)
+        }
+      })()
     })
 
     console.log('[MAIN] WebSocket event handlers registered.')
@@ -470,13 +478,14 @@ class WatchVRChatUser {
     event: FriendLocationEvent
   ): Promise<void> {
     const userId = event.userId
-    const displayName = event.user.displayName
-    const location = event.location
 
     // ターゲットユーザーでない場合はスキップ
     if (!this.config.targetUserIds.includes(userId)) {
       return
     }
+
+    const displayName = event.user.displayName
+    const location = event.location
 
     console.log(
       `[MAIN] Friend location event: ${displayName} (${userId}) -> ${location}`
@@ -525,12 +534,13 @@ class WatchVRChatUser {
    */
   private async handleFriendOnline(event: FriendOnlineEvent): Promise<void> {
     const userId = event.userId
-    const displayName = event.user.displayName
 
     // ターゲットユーザーでない場合はスキップ
     if (!this.config.targetUserIds.includes(userId)) {
       return
     }
+
+    const displayName = event.user.displayName
 
     console.log(`[MAIN] Friend online event: ${displayName} (${userId})`)
 
@@ -605,9 +615,13 @@ class WatchVRChatUser {
     const POLLING_INTERVAL = 60 * 60 * 1000 // 1時間
 
     this.apiPollerTimer = setInterval(() => {
-      this.pollUsersStatus().catch((error: unknown) => {
-        console.error('[MAIN] Error in API polling:', error)
-      })
+      ;(async () => {
+        try {
+          await this.pollUsersStatus()
+        } catch (error) {
+          console.error('[MAIN] Error in API polling:', error)
+        }
+      })()
     }, POLLING_INTERVAL)
 
     console.log('[MAIN] API polling started (interval: 1 hour)')
@@ -762,8 +776,12 @@ async function main(): Promise<void> {
 }
 
 // メイン関数を実行
-main().catch((error: unknown) => {
-  console.error('[MAIN] Unhandled error:', error)
-  // eslint-disable-next-line unicorn/no-process-exit
-  process.exit(1)
-})
+;(async () => {
+  try {
+    await main()
+  } catch (error) {
+    console.error('[MAIN] Unhandled error:', error)
+    // eslint-disable-next-line unicorn/no-process-exit
+    process.exit(1)
+  }
+})()

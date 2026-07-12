@@ -103,12 +103,8 @@ export class LocationStore {
       return false
     }
 
-    const obj = data as Record<string, unknown>
-    if (typeof obj.users !== 'object' || obj.users === null) {
-      return false
-    }
-
-    return true
+    const object = data as Record<string, unknown>
+    return typeof object.users === 'object' && object.users !== null
   }
 
   /**

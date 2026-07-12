@@ -13,7 +13,7 @@ export class HealthServer {
 
   /** ヘルスチェックサーバーのポート */
   private readonly PORT = process.env.HEALTH_PORT
-    ? Number.parseInt(process.env.HEALTH_PORT, 10)
+    ? Number(process.env.HEALTH_PORT)
     : 3000
 
   /** ヘルスチェックサーバーのホスト */
@@ -65,12 +65,14 @@ export class HealthServer {
    * ヘルスチェックサーバーを停止する
    */
   stop(): void {
-    if (this.server) {
-      this.server.close(() => {
-        console.log('[HEALTH] Health check server stopped')
-      })
-      this.server = null
+    if (!this.server) {
+      return
     }
+
+    this.server.close(() => {
+      console.log('[HEALTH] Health check server stopped')
+    })
+    this.server = null
   }
 
   /**

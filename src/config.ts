@@ -38,7 +38,7 @@ export interface Config {
  * @returns 環境変数の値
  * @throws 環境変数が設定されていない場合
  */
-function getRequiredEnv(name: string): string {
+function getRequiredEnvironment(name: string): string {
   const value = process.env[name]
   if (!value) {
     throw new Error(`Missing required environment variable: ${name}`)
@@ -73,7 +73,8 @@ function validateEnvironmentVariables(): ValidationResult {
   ]
 
   for (const variable of requiredVariables) {
-    if (!process.env[variable]) {
+    const value = process.env[variable]
+    if (!value) {
       errors.push(`Missing required environment variable: ${variable}`)
     }
   }
@@ -118,19 +119,19 @@ export function loadConfig(): Config {
     throw new Error('Invalid configuration')
   }
 
-  const targetUserIds = getRequiredEnv('TARGET_USER_IDS')
+  const targetUserIds = getRequiredEnvironment('TARGET_USER_IDS')
     .split(',')
     .map((id) => id.trim())
     .filter((id) => id !== '')
 
   return {
     vrchat: {
-      username: getRequiredEnv('VRCHAT_USERNAME'),
-      password: getRequiredEnv('VRCHAT_PASSWORD'),
+      username: getRequiredEnvironment('VRCHAT_USERNAME'),
+      password: getRequiredEnvironment('VRCHAT_PASSWORD'),
       totpSecret: process.env.VRCHAT_TOTP_SECRET,
     },
     discord: {
-      webhookUrl: getRequiredEnv('DISCORD_WEBHOOK_URL'),
+      webhookUrl: getRequiredEnvironment('DISCORD_WEBHOOK_URL'),
     },
     targetUserIds,
   }

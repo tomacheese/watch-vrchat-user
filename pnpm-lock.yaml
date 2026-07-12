@@ -5,9 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  vrchat@2.22.7:
-    hash: a452b18fc8779b4bad5d36c15e559e9ddf4725295dd7638a9085c2bc7e529856
-    path: patches/vrchat@2.22.7.patch
+  vrchat@2.22.7: a452b18fc8779b4bad5d36c15e559e9ddf4725295dd7638a9085c2bc7e529856
 
 importers:
 

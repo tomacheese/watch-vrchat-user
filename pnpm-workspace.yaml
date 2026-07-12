@@ -4,4 +4,4 @@ allowBuilds:
 minimumReleaseAgeExclude:
   - '@book000/*'
 patchedDependencies:
-  vrchat@2.20.7: patches/vrchat@2.20.7.patch
+  vrchat@2.22.7: patches/vrchat@2.22.7.patch

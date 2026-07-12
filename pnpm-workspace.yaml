@@ -3,3 +3,5 @@ allowBuilds:
   unrs-resolver: true
 minimumReleaseAgeExclude:
   - '@book000/*'
+patchedDependencies:
+  vrchat@2.22.7: patches/vrchat@2.22.7.patch

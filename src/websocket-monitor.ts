@@ -300,12 +300,14 @@ export class WebSocketMonitor {
 
         // タイムアウトを設定（close イベントが発火しない場合のフォールバック）
         this.closeTimeout = setTimeout(() => {
-          if (!this.closeEventReceived) {
-            console.warn(
-              `[MONITOR] WARNING: Close event timeout after ${this.CLOSE_TIMEOUT}ms, forcing handleDisconnect()`
-            )
-            this.handleDisconnect()
+          if (this.closeEventReceived) {
+            return
           }
+
+          console.warn(
+            `[MONITOR] WARNING: Close event timeout after ${this.CLOSE_TIMEOUT}ms, forcing handleDisconnect()`
+          )
+          this.handleDisconnect()
         }, this.CLOSE_TIMEOUT)
       } catch (error) {
         console.error(
@@ -638,10 +640,12 @@ export class WebSocketMonitor {
     // pong ハンドラをフィールドに保持し、removeListener で正確に解除できるようにする
     this.pongHandler = () => {
       // pong 受信 → タイムアウトをキャンセル（接続は生きている）
-      if (this.pingTimeoutTimer) {
-        clearTimeout(this.pingTimeoutTimer)
-        this.pingTimeoutTimer = null
+      if (!this.pingTimeoutTimer) {
+        return
       }
+
+      clearTimeout(this.pingTimeoutTimer)
+      this.pingTimeoutTimer = null
     }
     rawWs.on('pong', this.pongHandler)
 

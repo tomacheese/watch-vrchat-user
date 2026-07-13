@@ -76,11 +76,7 @@ function isFriendLocationEvent(data: unknown): data is FriendLocationEvent {
 
   const user = obj.user as Record<string, unknown>
 
-  if (typeof user.id !== 'string' || typeof user.displayName !== 'string') {
-    return false
-  }
-
-  return true
+  return typeof user.id === 'string' && typeof user.displayName === 'string'
 }
 
 /**
@@ -106,11 +102,7 @@ function isFriendOnlineEvent(data: unknown): data is FriendOnlineEvent {
 
   const user = obj.user as Record<string, unknown>
 
-  if (typeof user.id !== 'string' || typeof user.displayName !== 'string') {
-    return false
-  }
-
-  return true
+  return typeof user.id === 'string' && typeof user.displayName === 'string'
 }
 
 /**
@@ -470,13 +462,14 @@ class WatchVRChatUser {
     event: FriendLocationEvent
   ): Promise<void> {
     const userId = event.userId
-    const displayName = event.user.displayName
-    const location = event.location
 
     // ターゲットユーザーでない場合はスキップ
     if (!this.config.targetUserIds.includes(userId)) {
       return
     }
+
+    const displayName = event.user.displayName
+    const location = event.location
 
     console.log(
       `[MAIN] Friend location event: ${displayName} (${userId}) -> ${location}`
@@ -525,12 +518,13 @@ class WatchVRChatUser {
    */
   private async handleFriendOnline(event: FriendOnlineEvent): Promise<void> {
     const userId = event.userId
-    const displayName = event.user.displayName
 
     // ターゲットユーザーでない場合はスキップ
     if (!this.config.targetUserIds.includes(userId)) {
       return
     }
+
+    const displayName = event.user.displayName
 
     console.log(`[MAIN] Friend online event: ${displayName} (${userId})`)
 

@@ -65,12 +65,14 @@ export class HealthServer {
    * ヘルスチェックサーバーを停止する
    */
   stop(): void {
-    if (this.server) {
-      this.server.close(() => {
-        console.log('[HEALTH] Health check server stopped')
-      })
-      this.server = null
+    if (!this.server) {
+      return
     }
+
+    this.server.close(() => {
+      console.log('[HEALTH] Health check server stopped')
+    })
+    this.server = null
   }
 
   /**

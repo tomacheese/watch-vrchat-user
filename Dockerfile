@@ -23,7 +23,8 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm fetch
 COPY tsconfig.json ./
 COPY src src
 
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --offline
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --offline && \
+  rm -rf patches
 
 # 環境変数でデータディレクトリを /data に設定
 ENV COOKIE_FILE_PATH=/data/vrchat-cookies.json

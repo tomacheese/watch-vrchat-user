@@ -1,29 +1,4 @@
-# Builder stage
-FROM node:24-alpine AS builder
-
-ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME/bin:$PATH"
-
-# hadolint ignore=DL3018
-RUN apk update && \
-  apk upgrade && \
-  npm install -g corepack@latest && \
-  corepack enable
-
-WORKDIR /app
-
-COPY pnpm-lock.yaml package.json pnpm-workspace.yaml ./
-COPY patches patches
-
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm fetch
-
-COPY tsconfig.json ./
-COPY src src
-
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --offline
-
-# Runner stage
-FROM node:24-alpine AS runner
+FROM node:24-alpine
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME/bin:$PATH"
@@ -40,11 +15,15 @@ RUN apk update && \
 
 WORKDIR /app
 
-# Builder から必要なファイルのみコピー
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/src ./src
-COPY --from=builder /app/tsconfig.json ./tsconfig.json
+COPY pnpm-lock.yaml package.json pnpm-workspace.yaml ./
+COPY patches patches
+
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm fetch
+
+COPY tsconfig.json ./
+COPY src src
+
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --offline
 
 # 環境変数でデータディレクトリを /data に設定
 ENV COOKIE_FILE_PATH=/data/vrchat-cookies.json

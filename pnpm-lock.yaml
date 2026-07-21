@@ -25,8 +25,8 @@ importers:
         version: 2.22.7(patch_hash=a452b18fc8779b4bad5d36c15e559e9ddf4725295dd7638a9085c2bc7e529856)
     devDependencies:
       '@book000/eslint-config':
-        specifier: 1.16.11
-        version: 1.16.11(eslint@10.7.0)(typescript@6.0.3)
+        specifier: 1.16.13
+        version: 1.16.13(eslint@10.7.0)(typescript@6.0.3)
       '@types/jest':
         specifier: 30.0.0
         version: 30.0.0
@@ -243,8 +243,8 @@ packages:
   '@bcoe/v8-coverage@0.2.3':
     resolution: {integrity: sha512-0hYQ8SB4Db5zvZB4axdMHGwEaQjkZzFjQiN9LVYvIFB2nSUHW9tYpxWriPrWDASIxiaXax83REcLxuSdnGPZtw==}
 
-  '@book000/eslint-config@1.16.11':
-    resolution: {integrity: sha512-3/66ihciufAvlMzGhNgXEkLWIUjwkqKQwI/oIGUMW/yBTBGuazhhunGhWxMOnxBly7vUKyfFRpUZ/LO5ARfbAA==}
+  '@book000/eslint-config@1.16.13':
+    resolution: {integrity: sha512-8BG8/zRsfHOl6hrzVL4zoHz8N+r7skVpyostE9DND13gw2/ow5IwM20nOL4SXuIbEYWq1sAlqHJ7HT0H9jQLbA==}
     peerDependencies:
       eslint: 10.7.0
 
@@ -3133,7 +3133,7 @@ snapshots:
 
   '@bcoe/v8-coverage@0.2.3': {}
 
-  '@book000/eslint-config@1.16.11(eslint@10.7.0)(typescript@6.0.3)':
+  '@book000/eslint-config@1.16.13(eslint@10.7.0)(typescript@6.0.3)':
     dependencies:
       '@typescript-eslint/parser': 8.64.0(eslint@10.7.0)(typescript@6.0.3)
       eslint: 10.7.0

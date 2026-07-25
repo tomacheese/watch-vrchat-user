@@ -270,9 +270,7 @@ export class WebSocketMonitor {
   requestReconnect(reason: string): void {
     // 既に再接続中の場合はスキップ
     if (this.isReconnecting) {
-      logger.warn(
-        'Reconnect already in progress, skipping forced reconnect'
-      )
+      logger.warn('Reconnect already in progress, skipping forced reconnect')
       return
     }
 
@@ -513,10 +511,7 @@ export class WebSocketMonitor {
           await this.connect()
           return // 接続成功 - ループ終了
         } catch (connectError: unknown) {
-          logger.error(
-            'Error during reconnect attempt',
-            toError(connectError)
-          )
+          logger.error('Error during reconnect attempt', toError(connectError))
           // 認証エラーの場合は長時間クールダウン、それ以外はバックオフ
           const isAuthError = this.isAuthenticationError(connectError)
           if (isAuthError) {
@@ -702,9 +697,7 @@ export class WebSocketMonitor {
 
     // 前回の ping に対する pong がまだ返っていない場合、接続がサイレントデス状態と判断する
     if (this.pingTimeoutTimer) {
-      logger.warn(
-        'Previous ping unanswered. Connection is silently dead.'
-      )
+      logger.warn('Previous ping unanswered. Connection is silently dead.')
       this.requestReconnect('Previous ping unanswered')
       return
     }

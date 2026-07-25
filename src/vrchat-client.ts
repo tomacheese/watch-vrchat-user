@@ -59,18 +59,14 @@ async function authenticateWebSocket(
     try {
       parsed = JSON.parse(cookiesData) as CookieData
     } catch {
-      logger.error(
-        'Failed to parse cookies data, WebSocket not authenticated'
-      )
+      logger.error('Failed to parse cookies data, WebSocket not authenticated')
       return
     }
   } else if (typeof cookiesData === 'object') {
     // すでに object として保存されている場合
     parsed = cookiesData as CookieData
   } else {
-    logger.error(
-      'Unexpected cookies data type, WebSocket not authenticated'
-    )
+    logger.error('Unexpected cookies data type, WebSocket not authenticated')
     return
   }
 
@@ -120,9 +116,7 @@ export async function createVRChatClient(config: Config): Promise<VRChat> {
 
   // セッションが有効な場合（displayName がある = CurrentUser）
   if (currentUserResult.data && 'displayName' in currentUserResult.data) {
-    logger.info(
-      `Session restored: ${currentUserResult.data.displayName}`
-    )
+    logger.info(`Session restored: ${currentUserResult.data.displayName}`)
 
     // WebSocket (pipeline) を認証するために keyv から auth cookie を取得
     await authenticateWebSocket(vrchat, keyvAdapter)
@@ -226,9 +220,7 @@ export async function getUser(
       throw new Error(`Rate limit error (429): ${result.error.message}`)
     }
 
-    logger.error(
-      `Failed to get user ${userId}: ${result.error.message}`
-    )
+    logger.error(`Failed to get user ${userId}: ${result.error.message}`)
     return null
   }
 

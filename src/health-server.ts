@@ -1,5 +1,8 @@
+import { Logger } from '@book000/node-utils'
 import * as http from 'node:http'
 import type { WebSocketMonitor } from './websocket-monitor'
+
+const logger = Logger.configure('HEALTH')
 
 /**
  * ヘルスチェックサーバー
@@ -55,8 +58,8 @@ export class HealthServer {
     )
 
     this.server.listen(this.PORT, this.HOST, () => {
-      console.log(
-        `[HEALTH] Health check server listening on http://${this.HOST}:${this.PORT}/health`
+      logger.info(
+        `Health check server listening on http://${this.HOST}:${this.PORT}/health`
       )
     })
   }
@@ -70,7 +73,7 @@ export class HealthServer {
     }
 
     this.server.close(() => {
-      console.log('[HEALTH] Health check server stopped')
+      logger.info('Health check server stopped')
     })
     this.server = null
   }

@@ -67,6 +67,7 @@ pnpm test
 - `src/location-store.ts`: ユーザー位置情報の管理・永続化 (前回値との比較で重複通知を抑制)
 - `src/health-server.ts`: localhost のみでアクセス可能なヘルスチェック HTTP サーバー (WebSocket 接続状態・最終イベント受信時刻を返す)
 - `src/config.ts`: 環境変数からの設定読み込みとバリデーション
+- `src/logger-utils.ts`: unknown 型の値を Error に変換する `toError` ヘルパーを提供する
 - `data/`: 永続化データ保存先 (Cookie 等)
 
 ## 実装パターン

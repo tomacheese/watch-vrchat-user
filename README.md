@@ -40,6 +40,9 @@ DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/xxx/yyy
 
 # 監視対象ユーザー ID（カンマ区切り）
 TARGET_USER_IDS=usr_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+# エラー通知設定
+SENTRY_DSN=https://xxx@yyy.example.com/1  # オプション: GlitchTip/Sentry の DSN（未設定の場合、エラー通知は無効化される）
 ```
 
 > **注意**: `VRCHAT_TOTP_SECRET` を設定しない場合、初回起動時に 2FA コードの手動入力が必要です。

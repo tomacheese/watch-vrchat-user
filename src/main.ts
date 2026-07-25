@@ -751,6 +751,8 @@ async function main(): Promise<void> {
     await app.start()
   } catch (error) {
     logger.error('Fatal error', toError(error))
+    // Logger の送信をフラッシュしてからプロセスを終了する
+    Logger.closeAll()
     // eslint-disable-next-line unicorn/no-process-exit
     process.exit(1)
   }
@@ -759,6 +761,8 @@ async function main(): Promise<void> {
 // メイン関数を実行
 main().catch((error: unknown) => {
   logger.error('Unhandled error', toError(error))
+  // Logger の送信をフラッシュしてからプロセスを終了する
+  Logger.closeAll()
   // eslint-disable-next-line unicorn/no-process-exit
   process.exit(1)
 })

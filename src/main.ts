@@ -411,9 +411,10 @@ class WatchVRChatUser {
       this.monitor.updateLastEventTime()
 
       if (!isFriendLocationEvent(data)) {
-        logger.error(
-          `Invalid friend-location event data: ${JSON.stringify(data)}`
-        )
+        // 生ペイロードは Sentry（GlitchTip）へ転送されない debug レベルに留め、
+        // Location に含まれる招待用 nonce 等の機微情報が外部送信されないようにする
+        logger.error('Invalid friend-location event data')
+        logger.debug('Invalid friend-location event data (raw)', { data })
         return
       }
       this.handleFriendLocation(data).catch((error: unknown) => {
@@ -427,9 +428,9 @@ class WatchVRChatUser {
       this.monitor.updateLastEventTime()
 
       if (!isFriendOnlineEvent(data)) {
-        logger.error(
-          `Invalid friend-online event data: ${JSON.stringify(data)}`
-        )
+        // 生ペイロードは Sentry（GlitchTip）へ転送されない debug レベルに留める
+        logger.error('Invalid friend-online event data')
+        logger.debug('Invalid friend-online event data (raw)', { data })
         return
       }
       this.handleFriendOnline(data).catch((error: unknown) => {
@@ -443,9 +444,9 @@ class WatchVRChatUser {
       this.monitor.updateLastEventTime()
 
       if (!isFriendOfflineEvent(data)) {
-        logger.error(
-          `Invalid friend-offline event data: ${JSON.stringify(data)}`
-        )
+        // 生ペイロードは Sentry（GlitchTip）へ転送されない debug レベルに留める
+        logger.error('Invalid friend-offline event data')
+        logger.debug('Invalid friend-offline event data (raw)', { data })
         return
       }
       this.handleFriendOffline(data).catch((error: unknown) => {

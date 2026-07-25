@@ -1,5 +1,8 @@
-import { Discord, type DiscordEmbed } from '@book000/node-utils'
+import { Discord, Logger, type DiscordEmbed } from '@book000/node-utils'
 import type { Config } from './config'
+import { toError } from './logger-utils'
+
+const logger = Logger.configure('DISCORD')
 
 /** 通知の種類 */
 export type NotificationType = 'location-change' | 'online' | 'offline'
@@ -169,9 +172,9 @@ export class DiscordNotifier {
         embeds: [embed],
       })
     } catch (error) {
-      console.error(
-        `[DISCORD] Failed to send notification (attempt ${attempt}/${maxAttempts}):`,
-        error
+      logger.error(
+        `Failed to send notification (attempt ${attempt}/${maxAttempts})`,
+        toError(error)
       )
 
       if (attempt < maxAttempts) {

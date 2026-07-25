@@ -1,5 +1,9 @@
+import { Logger } from '@book000/node-utils'
 import * as fs from 'node:fs'
 import path from 'node:path'
+import { toError } from './logger-utils'
+
+const logger = Logger.configure('LOCATION-STORE')
 
 /** Location データファイルのパス（環境変数で上書き可能） */
 const LOCATION_FILE_PATH =
@@ -74,20 +78,20 @@ export class LocationStore {
 
         // データ構造のバリデーション
         if (!this.isValidLocationStoreData(parsed)) {
-          console.warn(
-            '[LOCATION-STORE] Invalid data structure in file, starting with empty data'
+          logger.warn(
+            'Invalid data structure in file, starting with empty data'
           )
           this.data = { users: {} }
           return
         }
 
         this.data = parsed
-        console.log(
-          `[LOCATION-STORE] Loaded ${Object.keys(this.data.users).length} user(s) from file`
+        logger.info(
+          `Loaded ${Object.keys(this.data.users).length} user(s) from file`
         )
       }
     } catch (error) {
-      console.error('[LOCATION-STORE] Failed to load data:', error)
+      logger.error('Failed to load data', toError(error))
       this.data = { users: {} }
     }
   }
@@ -132,7 +136,7 @@ export class LocationStore {
 
       fs.writeFileSync(LOCATION_FILE_PATH, JSON.stringify(this.data, null, 2))
     } catch (error) {
-      console.error('[LOCATION-STORE] Failed to save data:', error)
+      logger.error('Failed to save data', toError(error))
     }
   }
 

@@ -1,7 +1,11 @@
+import { Logger } from '@book000/node-utils'
 import * as readline from 'node:readline'
 import { KeyvFile } from 'keyv-file'
 import { VRChat } from 'vrchat'
 import type { Config } from './config'
+import { toError } from './logger-utils'
+
+const logger = Logger.configure('VRCHAT')
 
 /** Cookie ファイルのパス（環境変数で上書き可能） */
 const COOKIE_FILE_PATH =
@@ -45,7 +49,7 @@ async function authenticateWebSocket(
 ): Promise<void> {
   const cookiesData = await keyvAdapter.get('keyv:cookies')
   if (!cookiesData) {
-    console.warn('[VRCHAT] No cookies data found, WebSocket not authenticated')
+    logger.warn('No cookies data found, WebSocket not authenticated')
     return
   }
 
@@ -55,35 +59,28 @@ async function authenticateWebSocket(
     try {
       parsed = JSON.parse(cookiesData) as CookieData
     } catch {
-      console.error(
-        '[VRCHAT] Failed to parse cookies data, WebSocket not authenticated'
-      )
+      logger.error('Failed to parse cookies data, WebSocket not authenticated')
       return
     }
   } else if (typeof cookiesData === 'object') {
     // すでに object として保存されている場合
     parsed = cookiesData as CookieData
   } else {
-    console.error(
-      '[VRCHAT] Unexpected cookies data type, WebSocket not authenticated'
-    )
+    logger.error('Unexpected cookies data type, WebSocket not authenticated')
     return
   }
 
   const authCookie = parsed.value.find((c) => c.name === 'auth')
   if (!authCookie) {
-    console.warn('[VRCHAT] Auth cookie not found, WebSocket not authenticated')
+    logger.warn('Auth cookie not found, WebSocket not authenticated')
     return
   }
 
   try {
     await vrchat.pipeline.authenticate(authCookie.value)
-    console.log('[VRCHAT] WebSocket authenticated')
+    logger.info('WebSocket authenticated')
   } catch (error) {
-    console.error(
-      '[VRCHAT] Failed to authenticate WebSocket:',
-      error instanceof Error ? error.message : error
-    )
+    logger.error('Failed to authenticate WebSocket', toError(error))
   }
 }
 
@@ -94,7 +91,7 @@ async function authenticateWebSocket(
  * @returns 初期化された VRChat クライアント
  */
 export async function createVRChatClient(config: Config): Promise<VRChat> {
-  console.log('[VRCHAT] Initializing VRChat client...')
+  logger.info('Initializing VRChat client...')
 
   // Cookie 永続化用の Keyv アダプタを作成
   const keyvAdapter = new KeyvFile({
@@ -114,14 +111,12 @@ export async function createVRChatClient(config: Config): Promise<VRChat> {
   })
 
   // まず Cookie を使ってセッション復元を試みる
-  console.log('[VRCHAT] Checking existing session...')
+  logger.info('Checking existing session...')
   const currentUserResult = await vrchat.getCurrentUser()
 
   // セッションが有効な場合（displayName がある = CurrentUser）
   if (currentUserResult.data && 'displayName' in currentUserResult.data) {
-    console.log(
-      `[VRCHAT] Session restored: ${currentUserResult.data.displayName}`
-    )
+    logger.info(`Session restored: ${currentUserResult.data.displayName}`)
 
     // WebSocket (pipeline) を認証するために keyv から auth cookie を取得
     await authenticateWebSocket(vrchat, keyvAdapter)
@@ -130,7 +125,7 @@ export async function createVRChatClient(config: Config): Promise<VRChat> {
   }
 
   // セッションが無効な場合はログインを試みる
-  console.log('[VRCHAT] No valid session, logging in...')
+  logger.info('No valid session, logging in...')
   const loginResult = await vrchat.login({
     username: config.vrchat.username,
     password: config.vrchat.password,
@@ -152,7 +147,7 @@ export async function createVRChatClient(config: Config): Promise<VRChat> {
       'Login succeeded but user data is incomplete (no displayName)'
     )
   }
-  console.log(`[VRCHAT] Logged in as ${data.displayName}`)
+  logger.info(`Logged in as ${data.displayName}`)
 
   // ログイン後も WebSocket を認証する
   await authenticateWebSocket(vrchat, keyvAdapter)
@@ -174,8 +169,8 @@ export async function isFriend(
   const result = await vrchat.getFriendStatus({ path: { userId } })
 
   if (result.error) {
-    console.error(
-      `[VRCHAT] Failed to get friend status for ${userId}: ${result.error.message}`
+    logger.error(
+      `Failed to get friend status for ${userId}: ${result.error.message}`
     )
     return false
   }
@@ -225,9 +220,7 @@ export async function getUser(
       throw new Error(`Rate limit error (429): ${result.error.message}`)
     }
 
-    console.error(
-      `[VRCHAT] Failed to get user ${userId}: ${result.error.message}`
-    )
+    logger.error(`Failed to get user ${userId}: ${result.error.message}`)
     return null
   }
 
@@ -266,8 +259,8 @@ export async function getFriendIds(vrchat: VRChat): Promise<string[]> {
     })
 
     if (result.error) {
-      console.error(
-        `[VRCHAT] Failed to get friends (offset=${offset}): ${result.error.message}`
+      logger.error(
+        `Failed to get friends (offset=${offset}): ${result.error.message}`
       )
       break
     }

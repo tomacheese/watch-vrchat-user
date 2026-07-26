@@ -1,3 +1,7 @@
+import { Logger } from '@book000/node-utils'
+
+const logger = Logger.configure('CONFIG')
+
 /**
  * VRChat 認証情報の設定
  */
@@ -114,7 +118,7 @@ export function loadConfig(): Config {
 
   if (!validation.valid) {
     for (const error of validation.errors) {
-      console.error(`[CONFIG] ${error}`)
+      logger.error(error)
     }
     throw new Error('Invalid configuration')
   }

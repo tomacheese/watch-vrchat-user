@@ -1,6 +1,10 @@
+import { Logger } from '@book000/node-utils'
 import { createVRChatClient } from './vrchat-client'
 import type { Config } from './config'
+import { toError } from './logger-utils'
 import type { VRChat } from 'vrchat'
+
+const logger = Logger.configure('MONITOR')
 
 /**
  * WebSocket 接続状態
@@ -133,7 +137,7 @@ export class WebSocketMonitor {
     onConnected: (vrchat: VRChat) => void,
     onDisconnected: () => void
   ): Promise<void> {
-    console.log('[MONITOR] Starting WebSocket monitor...')
+    logger.info('Starting WebSocket monitor...')
 
     this.onConnected = onConnected
     this.onDisconnected = onDisconnected
@@ -144,8 +148,8 @@ export class WebSocketMonitor {
       // 初回接続失敗 - 再接続ループを開始する
       const isAuthError = this.isAuthenticationError(error)
       if (isAuthError) {
-        console.error(
-          `[MONITOR] Authentication error on initial connect. Cooling down for ${this.AUTH_FAILURE_COOLDOWN / 1000 / 60} minutes...`
+        logger.error(
+          `Authentication error on initial connect. Cooling down for ${this.AUTH_FAILURE_COOLDOWN / 1000 / 60} minutes...`
         )
         await this.scheduleReconnect(this.AUTH_FAILURE_COOLDOWN)
       } else {
@@ -159,7 +163,7 @@ export class WebSocketMonitor {
    * WebSocket 接続を停止する
    */
   stop(): void {
-    console.log('[MONITOR] Stopping WebSocket monitor...')
+    logger.info('Stopping WebSocket monitor...')
 
     this.state = 'stopped'
 
@@ -266,19 +270,17 @@ export class WebSocketMonitor {
   requestReconnect(reason: string): void {
     // 既に再接続中の場合はスキップ
     if (this.isReconnecting) {
-      console.warn(
-        '[MONITOR] Reconnect already in progress, skipping forced reconnect'
-      )
+      logger.warn('Reconnect already in progress, skipping forced reconnect')
       return
     }
 
     // stopped 状態の場合はスキップ
     if (this.state === 'stopped') {
-      console.warn('[MONITOR] Monitor is stopped, skipping forced reconnect')
+      logger.warn('Monitor is stopped, skipping forced reconnect')
       return
     }
 
-    console.warn(`[MONITOR] Forced reconnect: ${reason}`)
+    logger.warn(`Forced reconnect: ${reason}`)
 
     // ping/pong タイマーを停止
     this.stopPingPong()
@@ -295,7 +297,7 @@ export class WebSocketMonitor {
     // WebSocket を閉じて handleDisconnect() をトリガー
     if (this.vrchat) {
       try {
-        console.log('[MONITOR] Closing WebSocket pipeline for forced reconnect')
+        logger.info('Closing WebSocket pipeline for forced reconnect')
         this.vrchat.pipeline.close()
 
         // タイムアウトを設定（close イベントが発火しない場合のフォールバック）
@@ -304,15 +306,15 @@ export class WebSocketMonitor {
             return
           }
 
-          console.warn(
-            `[MONITOR] WARNING: Close event timeout after ${this.CLOSE_TIMEOUT}ms, forcing handleDisconnect()`
+          logger.warn(
+            `WARNING: Close event timeout after ${this.CLOSE_TIMEOUT}ms, forcing handleDisconnect()`
           )
           this.handleDisconnect()
         }, this.CLOSE_TIMEOUT)
       } catch (error) {
-        console.error(
-          '[MONITOR] Failed to close WebSocket pipeline for forced reconnect:',
-          error
+        logger.error(
+          'Failed to close WebSocket pipeline for forced reconnect',
+          toError(error)
         )
 
         // フォールバック: 直接 handleDisconnect() を呼び出す
@@ -320,8 +322,8 @@ export class WebSocketMonitor {
       }
     } else {
       // vrchat が null の場合（接続失敗後など）は直接 handleDisconnect() を呼び出す
-      console.warn(
-        '[MONITOR] VRChat client is null during forced reconnect, calling handleDisconnect directly'
+      logger.warn(
+        'VRChat client is null during forced reconnect, calling handleDisconnect directly'
       )
       this.handleDisconnect()
     }
@@ -341,7 +343,7 @@ export class WebSocketMonitor {
     this.state = 'connecting'
 
     try {
-      console.log('[MONITOR] Connecting to VRChat WebSocket...')
+      logger.info('Connecting to VRChat WebSocket...')
 
       // 既存の VRChat インスタンスをクリーンアップ
       if (this.vrchat) {
@@ -369,7 +371,7 @@ export class WebSocketMonitor {
 
       // pipeline イベントハンドラを登録
       this.vrchat.pipeline.on('close', () => {
-        console.warn('[MONITOR] WebSocket closed')
+        logger.warn('WebSocket closed')
 
         // close イベント受信フラグを設定
         this.closeEventReceived = true
@@ -384,7 +386,7 @@ export class WebSocketMonitor {
       })
 
       this.vrchat.pipeline.on('error', (error: unknown) => {
-        console.error('[MONITOR] WebSocket error:', error)
+        logger.error('WebSocket error', toError(error))
         this.handleDisconnect()
       })
 
@@ -396,7 +398,7 @@ export class WebSocketMonitor {
       // 接続確立時刻を記録（lastEventTime が null の間のバックアップ基準時刻として使用）
       this.connectedAt = new Date()
 
-      console.log('[MONITOR] Connected to VRChat WebSocket')
+      logger.info('Connected to VRChat WebSocket')
 
       // ping/pong ハートビートを開始
       this.startPingPong()
@@ -406,7 +408,7 @@ export class WebSocketMonitor {
         this.onConnected(this.vrchat)
       }
     } catch (error) {
-      console.error('[MONITOR] Failed to connect to VRChat WebSocket:', error)
+      logger.error('Failed to connect to VRChat WebSocket', toError(error))
       // 再接続スケジュールは呼び出し元（scheduleReconnect のループ または start）に委譲する
       throw error
     }
@@ -439,7 +441,7 @@ export class WebSocketMonitor {
       return
     }
 
-    console.warn('[MONITOR] Handling WebSocket disconnect...')
+    logger.warn('Handling WebSocket disconnect...')
 
     // ping/pong タイマーを停止
     this.stopPingPong()
@@ -460,7 +462,7 @@ export class WebSocketMonitor {
 
     // 再接続をスケジュール
     this.scheduleReconnect(this.calculateBackoff()).catch((error: unknown) => {
-      console.error('[MONITOR] Failed to schedule reconnect:', error)
+      logger.error('Failed to schedule reconnect', toError(error))
     })
   }
 
@@ -477,7 +479,7 @@ export class WebSocketMonitor {
   private async scheduleReconnect(initialDelay: number): Promise<void> {
     // 単一フライト化: 既に再接続中の場合はスキップ
     if (this.isReconnecting) {
-      console.warn('[MONITOR] Reconnect already in progress, skipping')
+      logger.warn('Reconnect already in progress, skipping')
       return
     }
 
@@ -491,8 +493,8 @@ export class WebSocketMonitor {
 
         this.state = 'reconnecting'
         this.reconnectAttempts++
-        console.log(
-          `[MONITOR] Scheduling reconnect attempt #${this.reconnectAttempts} in ${delay / 1000} seconds...`
+        logger.info(
+          `Scheduling reconnect attempt #${this.reconnectAttempts} in ${delay / 1000} seconds...`
         )
 
         // 既存のタイマーをクリア
@@ -509,15 +511,12 @@ export class WebSocketMonitor {
           await this.connect()
           return // 接続成功 - ループ終了
         } catch (connectError: unknown) {
-          console.error(
-            '[MONITOR] Error during reconnect attempt:',
-            connectError
-          )
+          logger.error('Error during reconnect attempt', toError(connectError))
           // 認証エラーの場合は長時間クールダウン、それ以外はバックオフ
           const isAuthError = this.isAuthenticationError(connectError)
           if (isAuthError) {
-            console.error(
-              `[MONITOR] Authentication error detected. Cooling down for ${this.AUTH_FAILURE_COOLDOWN / 1000 / 60} minutes...`
+            logger.error(
+              `Authentication error detected. Cooling down for ${this.AUTH_FAILURE_COOLDOWN / 1000 / 60} minutes...`
             )
             delay = this.AUTH_FAILURE_COOLDOWN
           } else {
@@ -574,7 +573,7 @@ export class WebSocketMonitor {
     // VRChat SDK は WebSocket の close/error イベントを EventEmitter に転送しないため、
     // pipeline.connected を毎分チェックして切断を早期検出する
     if (this.vrchat && !this.vrchat.pipeline.connected) {
-      console.warn('[MONITOR] WebSocket is not connected, triggering reconnect')
+      logger.warn('WebSocket is not connected, triggering reconnect')
       this.handleDisconnect()
       return
     }
@@ -599,8 +598,8 @@ export class WebSocketMonitor {
       // 全フレンドのイベントが 10 分以上来ない = WebSocket が実質的に死んでいる可能性が高い
       // ping/pong のバックアップとして強制再接続する
       const minutes = Math.floor(timeSinceReference / 1000 / 60)
-      console.warn(
-        `[MONITOR] No events received for ${minutes} minutes (reference: ${referenceTime.toISOString()}). Triggering backup reconnect.`
+      logger.warn(
+        `No events received for ${minutes} minutes (reference: ${referenceTime.toISOString()}). Triggering backup reconnect.`
       )
       this.requestReconnect(`No events received for ${minutes} minutes`)
     }
@@ -628,8 +627,8 @@ export class WebSocketMonitor {
     ).websocket
 
     if (!rawWs) {
-      console.warn(
-        '[MONITOR] Raw WebSocket instance not available, skipping ping/pong setup'
+      logger.warn(
+        'Raw WebSocket instance not available, skipping ping/pong setup'
       )
       return
     }
@@ -649,7 +648,7 @@ export class WebSocketMonitor {
     }
     rawWs.on('pong', this.pongHandler)
 
-    console.log('[MONITOR] Starting ping/pong heartbeat (interval: 30s)')
+    logger.info('Starting ping/pong heartbeat (interval: 30s)')
 
     // 接続直後に即座に ping を送り、最初のサイクルの検知遅延（最大 PING_INTERVAL）をなくす
     this.sendPing(rawWs)
@@ -698,17 +697,15 @@ export class WebSocketMonitor {
 
     // 前回の ping に対する pong がまだ返っていない場合、接続がサイレントデス状態と判断する
     if (this.pingTimeoutTimer) {
-      console.warn(
-        '[MONITOR] Previous ping unanswered. Connection is silently dead.'
-      )
+      logger.warn('Previous ping unanswered. Connection is silently dead.')
       this.requestReconnect('Previous ping unanswered')
       return
     }
 
     // raw WebSocket がまだ OPEN 状態でない場合はスキップ（接続直後の CONNECTING 状態等）
     if (rawWs.readyState !== 1) {
-      console.log(
-        `[MONITOR] Skipping ping: WebSocket not open (readyState=${rawWs.readyState})`
+      logger.info(
+        `Skipping ping: WebSocket not open (readyState=${rawWs.readyState})`
       )
       return
     }
@@ -718,13 +715,13 @@ export class WebSocketMonitor {
 
       // pong が返ってこない場合のタイムアウトを設定
       this.pingTimeoutTimer = setTimeout(() => {
-        console.warn(
-          `[MONITOR] Ping timeout: no pong received within ${this.PING_TIMEOUT / 1000}s. Connection is silently dead.`
+        logger.warn(
+          `Ping timeout: no pong received within ${this.PING_TIMEOUT / 1000}s. Connection is silently dead.`
         )
         this.requestReconnect('Ping timeout')
       }, this.PING_TIMEOUT)
     } catch (error) {
-      console.error('[MONITOR] Failed to send ping:', error)
+      logger.error('Failed to send ping', toError(error))
     }
   }
 }

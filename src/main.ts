@@ -1,10 +1,14 @@
+import { Logger } from '@book000/node-utils'
 import { loadConfig, type Config } from './config'
 import { DiscordNotifier } from './discord-notifier'
 import { HealthServer } from './health-server'
 import { LocationStore } from './location-store'
+import { toError } from './logger-utils'
 import { getUser, isFriend } from './vrchat-client'
 import { WebSocketMonitor } from './websocket-monitor'
 import type { VRChat } from 'vrchat'
+
+const logger = Logger.configure('MAIN')
 
 /**
  * friend-location イベントのデータ構造
@@ -177,7 +181,7 @@ class WatchVRChatUser {
    * アプリケーションを開始する
    */
   async start(): Promise<void> {
-    console.log('[MAIN] Starting watch-vrchat-user...')
+    logger.info('Starting watch-vrchat-user...')
 
     // シグナルハンドラを設定
     this.setupSignalHandlers()
@@ -189,7 +193,7 @@ class WatchVRChatUser {
     await this.monitor.start(
       (vrchat: VRChat) => {
         this.handleConnected(vrchat).catch((error: unknown) => {
-          console.error('[MAIN] Error in handleConnected:', error)
+          logger.error('Error in handleConnected', toError(error))
         })
       },
       () => {
@@ -200,7 +204,7 @@ class WatchVRChatUser {
     // API ポーリングを開始
     this.startApiPoller()
 
-    console.log('[MAIN] Application started. Listening for events...')
+    logger.info('Application started. Listening for events...')
   }
 
   /**
@@ -213,7 +217,7 @@ class WatchVRChatUser {
       }
       this.isShuttingDown = true
 
-      console.log('\n[MAIN] Shutting down...')
+      logger.info('\nShutting down...')
 
       // API ポーリングを停止
       if (this.apiPollerTimer) {
@@ -230,7 +234,9 @@ class WatchVRChatUser {
       // ヘルスチェックサーバーを停止
       this.healthServer.stop()
 
-      console.log('[MAIN] Goodbye!')
+      logger.info('Goodbye!')
+      // Logger の送信をフラッシュしてからプロセスを終了する
+      Logger.closeAll()
       // eslint-disable-next-line unicorn/no-process-exit
       process.exit(0)
     }
@@ -243,7 +249,7 @@ class WatchVRChatUser {
    * ターゲットユーザーがフレンドかどうかを検証する
    */
   private async validateTargetUsers(): Promise<void> {
-    console.log('[MAIN] Validating target users...')
+    logger.info('Validating target users...')
 
     if (!this.vrchat) {
       throw new Error('VRChat client is not initialized')
@@ -259,15 +265,15 @@ class WatchVRChatUser {
     }
 
     if (notFriends.length > 0) {
-      console.warn(
-        `[MAIN] Warning: The following target users are not friends: ${notFriends.join(', ')}`
+      logger.warn(
+        `Warning: The following target users are not friends: ${notFriends.join(', ')}`
       )
-      console.warn(
-        '[MAIN] You will not receive notifications for these users until they become friends.'
+      logger.warn(
+        'You will not receive notifications for these users until they become friends.'
       )
     } else {
-      console.log(
-        `[MAIN] All ${this.config.targetUserIds.length} target user(s) are friends.`
+      logger.info(
+        `All ${this.config.targetUserIds.length} target user(s) are friends.`
       )
     }
   }
@@ -279,7 +285,7 @@ class WatchVRChatUser {
    * 初回起動時など、前回の状態が存在しない場合は初期状態として保存するのみで通知は行わない。
    */
   private async fetchInitialUserStatuses(): Promise<void> {
-    console.log('[MAIN] Fetching initial user statuses...')
+    logger.info('Fetching initial user statuses...')
 
     if (!this.vrchat) {
       throw new Error('VRChat client is not initialized')
@@ -289,7 +295,7 @@ class WatchVRChatUser {
       const userInfo = await getUser(this.vrchat, userId)
 
       if (!userInfo) {
-        console.warn(`[MAIN] Failed to fetch user info for ${userId}`)
+        logger.warn(`Failed to fetch user info for ${userId}`)
         continue
       }
 
@@ -300,8 +306,8 @@ class WatchVRChatUser {
 
       // traveling 中は通知を送らず、ストアも更新しない（前回の location を維持）
       if (currentLocation === TRAVELING_LOCATION) {
-        console.log(
-          `[MAIN] Initial status: ${userInfo.displayName} (${userId}) - traveling (skipped)`
+        logger.info(
+          `Initial status: ${userInfo.displayName} (${userId}) - traveling (skipped)`
         )
         continue
       }
@@ -315,8 +321,8 @@ class WatchVRChatUser {
 
       // 状態変化があれば通知
       if (previousLocation !== currentLocation) {
-        console.log(
-          `[MAIN] State changed during downtime: ${userInfo.displayName} (${userId}) - ${previousLocation ?? 'offline'} -> ${currentLocation ?? 'offline'}`
+        logger.info(
+          `State changed during downtime: ${userInfo.displayName} (${userId}) - ${previousLocation ?? 'offline'} -> ${currentLocation ?? 'offline'}`
         )
 
         // 状態変化に応じて通知を送信
@@ -346,12 +352,12 @@ class WatchVRChatUser {
       }
 
       const locationDisplay = currentLocation ?? 'offline'
-      console.log(
-        `[MAIN] Initial status: ${userInfo.displayName} (${userId}) - ${userInfo.status} @ ${locationDisplay}`
+      logger.info(
+        `Initial status: ${userInfo.displayName} (${userId}) - ${userInfo.status} @ ${locationDisplay}`
       )
     }
 
-    console.log('[MAIN] Initial user statuses fetched.')
+    logger.info('Initial user statuses fetched.')
   }
 
   /**
@@ -360,7 +366,7 @@ class WatchVRChatUser {
    * @param vrchat VRChat クライアント
    */
   private async handleConnected(vrchat: VRChat): Promise<void> {
-    console.log('[MAIN] WebSocket connected, initializing...')
+    logger.info('WebSocket connected, initializing...')
 
     this.vrchat = vrchat
 
@@ -373,14 +379,14 @@ class WatchVRChatUser {
     // WebSocket イベントを登録
     this.setupWebSocketEvents()
 
-    console.log('[MAIN] WebSocket initialized successfully')
+    logger.info('WebSocket initialized successfully')
   }
 
   /**
    * WebSocket 切断時の処理
    */
   private handleDisconnected(): void {
-    console.warn('[MAIN] WebSocket disconnected')
+    logger.warn('WebSocket disconnected')
     this.vrchat = null
   }
 
@@ -405,14 +411,14 @@ class WatchVRChatUser {
       this.monitor.updateLastEventTime()
 
       if (!isFriendLocationEvent(data)) {
-        console.error(
-          '[MAIN] Invalid friend-location event data:',
-          JSON.stringify(data)
-        )
+        // 生ペイロードは Sentry（GlitchTip）へ転送されない debug レベルに留め、
+        // Location に含まれる招待用 nonce 等の機微情報が外部送信されないようにする
+        logger.error('Invalid friend-location event data')
+        logger.debug('Invalid friend-location event data (raw)', { data })
         return
       }
       this.handleFriendLocation(data).catch((error: unknown) => {
-        console.error('[MAIN] Error handling friend-location event:', error)
+        logger.error('Error handling friend-location event', toError(error))
       })
     })
 
@@ -422,14 +428,13 @@ class WatchVRChatUser {
       this.monitor.updateLastEventTime()
 
       if (!isFriendOnlineEvent(data)) {
-        console.error(
-          '[MAIN] Invalid friend-online event data:',
-          JSON.stringify(data)
-        )
+        // 生ペイロードは Sentry（GlitchTip）へ転送されない debug レベルに留める
+        logger.error('Invalid friend-online event data')
+        logger.debug('Invalid friend-online event data (raw)', { data })
         return
       }
       this.handleFriendOnline(data).catch((error: unknown) => {
-        console.error('[MAIN] Error handling friend-online event:', error)
+        logger.error('Error handling friend-online event', toError(error))
       })
     })
 
@@ -439,18 +444,17 @@ class WatchVRChatUser {
       this.monitor.updateLastEventTime()
 
       if (!isFriendOfflineEvent(data)) {
-        console.error(
-          '[MAIN] Invalid friend-offline event data:',
-          JSON.stringify(data)
-        )
+        // 生ペイロードは Sentry（GlitchTip）へ転送されない debug レベルに留める
+        logger.error('Invalid friend-offline event data')
+        logger.debug('Invalid friend-offline event data (raw)', { data })
         return
       }
       this.handleFriendOffline(data).catch((error: unknown) => {
-        console.error('[MAIN] Error handling friend-offline event:', error)
+        logger.error('Error handling friend-offline event', toError(error))
       })
     })
 
-    console.log('[MAIN] WebSocket event handlers registered.')
+    logger.info('WebSocket event handlers registered.')
   }
 
   /**
@@ -471,14 +475,14 @@ class WatchVRChatUser {
     const displayName = event.user.displayName
     const location = event.location
 
-    console.log(
-      `[MAIN] Friend location event: ${displayName} (${userId}) -> ${location}`
+    logger.info(
+      `Friend location event: ${displayName} (${userId}) -> ${location}`
     )
 
     // traveling 中はストアの更新・通知ともにスキップ
     if (location === TRAVELING_LOCATION) {
-      console.log(
-        `[MAIN] User ${displayName} (${userId}) is traveling, skipping notification`
+      logger.info(
+        `User ${displayName} (${userId}) is traveling, skipping notification`
       )
       return
     }
@@ -526,7 +530,7 @@ class WatchVRChatUser {
 
     const displayName = event.user.displayName
 
-    console.log(`[MAIN] Friend online event: ${displayName} (${userId})`)
+    logger.info(`Friend online event: ${displayName} (${userId})`)
 
     // 既にオンライン状態（location が非 null）の場合は重複通知を防ぐ
     const result = this.locationStore.updateLocation(
@@ -536,8 +540,8 @@ class WatchVRChatUser {
     )
 
     if (!result.changed) {
-      console.log(
-        `[MAIN] User ${displayName} (${userId}) already online, skipping notification`
+      logger.info(
+        `User ${displayName} (${userId}) already online, skipping notification`
       )
       return
     }
@@ -565,15 +569,15 @@ class WatchVRChatUser {
     // 表示名を取得（キャッシュから）
     const displayName = this.locationStore.getDisplayName(userId) ?? userId
 
-    console.log(`[MAIN] Friend offline event: ${displayName} (${userId})`)
+    logger.info(`Friend offline event: ${displayName} (${userId})`)
 
     // Location を null に更新
     const result = this.locationStore.updateLocation(userId, displayName, null)
 
     // 既にオフライン状態の場合は重複通知を防ぐ
     if (!result.changed) {
-      console.log(
-        `[MAIN] User ${displayName} (${userId}) already offline, skipping notification`
+      logger.info(
+        `User ${displayName} (${userId}) already offline, skipping notification`
       )
       return
     }
@@ -591,7 +595,7 @@ class WatchVRChatUser {
   private startApiPoller(): void {
     // 既に API ポーリングが開始されている場合はスキップ
     if (this.apiPollerTimer) {
-      console.warn('[MAIN] API polling already started, skipping')
+      logger.warn('API polling already started, skipping')
       return
     }
 
@@ -600,11 +604,11 @@ class WatchVRChatUser {
 
     this.apiPollerTimer = setInterval(() => {
       this.pollUsersStatus().catch((error: unknown) => {
-        console.error('[MAIN] Error in API polling:', error)
+        logger.error('Error in API polling', toError(error))
       })
     }, POLLING_INTERVAL)
 
-    console.log('[MAIN] API polling started (interval: 1 hour)')
+    logger.info('API polling started (interval: 1 hour)')
   }
 
   /**
@@ -618,8 +622,8 @@ class WatchVRChatUser {
         const remainingMinutes = Math.ceil(
           (this.apiPollCooldownUntil.getTime() - now.getTime()) / 1000 / 60
         )
-        console.log(
-          `[MAIN] Skipping API polling due to rate limit cooldown (${remainingMinutes} minutes remaining)`
+        logger.info(
+          `Skipping API polling due to rate limit cooldown (${remainingMinutes} minutes remaining)`
         )
         return
       }
@@ -628,14 +632,12 @@ class WatchVRChatUser {
       this.apiPollCooldownUntil = null
     }
 
-    console.log('[MAIN] Polling users status...')
+    logger.info('Polling users status...')
 
     // VRChat クライアントのスナップショット（ループ中に null になることを防ぐ）
     const vrchat = this.vrchat
     if (!vrchat) {
-      console.warn(
-        '[MAIN] VRChat client is not initialized, skipping API polling'
-      )
+      logger.warn('VRChat client is not initialized, skipping API polling')
       return
     }
 
@@ -646,7 +648,7 @@ class WatchVRChatUser {
         const userInfo = await getUser(vrchat, userId)
 
         if (!userInfo) {
-          console.warn(`[MAIN] Failed to fetch user info for ${userId}`)
+          logger.warn(`Failed to fetch user info for ${userId}`)
           continue
         }
 
@@ -657,16 +659,16 @@ class WatchVRChatUser {
 
         // traveling 中は乖離チェックをスキップ
         if (apiLocation === TRAVELING_LOCATION) {
-          console.log(
-            `[MAIN] User ${userInfo.displayName} (${userId}) is traveling, skipping mismatch check`
+          logger.info(
+            `User ${userInfo.displayName} (${userId}) is traveling, skipping mismatch check`
           )
           continue
         }
 
         // Location の乖離を検出
         if (apiLocation !== storeLocation) {
-          console.log(
-            `[MAIN] Location mismatch detected for ${userInfo.displayName} (${userId}): API=${apiLocation ?? 'offline'}, Store=${storeLocation ?? 'offline'}`
+          logger.info(
+            `Location mismatch detected for ${userInfo.displayName} (${userId}): API=${apiLocation ?? 'offline'}, Store=${storeLocation ?? 'offline'}`
           )
 
           // サイレント接続死の判定
@@ -678,18 +680,18 @@ class WatchVRChatUser {
           this.apiPollCooldownUntil = new Date(
             Date.now() + this.RATE_LIMIT_COOLDOWN
           )
-          console.warn(
-            `[MAIN] API rate limit error (429), cooling down for ${this.RATE_LIMIT_COOLDOWN / 1000 / 60} minutes`
+          logger.warn(
+            `API rate limit error (429), cooling down for ${this.RATE_LIMIT_COOLDOWN / 1000 / 60} minutes`
           )
           break
         }
 
         // その他のエラーはログ出力のみ
-        console.error(`[MAIN] Error fetching user info for ${userId}:`, error)
+        logger.error(`Error fetching user info for ${userId}`, toError(error))
       }
     }
 
-    console.log('[MAIN] API polling completed')
+    logger.info('API polling completed')
   }
 
   /**
@@ -729,8 +731,8 @@ class WatchVRChatUser {
     // 条件 3: Location が異なること（すでに呼び出し元で確認済み）
 
     // すべての条件を満たす場合、強制再接続
-    console.warn(
-      `[MAIN] Silent death detected for user ${userId}: API=${apiLocation ?? 'offline'}, Store=${storeLocation ?? 'offline'}, Time since reference=${timeSinceReference / 1000 / 60 / 60} hours`
+    logger.warn(
+      `Silent death detected for user ${userId}: API=${apiLocation ?? 'offline'}, Store=${storeLocation ?? 'offline'}, Time since reference=${timeSinceReference / 1000 / 60 / 60} hours`
     )
 
     this.monitor.requestReconnect('Silent death detected')
@@ -749,7 +751,9 @@ async function main(): Promise<void> {
     const app = new WatchVRChatUser(config)
     await app.start()
   } catch (error) {
-    console.error('[MAIN] Fatal error:', error)
+    logger.error('Fatal error', toError(error))
+    // Logger の送信をフラッシュしてからプロセスを終了する
+    Logger.closeAll()
     // eslint-disable-next-line unicorn/no-process-exit
     process.exit(1)
   }
@@ -757,7 +761,9 @@ async function main(): Promise<void> {
 
 // メイン関数を実行
 main().catch((error: unknown) => {
-  console.error('[MAIN] Unhandled error:', error)
+  logger.error('Unhandled error', toError(error))
+  // Logger の送信をフラッシュしてからプロセスを終了する
+  Logger.closeAll()
   // eslint-disable-next-line unicorn/no-process-exit
   process.exit(1)
 })

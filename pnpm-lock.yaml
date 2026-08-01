@@ -25,8 +25,8 @@ importers:
         version: 2.22.7(patch_hash=a452b18fc8779b4bad5d36c15e559e9ddf4725295dd7638a9085c2bc7e529856)(supports-color@8.1.1)
     devDependencies:
       '@book000/eslint-config':
-        specifier: 1.16.23
-        version: 1.16.23(eslint@10.8.0(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3)
+        specifier: 1.16.24
+        version: 1.16.24(eslint@10.8.0(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3)
       '@types/jest':
         specifier: 30.0.0
         version: 30.0.0
@@ -254,8 +254,8 @@ packages:
   '@bcoe/v8-coverage@0.2.3':
     resolution: {integrity: sha512-0hYQ8SB4Db5zvZB4axdMHGwEaQjkZzFjQiN9LVYvIFB2nSUHW9tYpxWriPrWDASIxiaXax83REcLxuSdnGPZtw==}
 
-  '@book000/eslint-config@1.16.23':
-    resolution: {integrity: sha512-Inv9keytJJzzMH1EJZ0ogKEEUR/fpTwH+KmYo4UFWbrozgksVgqc8YCsKOkH9YLnocPm6ZMqMloJ5UW2xgY5gg==}
+  '@book000/eslint-config@1.16.24':
+    resolution: {integrity: sha512-IHe6qj8pYzdf5Cuedoo3rIi5qs3ZAr+oa+u7m2Uh2MgZ6bcR6fUOtGaQBT+E0XgNycsz1jQijczqTQ4cujISsw==}
     peerDependencies:
       eslint: 10.8.0
 
@@ -3283,7 +3283,7 @@ snapshots:
 
   '@bcoe/v8-coverage@0.2.3': {}
 
-  '@book000/eslint-config@1.16.23(eslint@10.8.0(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3)':
+  '@book000/eslint-config@1.16.24(eslint@10.8.0(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3)':
     dependencies:
       '@typescript-eslint/parser': 8.65.0(eslint@10.8.0(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3)
       eslint: 10.8.0(supports-color@8.1.1)

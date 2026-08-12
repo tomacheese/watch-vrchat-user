@@ -90,4 +90,18 @@ describe('HealthService', () => {
 
     service.stop()
   })
+
+  it('getSnapshot が例外を投げても 503 を返し、プロセスをクラッシュさせない', async () => {
+    process.env.HEALTH_PORT = '0'
+    const service = new HealthService(() => {
+      throw new Error('Pipeline raw WebSocket is not available')
+    })
+    service.start()
+    const port = await waitForListening(service)
+
+    const { status } = await fetchJson(port)
+    expect(status).toBe(503)
+
+    service.stop()
+  })
 })

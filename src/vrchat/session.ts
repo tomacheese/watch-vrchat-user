@@ -161,6 +161,9 @@ export interface UserInfo {
 /**
  * 指定したユーザー ID がフレンドかどうかを確認する
  *
+ * API 呼び出し自体が失敗した場合は「フレンドではない」と確定できないため、
+ * false を返さず例外を投げる（呼び出し側が誤って fatal 判定しないようにする）。
+ *
  * @param vrchat VRChat クライアント
  * @param userId 確認するユーザー ID
  * @returns フレンドの場合は true
@@ -171,10 +174,9 @@ export async function isFriend(
 ): Promise<boolean> {
   const result = await vrchat.getFriendStatus({ path: { userId } })
   if (result.error) {
-    logger.error(
+    throw new Error(
       `Failed to get friend status for ${userId}: ${result.error.message}`
     )
-    return false
   }
   return result.data.isFriend
 }

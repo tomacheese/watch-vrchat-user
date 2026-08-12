@@ -85,6 +85,33 @@ describe('UserStateRepository', () => {
     const written = JSON.parse(fs.readFileSync(filePath, 'utf8')) as {
       users: Record<string, unknown>
     }
-    expect(Object.keys(written.users).toSorted((a, b) => a.localeCompare(b))).toEqual(['u1', 'u2'])
+    expect(
+      Object.keys(written.users).toSorted((a, b) => a.localeCompare(b))
+    ).toEqual(['u1', 'u2'])
+  })
+
+  it('write 失敗時は in-memory state を変更せず、retry で正しく反映できる', async () => {
+    const filePath = tempFilePath()
+    const repo = new UserStateRepository(filePath)
+    repo.load()
+
+    // tmp 書き込み先をディレクトリにしておくことで writeFile を確実に失敗させる
+    fs.mkdirSync(`${filePath}.tmp`)
+
+    const nextState = {
+      userId: 'u1',
+      displayName: 'Alice',
+      presence: 'online' as const,
+      location: 'wrld_a',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }
+
+    await expect(repo.commitUserState('u1', nextState)).rejects.toThrow()
+    // 書き込みが失敗した場合、in-memory state は変更されていないこと
+    expect(repo.get('u1')).toBeUndefined()
+
+    fs.rmdirSync(`${filePath}.tmp`)
+    await repo.commitUserState('u1', nextState)
+    expect(repo.get('u1')).toMatchObject({ location: 'wrld_a' })
   })
 })

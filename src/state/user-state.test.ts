@@ -21,6 +21,38 @@ describe('isUserStateStoreData', () => {
     const data = { users: {} }
     expect(isUserStateStoreData(data)).toBe(false)
   })
+
+  it('レコードの location が undefined など不正な場合は false', () => {
+    const data = {
+      schemaVersion: 2,
+      users: {
+        u1: {
+          userId: 'u1',
+          displayName: 'Alice',
+          presence: 'online',
+          location: undefined,
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      },
+    }
+    expect(isUserStateStoreData(data)).toBe(false)
+  })
+
+  it('レコードの presence が online/offline 以外の場合は false', () => {
+    const data = {
+      schemaVersion: 2,
+      users: {
+        u1: {
+          userId: 'u1',
+          displayName: 'Alice',
+          presence: 'traveling',
+          location: 'wrld_1',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      },
+    }
+    expect(isUserStateStoreData(data)).toBe(false)
+  })
 })
 
 describe('migrateStoreData', () => {
@@ -96,5 +128,25 @@ describe('migrateStoreData', () => {
 
   it('不正な形式（null）は空の schemaVersion 2 データを返す', () => {
     expect(migrateStoreData(null)).toEqual({ schemaVersion: 2, users: {} })
+  })
+
+  it('legacy: 不正な形式のレコード（updatedAt 欠落）は migrate 対象から除外する', () => {
+    const legacy = {
+      users: {
+        u1: {
+          userId: 'u1',
+          displayName: 'Alice',
+          location: 'wrld_1',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+        u2: {
+          userId: 'u2',
+          displayName: 'Bob',
+          location: 'wrld_2',
+        },
+      },
+    }
+    const migrated = migrateStoreData(legacy)
+    expect(Object.keys(migrated.users)).toEqual(['u1'])
   })
 })

@@ -20,7 +20,7 @@ describe('UserStateCoordinator', () => {
   it('同一ユーザーの observation を順番に処理し effect を発火する', async () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
-    // 8.6 unknown baseline ではなく 8.1/8.2/8.5 の通常フローを検証するため、
+    // record 不在の baseline ケースではなく、既存 record がある通常フローを検証するため、
     // 既存 offline record がある状態から開始する
     await repository.commitUserState('u1', {
       userId: 'u1',
@@ -173,6 +173,41 @@ describe('UserStateCoordinator', () => {
     coordinator.enqueue('u1', 'Alice', { type: 'location', location: 'wrld_a' })
     coordinator.enqueue('u1', 'Alice', { type: 'location', location: 'wrld_b' })
 
+    expect(coordinator.getUnhealthy('u1')?.cause).toBe('queue-overflow')
+  })
+
+  it('queue-overflow は persist が成功しても解消されない（データ損失の記録を保持する）', async () => {
+    const repository = new UserStateRepository(tempFilePath())
+    repository.load()
+    // Promise.withResolvers() の resolve は `(value: void) => void` 型となり
+    // no-invalid-void-type と衝突するため、この形のまま使う
+    const { promise: firstCommitPromise, resolve: resolveFirstCommit } =
+      // eslint-disable-next-line @typescript-eslint/no-invalid-void-type
+      Promise.withResolvers<void>()
+    jest
+      .spyOn(repository, 'commitUserState')
+      .mockImplementationOnce(() => firstCommitPromise)
+    const coordinator = new UserStateCoordinator(
+      repository,
+      () => Promise.resolve(),
+      { maxQueueSize: 2 }
+    )
+
+    coordinator.enqueue('u1', 'Alice', { type: 'online' })
+    coordinator.enqueue('u1', 'Alice', {
+      type: 'location',
+      location: 'wrld_a',
+    })
+    coordinator.enqueue('u1', 'Alice', {
+      type: 'location',
+      location: 'wrld_b',
+    })
+    expect(coordinator.getUnhealthy('u1')?.cause).toBe('queue-overflow')
+
+    resolveFirstCommit()
+    await wait(50)
+
+    // head の commit は成功したが、overflow によるデータ損失自体は解消しない
     expect(coordinator.getUnhealthy('u1')?.cause).toBe('queue-overflow')
   })
 })

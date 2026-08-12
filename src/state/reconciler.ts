@@ -59,9 +59,12 @@ export class Reconciler {
     }
     this.cooldownUntil = null
 
+    let succeededCount = 0
     for (const userId of this.targetUserIds) {
       try {
-        await this.reconcileUser(vrchat, userId)
+        if (await this.reconcileUser(vrchat, userId)) {
+          succeededCount += 1
+        }
       } catch (error) {
         if (error instanceof Error && error.message.includes('429')) {
           this.cooldownUntil = new Date(Date.now() + RATE_LIMIT_COOLDOWN_MS)
@@ -74,7 +77,11 @@ export class Reconciler {
       }
     }
 
-    this.lastRunAt = new Date()
+    // 1 人も reconcile できなかった場合、lastRunAt を更新すると health 上
+    // reconciliation が機能しているように見えてしまうため更新しない
+    if (succeededCount > 0) {
+      this.lastRunAt = new Date()
+    }
   }
 
   /**
@@ -82,12 +89,16 @@ export class Reconciler {
    *
    * @param vrchat VRChat クライアント
    * @param userId ユーザー ID
+   * @returns REST snapshot を取得できた場合は true（stale で drop された場合も含む）
    */
-  private async reconcileUser(vrchat: VRChat, userId: string): Promise<void> {
+  private async reconcileUser(
+    vrchat: VRChat,
+    userId: string
+  ): Promise<boolean> {
     const expectedSeq = this.coordinator.captureSeq(userId)
     const userInfo = await getUser(vrchat, userId)
     if (!userInfo) {
-      return
+      return false
     }
 
     const observation: UserObservation =
@@ -106,5 +117,6 @@ export class Reconciler {
         `Snapshot for user ${userId} is stale, dropped (newer WebSocket observation arrived)`
       )
     }
+    return true
   }
 }

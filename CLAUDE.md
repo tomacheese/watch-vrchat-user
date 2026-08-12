@@ -95,8 +95,9 @@ pnpm test
 
 ## テスト
 - **フレームワーク**: Jest (`ts-jest`)。テスト対象は `**/*.test.ts`
-- **現状**: テストファイルは未整備 (`pnpm test` は `--passWithNoTests` で通る)。ロジック部分は可能な限りテストを追加する
+- **現状**: state reducer/repository/coordinator、pipeline supervisor/transport、session、health-service、app など主要ロジックにテストが整備済み (13 テストスイート、78 テストが成功)
 - **コマンド**: `pnpm test` (カバレッジ計測込み)
+- 新規ロジック追加時は既存のテストパターンに沿ってテストを追加する
 
 ## ドキュメント更新ルール
 - **タイミング**: 機能追加・変更時、アーキテクチャや主要ファイル構成の変更時

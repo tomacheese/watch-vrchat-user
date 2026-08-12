@@ -90,6 +90,9 @@ describe('Reconciler.reconcileAll', () => {
     await reconciler.reconcileAll()
 
     expect(appendSpy).not.toHaveBeenCalled()
+    // 誰も reconcile できなかった場合、lastRunAt を更新すると health 上
+    // reconciliation が機能しているように誤認させてしまう
+    expect(reconciler.getLastRunAt()).toBeNull()
   })
 
   it('vrchat が未接続の場合は何もしない', async () => {

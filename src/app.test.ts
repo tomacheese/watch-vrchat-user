@@ -64,9 +64,13 @@ describe('App.start', () => {
     expect(VRChatSession.create).toHaveBeenCalledTimes(1)
     const supervisorInstance = (PipelineSupervisor as unknown as jest.Mock).mock
       .instances[0] as {
-      start: jest.Mock
+      start: jest.Mock<Promise<void>, [() => Promise<string>]>
     }
-    expect(supervisorInstance.start).toHaveBeenCalledWith('cookie')
+    // start() は固定 cookie 文字列ではなく provider 関数を受け取るようになった
+    // ため、渡された provider を実際に呼び出して解決値を検証する
+    expect(supervisorInstance.start).toHaveBeenCalledWith(expect.any(Function))
+    const authCookieProvider = supervisorInstance.start.mock.calls[0][0]
+    await expect(authCookieProvider()).resolves.toBe('cookie')
     const reconcilerInstance = (Reconciler as unknown as jest.Mock).mock
       .instances[0] as {
       reconcileAll: jest.Mock
@@ -74,5 +78,27 @@ describe('App.start', () => {
     expect(reconcilerInstance.reconcileAll).toHaveBeenCalledTimes(1)
 
     await app.stop()
+  })
+
+  it('isFriend の API 呼び出し自体が失敗しても fatal にせず起動を継続する', async () => {
+    ;(isFriend as jest.Mock).mockRejectedValue(new Error('network error'))
+    const app = new App(config())
+
+    await expect(app.start()).resolves.toBeUndefined()
+
+    await app.stop()
+  })
+
+  it('supervisor.stop() が同期的に例外を投げても stop() は reject せず完了する', async () => {
+    const app = new App(config())
+    await app.start()
+
+    const supervisorInstance = (PipelineSupervisor as unknown as jest.Mock).mock
+      .instances[0] as { stop: jest.Mock }
+    supervisorInstance.stop.mockImplementation(() => {
+      throw new Error('pipeline.close failed')
+    })
+
+    await expect(app.stop()).resolves.toBeUndefined()
   })
 })

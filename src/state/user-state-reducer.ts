@@ -19,8 +19,14 @@ export type ReducerEffect =
 
 /** reduce の結果 */
 export interface ReduceResult {
-  /** 更新後の state。判断材料が不足し何も記録できない場合は undefined */
-  nextState: UserState | undefined
+  /**
+   * 更新後の state。判断材料が不足し何も記録できない場合は undefined
+   *
+   * `userId` を含まない: reducer は呼び出し元が知っている userId を認識しないため、
+   * 唯一の呼び出し元 (UserStateCoordinator) が実際の userId を補って commit する。
+   * 型から `userId` を除くことで、この補完を怠った場合はコンパイルエラーになる。
+   */
+  nextState: Omit<UserState, 'userId'> | undefined
   /** 発火すべき通知 effect */
   effect: ReducerEffect
 }
@@ -40,12 +46,11 @@ function reduceLocation(
   location: string,
   now: () => string
 ): ReduceResult {
-  // record 不在、または offline からの遷移は baseline のみで通知しない
-  // (8.6 unknown baseline / friend-online 欠落時の online 推定は effect のみ 'online' として区別する)
+  // record 不在ユーザーへの最初の観測は baseline としてのみ保存し通知しない
+  // (offline からの遷移は下の分岐で 'online' として通知する。混同しないよう分離している)
   if (current === undefined) {
     return {
       nextState: {
-        userId: '',
         displayName,
         presence: 'online',
         location,
@@ -63,6 +68,7 @@ function reduceLocation(
     updatedAt: now(),
   }
 
+  // offline から concrete location への遷移は online 通知として扱う
   if (current.presence === 'offline') {
     return { nextState, effect: { type: 'online' } }
   }
@@ -99,10 +105,9 @@ function reduceOnline(
   now: () => string
 ): ReduceResult {
   if (current === undefined) {
-    // record 不在ユーザーへの最初の observation は baseline のみで通知しない（8.6 unknown baseline）
+    // record 不在ユーザーへの最初の observation は baseline のみで通知しない
     return {
       nextState: {
-        userId: '',
         displayName,
         presence: 'online',
         location: null,
@@ -144,7 +149,6 @@ function reduceOffline(
   if (current === undefined || current.presence === 'offline') {
     return {
       nextState: {
-        userId: current?.userId ?? '',
         displayName,
         presence: 'offline',
         location: null,
@@ -185,7 +189,7 @@ export function reduce(
     observation.type === 'location' &&
     observation.location === TRAVELING_LOCATION
   ) {
-    // traveling は transient observation であり、persisted location も lastConfirmedLocation も変更しない
+    // traveling は transient observation であり、current の state をそのまま維持し変更しない
     return { nextState: current, effect: { type: 'no-op' } }
   }
 

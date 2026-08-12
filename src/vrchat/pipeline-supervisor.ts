@@ -45,7 +45,7 @@ export class PipelineSupervisor {
   private lastPongAt: Date | null = null
   private reconnectAttempts = 0
   private lastReconnectReason: string | null = null
-  private authCookie: string | null = null
+  private authCookieProvider: (() => Promise<string>) | null = null
   private staleCheckTimer: NodeJS.Timeout | null = null
   private pingTimer: NodeJS.Timeout | null = null
   private pingTimeoutTimer: NodeJS.Timeout | null = null
@@ -82,10 +82,14 @@ export class PipelineSupervisor {
   /**
    * Pipeline への接続を開始する
    *
-   * @param authCookie Pipeline 認証用の auth cookie
+   * cookie は固定値ではなく provider として受け取り、reconnect のたびに再取得する。
+   * 固定値のままだと auth cookie が期限切れ/rotate した場合、以後の reconnect が
+   * 永久に失敗し続け、プロセス再起動でしか復旧できなくなる。
+   *
+   * @param authCookieProvider Pipeline 認証用の auth cookie を取得する関数
    */
-  async start(authCookie: string): Promise<void> {
-    this.authCookie = authCookie
+  async start(authCookieProvider: () => Promise<string>): Promise<void> {
+    this.authCookieProvider = authCookieProvider
     await this.connectOnce()
   }
 
@@ -112,26 +116,56 @@ export class PipelineSupervisor {
     this.startReconnect()
   }
 
+  /**
+   * 現在の接続状態を取得する
+   *
+   * @returns 現在の接続状態
+   */
   getState(): SupervisorState {
     return this.state
   }
 
+  /**
+   * 現在の connection generation を取得する
+   *
+   * @returns 現在の generation
+   */
   getGeneration(): number {
     return this.generation
   }
 
+  /**
+   * 直近で raw message を受信した日時を取得する
+   *
+   * @returns 直近の raw message 受信日時、未受信の場合は null
+   */
   getLastMessageAt(): Date | null {
     return this.lastMessageAt
   }
 
+  /**
+   * 直近で pong を受信した日時を取得する
+   *
+   * @returns 直近の pong 受信日時、未受信の場合は null
+   */
   getLastPongAt(): Date | null {
     return this.lastPongAt
   }
 
+  /**
+   * 現在の接続以降の reconnect 試行回数を取得する
+   *
+   * @returns reconnect 試行回数
+   */
   getReconnectAttempts(): number {
     return this.reconnectAttempts
   }
 
+  /**
+   * 直近の reconnect 理由を取得する
+   *
+   * @returns 直近の reconnect 理由、reconnect 未発生の場合は null
+   */
   getLastReconnectReason(): string | null {
     return this.lastReconnectReason
   }
@@ -143,17 +177,27 @@ export class PipelineSupervisor {
     const myGeneration = this.generation
     this.state = 'connecting'
 
-    if (!this.authCookie) {
+    if (!this.authCookieProvider) {
       throw new Error(
-        'PipelineSupervisor.start() was not called with an auth cookie'
+        'PipelineSupervisor.start() was not called with an auth cookie provider'
       )
     }
+    const authCookie = await this.authCookieProvider()
 
     const callbacks = this.buildCallbacks(myGeneration)
-    await this.transport.connect(this.vrchat, this.authCookie, callbacks)
+    await this.transport.connect(this.vrchat, authCookie, callbacks)
     if (myGeneration !== this.generation) {
       return
     }
+
+    // raw socket が open した時点で liveness 監視を開始する。synchronizing
+    // （REST reconciliation）完了を待ってから開始すると、その間に発生した
+    // silent な切断を検知できない窓ができてしまう。
+    // 新しい接続の基準時刻をリセットしないと、reconnect 後も古い generation の
+    // stale な timestamp が残り、stale-message timeout が即座に再発火してしまう
+    // （reconnect storm）。
+    this.lastMessageAt = new Date()
+    this.startLivenessTimers(myGeneration)
 
     this.state = 'synchronizing'
     await this.onSynchronize()
@@ -163,7 +207,6 @@ export class PipelineSupervisor {
 
     this.state = 'ready'
     this.reconnectAttempts = 0
-    this.startLivenessTimers(myGeneration)
   }
 
   /**

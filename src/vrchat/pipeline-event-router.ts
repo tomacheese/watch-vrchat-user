@@ -9,17 +9,20 @@ export interface PipelineEventEmitterLike {
   removeAllListeners: (event: string) => void
 }
 
+/** Pipeline の `friend-location` イベントのペイロード */
 interface FriendLocationEvent {
   userId: string
   user: { id: string; displayName: string }
   location: string
 }
 
+/** Pipeline の `friend-online` イベントのペイロード */
 interface FriendOnlineEvent {
   userId: string
   user: { id: string; displayName: string }
 }
 
+/** Pipeline の `friend-offline` イベントのペイロード */
 interface FriendOfflineEvent {
   userId: string
 }

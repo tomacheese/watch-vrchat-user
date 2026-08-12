@@ -102,11 +102,18 @@ export class UserStateRepository {
     userId: string,
     nextState: UserState
   ): Promise<void> {
-    this.data.users[userId] = nextState
+    // 書き込みが失敗した場合に `this.data` が新 state のまま残ると、呼び出し側の
+    // retry が「既に反映済み」と誤認して no-op になり通知を失う。そのため
+    // in-memory 反映は write + rename が成功した後に行う。
+    const nextData: UserStateStoreData = {
+      ...this.data,
+      users: { ...this.data.users, [userId]: nextState },
+    }
     const tmpPath = `${this.filePath}.tmp`
     const directory = path.dirname(this.filePath)
     await fsPromises.mkdir(directory, { recursive: true })
-    await fsPromises.writeFile(tmpPath, JSON.stringify(this.data, null, 2))
+    await fsPromises.writeFile(tmpPath, JSON.stringify(nextData, null, 2))
     await fsPromises.rename(tmpPath, this.filePath)
+    this.data = nextData
   }
 }

@@ -1,6 +1,7 @@
 import { Logger } from '@book000/node-utils'
 import * as http from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { toError } from '../logger-utils'
 import type { SupervisorState } from '../vrchat/pipeline-supervisor'
 
 const logger = Logger.configure('HEALTH')
@@ -94,7 +95,9 @@ export class HealthService {
    */
   stop(): void {
     if (!this.server) return
-    this.server.close(() => { logger.info('Health check server stopped'); })
+    this.server.close(() => {
+      logger.info('Health check server stopped')
+    })
     this.server = null
   }
 
@@ -104,7 +107,15 @@ export class HealthService {
    * @param response HTTP レスポンス
    */
   private handleHealthCheck(response: http.ServerResponse): void {
-    const snapshot = this.getSnapshot()
+    let snapshot: HealthSnapshot
+    try {
+      snapshot = this.getSnapshot()
+    } catch (error) {
+      logger.error('Failed to build health snapshot', toError(error))
+      response.writeHead(503, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify({ status: 'unhealthy' }))
+      return
+    }
     const isHealthy =
       snapshot.supervisorState === 'ready' &&
       snapshot.unhealthyUsers.length === 0

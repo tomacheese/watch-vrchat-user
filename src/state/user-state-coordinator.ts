@@ -27,8 +27,11 @@ export interface UserStateCoordinatorOptions {
   maxQueueSize?: number
 }
 
+/** per-user queue に積まれる 1 件分の observation */
 interface QueueItem {
+  /** enqueue 時点で解決済みの表示名 */
   displayName: string
+  /** 観測値 */
   observation: UserObservation
 }
 
@@ -81,8 +84,8 @@ export class UserStateCoordinator {
    * フォールバック）のときは Repository が保持する既存の表示名で補完する。
    *
    * queue が上限に達している場合は非通知で drop し unhealthy にする
-   * （10.1 known limitation: この間の中間 transition は REST reconciliation でのみ
-   * 最終 state を補正できる）。
+   * (known limitation: drop された中間 transition は REST reconciliation でのみ
+   * 最終 state を補正できる)。
    *
    * @param userId ユーザー ID
    * @param displayName 表示名
@@ -209,7 +212,11 @@ export class UserStateCoordinator {
           }
           queue.shift()
           attempt = 0
-          this.unhealthy.delete(userId)
+          // queue-overflow は observation を取り戻せない永続的なデータ損失のため、
+          // 後続の commit が成功しても記録を消さない（persist-failure は回復可能なので消してよい）
+          if (this.unhealthy.get(userId)?.cause === 'persist-failure') {
+            this.unhealthy.delete(userId)
+          }
 
           if (effect.type !== 'no-op') {
             await this.onEffect(userId, item.displayName, effect).catch(

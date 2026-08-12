@@ -60,7 +60,17 @@ export class App {
     this.session = await VRChatSession.create(this.config)
 
     for (const userId of this.config.targetUserIds) {
-      const friend = await isFriend(this.session.client, userId)
+      let friend: boolean
+      try {
+        friend = await isFriend(this.session.client, userId)
+      } catch (error) {
+        // API 呼び出し自体の失敗（一時的なネットワーク不調や 429 等）は
+        // 「フレンドではない」と断定できないため、fatal にせず監視を継続する
+        logger.warn(
+          `Could not verify friend status for ${userId}, continuing to monitor: ${toError(error).message}`
+        )
+        continue
+      }
       if (!friend) {
         throw new Error(
           `Target user ${userId} is not a friend. Add them as a friend before monitoring.`
@@ -88,13 +98,20 @@ export class App {
       () => reconciler.reconcileAll()
     )
 
-    const authCookie = await this.session.getAuthCookie()
-    if (!authCookie) {
-      throw new Error(
-        'Failed to obtain auth cookie for Pipeline authentication'
-      )
+    const session = this.session
+    const getAuthCookie = async (): Promise<string> => {
+      const authCookie = await session.getAuthCookie()
+      if (!authCookie) {
+        throw new Error(
+          'Failed to obtain auth cookie for Pipeline authentication'
+        )
+      }
+      return authCookie
     }
-    await this.supervisor.start(authCookie)
+    // 起動時点で cookie が取得できることを早期に確認しておく
+    // (以後 reconnect のたびに provider が再取得することで、期限切れ/rotate にも追従する)
+    await getAuthCookie()
+    await this.supervisor.start(getAuthCookie)
 
     this.reconcileTimer = setInterval(() => {
       this.reconciler?.reconcileAll().catch((error: unknown) => {
@@ -120,14 +137,25 @@ export class App {
 
   /**
    * アプリケーションを停止する
+   *
+   * shutdown handler (main.ts) の `.catch`/`.finally` が確実に走るよう、
+   * 同期的な例外が発生してもここで飲み込み、reject させない。
    */
   stop(): Promise<void> {
     if (this.reconcileTimer) {
       clearInterval(this.reconcileTimer)
       this.reconcileTimer = null
     }
-    this.supervisor?.stop()
-    this.healthService?.stop()
+    try {
+      this.supervisor?.stop()
+    } catch (error) {
+      logger.error('Error while stopping supervisor', toError(error))
+    }
+    try {
+      this.healthService?.stop()
+    } catch (error) {
+      logger.error('Error while stopping health service', toError(error))
+    }
     return Promise.resolve()
   }
 

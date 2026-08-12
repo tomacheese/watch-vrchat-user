@@ -30,6 +30,30 @@ export const TRAVELING_LOCATION = 'traveling'
 export const ONLINE_SENTINEL = 'online'
 
 /**
+ * 値が 1 件分の UserState として有効かを検証する
+ *
+ * 壊れた・手編集された永続ファイルから `undefined` 等の不正値が
+ * `location`/`presence` に紛れ込むと、reducer の `=== null` 判定をすり抜けて
+ * 誤った通知を発火しうるため、個々のレコードの形を検証する。
+ *
+ * @param value 検証する値
+ * @returns 有効な場合は true
+ */
+function isValidUserState(value: unknown): value is UserState {
+  if (typeof value !== 'object' || value === null) {
+    return false
+  }
+  const obj = value as Record<string, unknown>
+  return (
+    typeof obj.userId === 'string' &&
+    typeof obj.displayName === 'string' &&
+    (obj.presence === 'online' || obj.presence === 'offline') &&
+    (obj.location === null || typeof obj.location === 'string') &&
+    typeof obj.updatedAt === 'string'
+  )
+}
+
+/**
  * データが schemaVersion 2 の UserStateStoreData として有効かを検証する
  *
  * @param raw 検証するデータ
@@ -40,11 +64,14 @@ export function isUserStateStoreData(raw: unknown): raw is UserStateStoreData {
     return false
   }
   const obj = raw as Record<string, unknown>
-  return (
-    obj.schemaVersion === 2 &&
-    typeof obj.users === 'object' &&
-    obj.users !== null
-  )
+  if (
+    obj.schemaVersion !== 2 ||
+    typeof obj.users !== 'object' ||
+    obj.users === null
+  ) {
+    return false
+  }
+  return Object.values(obj.users).every((user) => isValidUserState(user))
 }
 
 /** legacy (schemaVersion なし) 形式のユーザーレコード */
@@ -53,6 +80,27 @@ interface LegacyUserLocation {
   displayName: string
   location: string | null
   updatedAt: string
+}
+
+/**
+ * 値が 1 件分の legacy レコードとして有効かを検証する
+ *
+ * @param value 検証する値
+ * @returns 有効な場合は true
+ */
+function isValidLegacyUserLocation(
+  value: unknown
+): value is LegacyUserLocation {
+  if (typeof value !== 'object' || value === null) {
+    return false
+  }
+  const obj = value as Record<string, unknown>
+  return (
+    typeof obj.userId === 'string' &&
+    typeof obj.displayName === 'string' &&
+    (obj.location === null || typeof obj.location === 'string') &&
+    typeof obj.updatedAt === 'string'
+  )
 }
 
 /**
@@ -98,15 +146,18 @@ export function migrateStoreData(raw: unknown): UserStateStoreData {
     return { schemaVersion: 2, users: {} }
   }
 
-  const legacyUsers = (raw).users
+  const legacyUsers = raw.users
   if (typeof legacyUsers !== 'object' || legacyUsers === null) {
     return { schemaVersion: 2, users: {} }
   }
 
   const users: Record<string, UserState> = {}
   for (const [userId, legacy] of Object.entries(
-    legacyUsers as Record<string, LegacyUserLocation>
+    legacyUsers as Record<string, unknown>
   )) {
+    if (!isValidLegacyUserLocation(legacy)) {
+      continue
+    }
     users[userId] = migrateLegacyUser(legacy)
   }
 

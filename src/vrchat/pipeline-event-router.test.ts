@@ -4,7 +4,8 @@ import { UserStateCoordinator } from '../state/user-state-coordinator'
 import { UserStateRepository } from '../state/user-state-repository'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
-import * as path from 'node:path'
+import path from 'node:path'
+import type { PipelineEventEmitterLike } from './pipeline-event-router'
 
 function tempFilePath(): string {
   return path.join(
@@ -13,16 +14,23 @@ function tempFilePath(): string {
   )
 }
 
+// VRChat SDK の pipeline は Node 流の EventEmitter API を持つため、
+// fake もそれに合わせる（EventTarget では on()/emit() の形が一致しない）。
+function fakePipeline(): PipelineEventEmitterLike & EventEmitter {
+  // eslint-disable-next-line unicorn/prefer-event-target
+  return new EventEmitter()
+}
+
 describe('PipelineEventRouter', () => {
   it('対象ユーザーの friend-location を coordinator へ enqueue する', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
-    const coordinator = new UserStateCoordinator(repository, async () => {})
+    const coordinator = new UserStateCoordinator(repository, () =>
+      Promise.resolve()
+    )
     const enqueueSpy = jest.spyOn(coordinator, 'enqueue')
     const router = new PipelineEventRouter(['usr_1'], coordinator)
-    const pipeline = new EventEmitter() as unknown as EventEmitter & {
-      removeAllListeners: (event: string) => void
-    }
+    const pipeline = fakePipeline()
     router.attach(pipeline)
 
     pipeline.emit('friend-location', {
@@ -40,12 +48,12 @@ describe('PipelineEventRouter', () => {
   it('対象外ユーザーの event は無視する', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
-    const coordinator = new UserStateCoordinator(repository, async () => {})
+    const coordinator = new UserStateCoordinator(repository, () =>
+      Promise.resolve()
+    )
     const enqueueSpy = jest.spyOn(coordinator, 'enqueue')
     const router = new PipelineEventRouter(['usr_1'], coordinator)
-    const pipeline = new EventEmitter() as unknown as EventEmitter & {
-      removeAllListeners: (event: string) => void
-    }
+    const pipeline = fakePipeline()
     router.attach(pipeline)
 
     pipeline.emit('friend-online', {
@@ -59,12 +67,12 @@ describe('PipelineEventRouter', () => {
   it('不正な payload は enqueue せず無視する', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
-    const coordinator = new UserStateCoordinator(repository, async () => {})
+    const coordinator = new UserStateCoordinator(repository, () =>
+      Promise.resolve()
+    )
     const enqueueSpy = jest.spyOn(coordinator, 'enqueue')
     const router = new PipelineEventRouter(['usr_1'], coordinator)
-    const pipeline = new EventEmitter() as unknown as EventEmitter & {
-      removeAllListeners: (event: string) => void
-    }
+    const pipeline = fakePipeline()
     router.attach(pipeline)
 
     pipeline.emit('friend-online', { unexpected: true })
@@ -75,12 +83,12 @@ describe('PipelineEventRouter', () => {
   it('friend-offline はフォールバック displayName で enqueue する', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
-    const coordinator = new UserStateCoordinator(repository, async () => {})
+    const coordinator = new UserStateCoordinator(repository, () =>
+      Promise.resolve()
+    )
     const enqueueSpy = jest.spyOn(coordinator, 'enqueue')
     const router = new PipelineEventRouter(['usr_1'], coordinator)
-    const pipeline = new EventEmitter() as unknown as EventEmitter & {
-      removeAllListeners: (event: string) => void
-    }
+    const pipeline = fakePipeline()
     router.attach(pipeline)
 
     pipeline.emit('friend-offline', { userId: 'usr_1' })

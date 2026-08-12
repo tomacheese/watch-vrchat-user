@@ -94,7 +94,7 @@ export class HealthService {
    */
   stop(): void {
     if (!this.server) return
-    this.server.close(() => logger.info('Health check server stopped'))
+    this.server.close(() => { logger.info('Health check server stopped'); })
     this.server = null
   }
 

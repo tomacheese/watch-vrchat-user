@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
-import * as path from 'node:path'
+import path from 'node:path'
 import { App } from './app'
 import { VRChatSession } from './vrchat/session'
 import { PipelineTransportAdapter } from './vrchat/pipeline-transport'
@@ -15,7 +15,7 @@ jest.mock('./vrchat/pipeline-transport')
 // coordinator の queue 処理をブロックし（onEffect を await するため）、実ネットワーク
 // 呼び出しのタイムアウト・リトライ分だけテストを不安定に遅くしてしまう。
 jest.mock('@book000/node-utils', () => {
-  const actual = jest.requireActual('@book000/node-utils')
+  const actual: object = jest.requireActual('@book000/node-utils')
   return {
     ...actual,
     Discord: jest.fn().mockImplementation(() => ({
@@ -55,8 +55,15 @@ describe('App integration', () => {
       fs.mkdtempSync(path.join(os.tmpdir(), 'app-integration-')),
       'user-locations.json'
     )
-    pipeline = Object.assign(new EventEmitter(), {
-      removeAllListeners: EventEmitter.prototype.removeAllListeners,
+    // VRChat SDK の pipeline は Node 流の EventEmitter API を持つため、
+    // fake もそれに合わせる（EventTarget では on()/emit() の形が一致しない）。
+    // eslint-disable-next-line unicorn/prefer-event-target
+    const emitter = new EventEmitter()
+    const removeAllListeners = emitter.removeAllListeners.bind(emitter)
+    pipeline = Object.assign(emitter, {
+      removeAllListeners: (event: string) => {
+        removeAllListeners(event)
+      },
     })
     capturedCallbacks = []
 
@@ -71,24 +78,31 @@ describe('App integration', () => {
       status: 'offline',
     })
     ;(session.isFriend as jest.Mock).mockResolvedValue(true)
-    ;(
-      PipelineTransportAdapter as unknown as jest.Mock
-    ).mockImplementation(function (this: {
-      connect: jest.Mock
-      getReadyState: jest.Mock
-      ping: jest.Mock
-      close: jest.Mock
-    }) {
-      this.connect = jest
-        .fn()
-        .mockImplementation(async (_vrchat, _cookie, callbacks) => {
-          capturedCallbacks.push(callbacks)
-          callbacks.onOpen()
-        })
-      this.getReadyState = jest.fn().mockReturnValue(1)
-      this.ping = jest.fn()
-      this.close = jest.fn()
-    })
+    ;(PipelineTransportAdapter as unknown as jest.Mock).mockImplementation(
+      function (this: {
+        connect: jest.Mock
+        getReadyState: jest.Mock
+        ping: jest.Mock
+        close: jest.Mock
+      }) {
+        this.connect = jest
+          .fn()
+          .mockImplementation(
+            (
+              _vrchat: unknown,
+              _cookie: string,
+              callbacks: PipelineTransportCallbacks
+            ) => {
+              capturedCallbacks.push(callbacks)
+              callbacks.onOpen()
+              return Promise.resolve()
+            }
+          )
+        this.getReadyState = jest.fn().mockReturnValue(1)
+        this.ping = jest.fn()
+        this.close = jest.fn()
+      }
+    )
   })
 
   afterEach(() => {

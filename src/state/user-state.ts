@@ -98,7 +98,7 @@ export function migrateStoreData(raw: unknown): UserStateStoreData {
     return { schemaVersion: 2, users: {} }
   }
 
-  const legacyUsers = (raw as { users: unknown }).users
+  const legacyUsers = (raw).users
   if (typeof legacyUsers !== 'object' || legacyUsers === null) {
     return { schemaVersion: 2, users: {} }
   }

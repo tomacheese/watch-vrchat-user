@@ -3,11 +3,9 @@ import type { VRChat } from 'vrchat'
 /** SDK 内部の raw WebSocket が持つ最小限のインターフェース */
 export interface RawWebSocket {
   readyState: number
-  on(event: 'open', listener: () => void): void
-  on(event: 'close', listener: () => void): void
+  on(event: 'open' | 'close' | 'pong', listener: () => void): void
   on(event: 'error', listener: (error: Error) => void): void
   on(event: 'message', listener: (data: Buffer) => void): void
-  on(event: 'pong', listener: () => void): void
   ping(): void
 }
 
@@ -97,7 +95,9 @@ export class PipelineTransportAdapter implements PipelineTransport {
 
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
-        reject(new Error(`Pipeline WebSocket open timed out after ${timeoutMs}ms`))
+        reject(
+          new Error(`Pipeline WebSocket open timed out after ${timeoutMs}ms`)
+        )
       }, timeoutMs)
 
       rawWs.on('open', () => {

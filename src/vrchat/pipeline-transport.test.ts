@@ -2,14 +2,21 @@ import { EventEmitter } from 'node:events'
 import { PipelineTransportAdapter } from './pipeline-transport'
 import type { VRChat } from 'vrchat'
 
+// 本物の raw WebSocket (ws ライブラリ) は Node 流の EventEmitter API を持つため、
+// fake もそれに合わせる（EventTarget では on()/emit() の形が一致しない）。
+// eslint-disable-next-line unicorn/prefer-event-target
 class FakeRawWebSocket extends EventEmitter {
   readyState = 0 // CONNECTING
   ping = jest.fn()
 }
 
-function fakeVRChat(rawWs: FakeRawWebSocket, authenticate: jest.Mock): VRChat {
+function fakeVRChat(
+  rawWs: FakeRawWebSocket,
+  authenticate: jest.Mock,
+  close: jest.Mock = jest.fn()
+): VRChat {
   return {
-    pipeline: { authenticate, websocket: rawWs, close: jest.fn() },
+    pipeline: { authenticate, websocket: rawWs, close },
   } as unknown as VRChat
 }
 
@@ -104,10 +111,11 @@ describe('PipelineTransportAdapter.getReadyState / ping / close', () => {
 
   it('close は pipeline.close を best-effort で呼ぶ', () => {
     const rawWs = new FakeRawWebSocket()
-    const vrchat = fakeVRChat(rawWs, jest.fn())
+    const close = jest.fn()
+    const vrchat = fakeVRChat(rawWs, jest.fn(), close)
     const adapter = new PipelineTransportAdapter()
     adapter.close(vrchat)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((vrchat.pipeline as any).close).toHaveBeenCalledTimes(1)
+
+    expect(close).toHaveBeenCalledTimes(1)
   })
 })

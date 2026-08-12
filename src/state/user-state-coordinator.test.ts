@@ -1,6 +1,6 @@
 import * as fs from 'node:fs'
 import * as os from 'node:os'
-import * as path from 'node:path'
+import path from 'node:path'
 import { UserStateCoordinator } from './user-state-coordinator'
 import { UserStateRepository } from './user-state-repository'
 import type { ReducerEffect } from './user-state-reducer'
@@ -32,13 +32,17 @@ describe('UserStateCoordinator', () => {
     const effects: ReducerEffect[] = []
     const coordinator = new UserStateCoordinator(
       repository,
-      async (_userId, _displayName, effect) => {
+      (_userId, _displayName, effect) => {
         effects.push(effect)
+        return Promise.resolve()
       }
     )
 
     coordinator.enqueue('u1', 'Alice', { type: 'online' })
-    coordinator.enqueue('u1', 'Alice', { type: 'location', location: 'traveling' })
+    coordinator.enqueue('u1', 'Alice', {
+      type: 'location',
+      location: 'traveling',
+    })
     coordinator.enqueue('u1', 'Alice', { type: 'location', location: 'wrld_a' })
     coordinator.enqueue('u1', 'Alice', { type: 'location', location: 'wrld_b' })
     coordinator.enqueue('u1', 'Alice', { type: 'offline' })
@@ -65,7 +69,9 @@ describe('UserStateCoordinator', () => {
   it('appendSnapshotObservation は expectedSeq が古い場合 dropped し false を返す', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
-    const coordinator = new UserStateCoordinator(repository, async () => {})
+    const coordinator = new UserStateCoordinator(repository, () =>
+      Promise.resolve()
+    )
 
     const seq = coordinator.captureSeq('u1')
     coordinator.enqueue('u1', 'Alice', { type: 'online' }) // seq を進める
@@ -82,7 +88,9 @@ describe('UserStateCoordinator', () => {
   it('appendSnapshotObservation は queue に変化がなければ true を返し末尾に追記する', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
-    const coordinator = new UserStateCoordinator(repository, async () => {})
+    const coordinator = new UserStateCoordinator(repository, () =>
+      Promise.resolve()
+    )
 
     const seq = coordinator.captureSeq('u1')
     const appended = coordinator.appendSnapshotObservation(
@@ -112,19 +120,22 @@ describe('UserStateCoordinator', () => {
     // reducer が current=undefined のまま扱ってしまうため）
     const realCommit = repository.commitUserState.bind(repository)
     let callCount = 0
-    jest.spyOn(repository, 'commitUserState').mockImplementation(async (userId, nextState) => {
-      callCount += 1
-      if (callCount === 1) {
-        throw new Error('disk full')
-      }
-      return realCommit(userId, nextState)
-    })
+    jest
+      .spyOn(repository, 'commitUserState')
+      .mockImplementation(async (userId, nextState) => {
+        callCount += 1
+        if (callCount === 1) {
+          throw new Error('disk full')
+        }
+        return realCommit(userId, nextState)
+      })
 
     const effects: ReducerEffect[] = []
     const coordinator = new UserStateCoordinator(
       repository,
-      async (_userId, _displayName, effect) => {
+      (_userId, _displayName, effect) => {
         effects.push(effect)
+        return Promise.resolve()
       },
       { initialBackoffMs: 30, maxBackoffMs: 30 }
     )
@@ -148,10 +159,15 @@ describe('UserStateCoordinator', () => {
     repository.load()
     jest
       .spyOn(repository, 'commitUserState')
-      .mockReturnValue(new Promise(() => {})) // 永遠に処理中にする
-    const coordinator = new UserStateCoordinator(repository, async () => {}, {
-      maxQueueSize: 2,
-    })
+      // eslint-disable-next-line @typescript-eslint/no-empty-function -- queue-overflow を検証するため commit を意図的に永遠に処理中にする
+      .mockReturnValue(new Promise(() => {}))
+    const coordinator = new UserStateCoordinator(
+      repository,
+      () => Promise.resolve(),
+      {
+        maxQueueSize: 2,
+      }
+    )
 
     coordinator.enqueue('u1', 'Alice', { type: 'online' })
     coordinator.enqueue('u1', 'Alice', { type: 'location', location: 'wrld_a' })

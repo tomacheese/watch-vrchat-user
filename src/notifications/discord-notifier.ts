@@ -194,17 +194,16 @@ export class DiscordNotifier {
    * @param ms タイムアウトまでのミリ秒
    */
   private async withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-    let timer: NodeJS.Timeout
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(
-        () => reject(new Error(`Discord send timed out after ${ms}ms`)),
-        ms
-      )
+    let timer: NodeJS.Timeout | undefined
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`Discord send timed out after ${ms}ms`))
+      }, ms)
     })
     try {
       return await Promise.race([promise, timeout])
     } finally {
-      clearTimeout(timer!)
+      clearTimeout(timer)
     }
   }
 

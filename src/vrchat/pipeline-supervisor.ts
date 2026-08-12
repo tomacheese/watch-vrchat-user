@@ -10,11 +10,7 @@ const logger = Logger.configure('PIPELINE-SUPERVISOR')
 
 /** Pipeline 接続の状態 */
 export type SupervisorState =
-  | 'stopped'
-  | 'connecting'
-  | 'synchronizing'
-  | 'ready'
-  | 'reconnecting'
+  'stopped' | 'connecting' | 'synchronizing' | 'ready' | 'reconnecting'
 
 /** PipelineSupervisor の挙動を調整するオプション */
 export interface PipelineSupervisorOptions {
@@ -113,7 +109,7 @@ export class PipelineSupervisor {
       return
     }
     this.lastReconnectReason = reason
-    void this.reconnect()
+    this.startReconnect()
   }
 
   getState(): SupervisorState {
@@ -146,7 +142,6 @@ export class PipelineSupervisor {
   private async connectOnce(): Promise<void> {
     const myGeneration = this.generation
     this.state = 'connecting'
-    const callbacks = this.buildCallbacks(myGeneration)
 
     if (!this.authCookie) {
       throw new Error(
@@ -154,6 +149,7 @@ export class PipelineSupervisor {
       )
     }
 
+    const callbacks = this.buildCallbacks(myGeneration)
     await this.transport.connect(this.vrchat, this.authCookie, callbacks)
     if (myGeneration !== this.generation) {
       return
@@ -180,17 +176,19 @@ export class PipelineSupervisor {
    */
   private buildCallbacks(myGeneration: number): PipelineTransportCallbacks {
     return {
+      // raw open は supervisor 側で liveness 状態を持たないため何もしない
+      // eslint-disable-next-line @typescript-eslint/no-empty-function
       onOpen: () => {},
       onClose: () => {
         if (myGeneration !== this.generation) return
         this.lastReconnectReason = 'raw close'
-        void this.reconnect()
+        this.startReconnect()
       },
       onError: (error: Error) => {
         if (myGeneration !== this.generation) return
         logger.error('Raw pipeline error', toError(error))
         this.lastReconnectReason = 'raw error'
-        void this.reconnect()
+        this.startReconnect()
       },
       onMessage: () => {
         if (myGeneration !== this.generation) return
@@ -213,17 +211,20 @@ export class PipelineSupervisor {
    * @param myGeneration 監視対象の generation
    */
   private startLivenessTimers(myGeneration: number): void {
-    this.staleCheckTimer = setInterval(() => {
-      if (myGeneration !== this.generation) return
-      const reference = this.lastMessageAt
-      if (
-        reference &&
-        Date.now() - reference.getTime() >= this.staleMessageTimeoutMs
-      ) {
-        this.lastReconnectReason = 'stale message stream'
-        void this.reconnect()
-      }
-    }, Math.min(this.staleMessageTimeoutMs, 60_000))
+    this.staleCheckTimer = setInterval(
+      () => {
+        if (myGeneration !== this.generation) return
+        const reference = this.lastMessageAt
+        if (
+          reference &&
+          Date.now() - reference.getTime() >= this.staleMessageTimeoutMs
+        ) {
+          this.lastReconnectReason = 'stale message stream'
+          this.startReconnect()
+        }
+      },
+      Math.min(this.staleMessageTimeoutMs, 60_000)
+    )
 
     this.pingTimer = setInterval(() => {
       if (myGeneration !== this.generation) return
@@ -235,7 +236,7 @@ export class PipelineSupervisor {
       this.pingTimeoutTimer = setTimeout(() => {
         if (myGeneration !== this.generation) return
         this.lastReconnectReason = 'pong timeout'
-        void this.reconnect()
+        this.startReconnect()
       }, this.pongTimeoutMs)
     }, this.pingIntervalMs)
   }
@@ -261,6 +262,9 @@ export class PipelineSupervisor {
     this.reconnectAttempts += 1
     await new Promise((resolve) => setTimeout(resolve, delay))
 
+    // backoff 待機中に stop() が呼ばれ state が変わっている可能性があるため、
+    // 型上は常に 'reconnecting' に見えてもこのチェックは必要（false positive）
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (this.state !== 'reconnecting') {
       return
     }
@@ -269,8 +273,20 @@ export class PipelineSupervisor {
       await this.connectOnce()
     } catch (error) {
       logger.error('Reconnect attempt failed', toError(error))
-      void this.reconnect()
+      this.startReconnect()
     }
+  }
+
+  /**
+   * `reconnect` を fire-and-forget で開始する
+   *
+   * このリポジトリの ESLint 設定は `no-void` を禁止しているため、`no-floating-promises`
+   * を `void` ではなくこの明示的な `.catch` ラッパーで満たす。
+   */
+  private startReconnect(): void {
+    this.reconnect().catch((error: unknown) => {
+      logger.error('Unexpected error during reconnect', toError(error))
+    })
   }
 
   /**

@@ -4,7 +4,7 @@ import { UserStateRepository } from './user-state-repository'
 import * as session from '../vrchat/session'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
-import * as path from 'node:path'
+import path from 'node:path'
 import type { VRChat } from 'vrchat'
 
 jest.mock('../vrchat/session')
@@ -20,7 +20,9 @@ describe('Reconciler.reconcileAll', () => {
   it('REST snapshot を observation として compare-and-enqueue する', async () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
-    const coordinator = new UserStateCoordinator(repository, async () => {})
+    const coordinator = new UserStateCoordinator(repository, () =>
+      Promise.resolve()
+    )
     const appendSpy = jest.spyOn(coordinator, 'appendSnapshotObservation')
     ;(session.getUser as jest.Mock).mockResolvedValue({
       id: 'usr_1',
@@ -29,11 +31,9 @@ describe('Reconciler.reconcileAll', () => {
       status: 'active',
     })
 
-    const reconciler = new Reconciler(
-      () => ({}) as VRChat,
-      coordinator,
-      ['usr_1']
-    )
+    const reconciler = new Reconciler(() => ({}) as VRChat, coordinator, [
+      'usr_1',
+    ])
     await reconciler.reconcileAll()
 
     expect(appendSpy).toHaveBeenCalledWith(
@@ -48,7 +48,9 @@ describe('Reconciler.reconcileAll', () => {
   it('location が null の場合は offline observation を追記する', async () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
-    const coordinator = new UserStateCoordinator(repository, async () => {})
+    const coordinator = new UserStateCoordinator(repository, () =>
+      Promise.resolve()
+    )
     const appendSpy = jest.spyOn(coordinator, 'appendSnapshotObservation')
     ;(session.getUser as jest.Mock).mockResolvedValue({
       id: 'usr_1',
@@ -57,30 +59,34 @@ describe('Reconciler.reconcileAll', () => {
       status: 'offline',
     })
 
-    const reconciler = new Reconciler(
-      () => ({}) as VRChat,
-      coordinator,
-      ['usr_1']
-    )
+    const reconciler = new Reconciler(() => ({}) as VRChat, coordinator, [
+      'usr_1',
+    ])
     await reconciler.reconcileAll()
 
-    expect(appendSpy).toHaveBeenCalledWith('usr_1', 'Alice', { type: 'offline' }, 0)
+    expect(appendSpy).toHaveBeenCalledWith(
+      'usr_1',
+      'Alice',
+      { type: 'offline' },
+      0
+    )
   })
 
   it('429 エラーが発生した場合は残りのユーザーの reconcile を中断する', async () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
-    const coordinator = new UserStateCoordinator(repository, async () => {})
+    const coordinator = new UserStateCoordinator(repository, () =>
+      Promise.resolve()
+    )
     const appendSpy = jest.spyOn(coordinator, 'appendSnapshotObservation')
     ;(session.getUser as jest.Mock).mockRejectedValue(
       new Error('Rate limit error (429): too many requests')
     )
 
-    const reconciler = new Reconciler(
-      () => ({}) as VRChat,
-      coordinator,
-      ['usr_1', 'usr_2']
-    )
+    const reconciler = new Reconciler(() => ({}) as VRChat, coordinator, [
+      'usr_1',
+      'usr_2',
+    ])
     await reconciler.reconcileAll()
 
     expect(appendSpy).not.toHaveBeenCalled()
@@ -89,7 +95,9 @@ describe('Reconciler.reconcileAll', () => {
   it('vrchat が未接続の場合は何もしない', async () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
-    const coordinator = new UserStateCoordinator(repository, async () => {})
+    const coordinator = new UserStateCoordinator(repository, () =>
+      Promise.resolve()
+    )
     const appendSpy = jest.spyOn(coordinator, 'appendSnapshotObservation')
 
     const reconciler = new Reconciler(() => null, coordinator, ['usr_1'])

@@ -1,6 +1,10 @@
 import { Logger } from '@book000/node-utils'
 import { toError } from '../logger-utils'
-import { reduce, type ReducerEffect, type UserObservation } from './user-state-reducer'
+import {
+  reduce,
+  type ReducerEffect,
+  type UserObservation,
+} from './user-state-reducer'
 import type { UserStateRepository } from './user-state-repository'
 
 const logger = Logger.configure('USER-STATE-COORDINATOR')
@@ -64,7 +68,8 @@ export class UserStateCoordinator {
     ) => Promise<void>,
     options: UserStateCoordinatorOptions = {}
   ) {
-    this.initialBackoffMs = options.initialBackoffMs ?? DEFAULT_INITIAL_BACKOFF_MS
+    this.initialBackoffMs =
+      options.initialBackoffMs ?? DEFAULT_INITIAL_BACKOFF_MS
     this.maxBackoffMs = options.maxBackoffMs ?? DEFAULT_MAX_BACKOFF_MS
     this.maxQueueSize = options.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE
   }
@@ -83,7 +88,11 @@ export class UserStateCoordinator {
    * @param displayName 表示名
    * @param observation 観測値
    */
-  enqueue(userId: string, displayName: string, observation: UserObservation): void {
+  enqueue(
+    userId: string,
+    displayName: string,
+    observation: UserObservation
+  ): void {
     const resolvedDisplayName =
       displayName === userId
         ? (this.repository.get(userId)?.displayName ?? displayName)
@@ -96,12 +105,14 @@ export class UserStateCoordinator {
 
     if (queue.length >= this.maxQueueSize) {
       this.markUnhealthy(userId, 'queue-overflow')
-      logger.error(`Queue overflow for user ${userId}, dropping new observation`)
+      logger.error(
+        `Queue overflow for user ${userId}, dropping new observation`
+      )
       return
     }
 
     queue.push({ displayName: resolvedDisplayName, observation })
-    void this.processQueue(userId)
+    this.startProcessingQueue(userId)
   }
 
   /**
@@ -183,27 +194,45 @@ export class UserStateCoordinator {
 
         const item = queue[0]
         const current = this.repository.get(userId)
-        const { nextState, effect } = reduce(current, item.displayName, item.observation)
+        const { nextState, effect } = reduce(
+          current,
+          item.displayName,
+          item.observation
+        )
 
         try {
           if (nextState) {
-            await this.repository.commitUserState(userId, { ...nextState, userId })
+            await this.repository.commitUserState(userId, {
+              ...nextState,
+              userId,
+            })
           }
           queue.shift()
           attempt = 0
           this.unhealthy.delete(userId)
 
           if (effect.type !== 'no-op') {
-            await this.onEffect(userId, item.displayName, effect).catch((error: unknown) => {
-              // 通知失敗はログのみ。persist 済みの state は既に確定しているため、
-              // 通知の再送は行わず次の observation の処理を継続する。
-              logger.error(`Failed to dispatch effect for user ${userId}`, toError(error))
-            })
+            await this.onEffect(userId, item.displayName, effect).catch(
+              (error: unknown) => {
+                // 通知失敗はログのみ。persist 済みの state は既に確定しているため、
+                // 通知の再送は行わず次の observation の処理を継続する。
+                logger.error(
+                  `Failed to dispatch effect for user ${userId}`,
+                  toError(error)
+                )
+              }
+            )
           }
         } catch (error) {
           this.markUnhealthy(userId, 'persist-failure')
-          logger.error(`Failed to persist state for user ${userId}`, toError(error))
-          const delay = Math.min(this.initialBackoffMs * 2 ** attempt, this.maxBackoffMs)
+          logger.error(
+            `Failed to persist state for user ${userId}`,
+            toError(error)
+          )
+          const delay = Math.min(
+            this.initialBackoffMs * 2 ** attempt,
+            this.maxBackoffMs
+          )
           attempt += 1
           await this.sleep(delay)
         }
@@ -214,9 +243,26 @@ export class UserStateCoordinator {
       // 可能性があるため、queue が空でなければ処理ループを再起動する
       const queue = this.queues.get(userId)
       if (queue && queue.length > 0) {
-        void this.processQueue(userId)
+        this.startProcessingQueue(userId)
       }
     }
+  }
+
+  /**
+   * `processQueue` を fire-and-forget で開始する
+   *
+   * このリポジトリの ESLint 設定は `no-void` を禁止しているため、`no-floating-promises`
+   * を `void` ではなくこの明示的な `.catch` ラッパーで満たす。
+   *
+   * @param userId ユーザー ID
+   */
+  private startProcessingQueue(userId: string): void {
+    this.processQueue(userId).catch((error: unknown) => {
+      logger.error(
+        `Unexpected error while processing queue for user ${userId}`,
+        toError(error)
+      )
+    })
   }
 
   /**

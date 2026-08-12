@@ -26,40 +26,6 @@ export interface ReduceResult {
 }
 
 /**
- * WebSocket event / REST snapshot 共通の状態遷移を計算する純粋関数
- *
- * @param current 現在の永続 state（未知のユーザーは undefined）
- * @param displayName ユーザーの表示名
- * @param observation 正規化済みの観測値
- * @param now 現在時刻を返す関数（テスト用に注入可能）
- * @returns 更新後の state と発火すべき effect
- */
-export function reduce(
-  current: UserState | undefined,
-  displayName: string,
-  observation: UserObservation,
-  now: () => string = () => new Date().toISOString()
-): ReduceResult {
-  if (
-    observation.type === 'location' &&
-    observation.location === TRAVELING_LOCATION
-  ) {
-    // traveling は transient observation であり、persisted location も lastConfirmedLocation も変更しない
-    return { nextState: current, effect: { type: 'no-op' } }
-  }
-
-  if (observation.type === 'location') {
-    return reduceLocation(current, displayName, observation.location, now)
-  }
-
-  if (observation.type === 'online') {
-    return reduceOnline(current, displayName, now)
-  }
-
-  return reduceOffline(current, displayName, now)
-}
-
-/**
  * concrete location（private を含む）の観測値を処理する
  *
  * @param current 現在の state
@@ -198,4 +164,38 @@ function reduceOffline(
     },
     effect: { type: 'offline' },
   }
+}
+
+/**
+ * WebSocket event / REST snapshot 共通の状態遷移を計算する純粋関数
+ *
+ * @param current 現在の永続 state（未知のユーザーは undefined）
+ * @param displayName ユーザーの表示名
+ * @param observation 正規化済みの観測値
+ * @param now 現在時刻を返す関数（テスト用に注入可能）
+ * @returns 更新後の state と発火すべき effect
+ */
+export function reduce(
+  current: UserState | undefined,
+  displayName: string,
+  observation: UserObservation,
+  now: () => string = () => new Date().toISOString()
+): ReduceResult {
+  if (
+    observation.type === 'location' &&
+    observation.location === TRAVELING_LOCATION
+  ) {
+    // traveling は transient observation であり、persisted location も lastConfirmedLocation も変更しない
+    return { nextState: current, effect: { type: 'no-op' } }
+  }
+
+  if (observation.type === 'location') {
+    return reduceLocation(current, displayName, observation.location, now)
+  }
+
+  if (observation.type === 'online') {
+    return reduceOnline(current, displayName, now)
+  }
+
+  return reduceOffline(current, displayName, now)
 }

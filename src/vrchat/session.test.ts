@@ -3,6 +3,12 @@ import { VRChatSession } from './session'
 
 jest.mock('keyv-file')
 
+// private constructor を経由せず getAuthCookie() 単体をテストするための最小限のアクセサ型
+interface SessionTestAccessor {
+  keyvAdapter: KeyvFile
+  getAuthCookie: () => Promise<string | undefined>
+}
+
 describe('VRChatSession.getAuthCookie', () => {
   it('保存済み Cookie から auth cookie を抽出する', async () => {
     const mockGet = jest
@@ -14,8 +20,9 @@ describe('VRChatSession.getAuthCookie', () => {
       get: mockGet,
     }))
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const session = Object.create(VRChatSession.prototype) as any
+    const session = Object.create(
+      VRChatSession.prototype
+    ) as SessionTestAccessor
     session.keyvAdapter = new KeyvFile({ filename: 'unused' })
 
     const cookie = await session.getAuthCookie()
@@ -28,8 +35,9 @@ describe('VRChatSession.getAuthCookie', () => {
       get: mockGet,
     }))
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const session = Object.create(VRChatSession.prototype) as any
+    const session = Object.create(
+      VRChatSession.prototype
+    ) as SessionTestAccessor
     session.keyvAdapter = new KeyvFile({ filename: 'unused' })
 
     const cookie = await session.getAuthCookie()

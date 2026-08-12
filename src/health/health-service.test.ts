@@ -75,7 +75,11 @@ describe('HealthService', () => {
     const service = new HealthService(() => ({
       ...healthySnapshot,
       unhealthyUsers: [
-        { userId: 'usr_1', cause: 'queue-overflow', since: new Date().toISOString() },
+        {
+          userId: 'usr_1',
+          cause: 'queue-overflow',
+          since: new Date().toISOString(),
+        },
       ],
     }))
     service.start()

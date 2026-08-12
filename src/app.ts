@@ -74,20 +74,25 @@ export class App {
     )
     router.attach(this.session.client.pipeline)
 
-    this.reconciler = new Reconciler(
+    const reconciler = new Reconciler(
       () => this.session?.client ?? null,
       this.coordinator,
       this.config.targetUserIds
     )
+    this.reconciler = reconciler
 
     const transport = new PipelineTransportAdapter()
-    this.supervisor = new PipelineSupervisor(this.session.client, transport, () =>
-      this.reconciler!.reconcileAll()
+    this.supervisor = new PipelineSupervisor(
+      this.session.client,
+      transport,
+      () => reconciler.reconcileAll()
     )
 
     const authCookie = await this.session.getAuthCookie()
     if (!authCookie) {
-      throw new Error('Failed to obtain auth cookie for Pipeline authentication')
+      throw new Error(
+        'Failed to obtain auth cookie for Pipeline authentication'
+      )
     }
     await this.supervisor.start(authCookie)
 
@@ -116,13 +121,14 @@ export class App {
   /**
    * アプリケーションを停止する
    */
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
     if (this.reconcileTimer) {
       clearInterval(this.reconcileTimer)
       this.reconcileTimer = null
     }
     this.supervisor?.stop()
     this.healthService?.stop()
+    return Promise.resolve()
   }
 
   /**
@@ -139,17 +145,28 @@ export class App {
     displayName: string,
     effect: ReducerEffect
   ): Promise<void> {
-    if (effect.type === 'online') {
-      await notifier.notifyOnline({ displayName, userId })
-    } else if (effect.type === 'offline') {
-      await notifier.notifyOffline({ displayName, userId })
-    } else if (effect.type === 'location-change') {
-      await notifier.notifyLocationChange({
-        displayName,
-        userId,
-        previousLocation: effect.previousLocation,
-        currentLocation: effect.currentLocation,
-      })
+    switch (effect.type) {
+      case 'online': {
+        await notifier.notifyOnline({ displayName, userId })
+
+        break
+      }
+      case 'offline': {
+        await notifier.notifyOffline({ displayName, userId })
+
+        break
+      }
+      case 'location-change': {
+        await notifier.notifyLocationChange({
+          displayName,
+          userId,
+          previousLocation: effect.previousLocation,
+          currentLocation: effect.currentLocation,
+        })
+
+        break
+      }
+      // No default
     }
   }
 

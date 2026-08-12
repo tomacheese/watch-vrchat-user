@@ -1,6 +1,6 @@
 import * as fs from 'node:fs'
 import * as os from 'node:os'
-import * as path from 'node:path'
+import path from 'node:path'
 import { App } from './app'
 import { VRChatSession, isFriend } from './vrchat/session'
 import { PipelineSupervisor } from './vrchat/pipeline-supervisor'
@@ -43,9 +43,9 @@ describe('App.start', () => {
         await onSynchronize()
       })
     })
-    ;(Reconciler as unknown as jest.Mock).mockImplementation(function (
-      this: { reconcileAll: jest.Mock }
-    ) {
+    ;(Reconciler as unknown as jest.Mock).mockImplementation(function (this: {
+      reconcileAll: jest.Mock
+    }) {
       this.reconcileAll = jest.fn().mockResolvedValue(undefined)
     })
   })
@@ -59,10 +59,11 @@ describe('App.start', () => {
     const app = new App(config())
     await app.start()
 
+    // static method を値として渡すため this バインディングに依存せず false positive
+    // eslint-disable-next-line @typescript-eslint/unbound-method
     expect(VRChatSession.create).toHaveBeenCalledTimes(1)
-    const supervisorInstance = (
-      PipelineSupervisor as unknown as jest.Mock
-    ).mock.instances[0] as {
+    const supervisorInstance = (PipelineSupervisor as unknown as jest.Mock).mock
+      .instances[0] as {
       start: jest.Mock
     }
     expect(supervisorInstance.start).toHaveBeenCalledWith('cookie')

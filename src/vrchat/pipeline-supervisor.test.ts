@@ -22,11 +22,14 @@ class FakeTransport implements PipelineTransport {
     }
   }
 
+  // fake の ping/close は呼び出し記録が不要なテストでのみ使うため no-op でよい
+  /* eslint-disable @typescript-eslint/no-empty-function */
   ping(): void {}
+  close(): void {}
+  /* eslint-enable @typescript-eslint/no-empty-function */
   getReadyState(): number {
     return this.readyState
   }
-  close(): void {}
 }
 
 const fakeVrchat = {} as VRChat
@@ -34,9 +37,12 @@ const fakeVrchat = {} as VRChat
 describe('PipelineSupervisor', () => {
   it('raw open 前は ready にならず、synchronize 完了後に ready になる', async () => {
     const transport = new FakeTransport()
-    let synchronizeResolve: () => void = () => {}
+    let synchronizeResolve = (): void => undefined
     const onSynchronize = jest.fn(
       () =>
+        // Promise.withResolvers() の resolve は `(value: void) => void` 型となり
+        // no-invalid-void-type と衝突するため、この形のまま使う
+        // eslint-disable-next-line unicorn/prefer-promise-with-resolvers
         new Promise<void>((resolve) => {
           synchronizeResolve = resolve
         })
@@ -82,10 +88,8 @@ describe('PipelineSupervisor', () => {
 
   it('raw message は liveness (lastMessageAt) を更新する', async () => {
     const transport = new FakeTransport()
-    const supervisor = new PipelineSupervisor(
-      fakeVrchat,
-      transport,
-      async () => {}
+    const supervisor = new PipelineSupervisor(fakeVrchat, transport, () =>
+      Promise.resolve()
     )
     await supervisor.start('cookie')
 
@@ -99,7 +103,7 @@ describe('PipelineSupervisor', () => {
     const supervisor = new PipelineSupervisor(
       fakeVrchat,
       transport,
-      async () => {},
+      () => Promise.resolve(),
       {
         initialBackoffMs: 1,
         maxBackoffMs: 2,
@@ -123,7 +127,7 @@ describe('PipelineSupervisor', () => {
     const supervisor = new PipelineSupervisor(
       fakeVrchat,
       transport,
-      async () => {},
+      () => Promise.resolve(),
       {
         pingIntervalMs: 10,
         pongTimeoutMs: 20,

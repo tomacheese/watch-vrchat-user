@@ -207,7 +207,12 @@ export async function getUser(
   const location =
     user.location && user.location !== 'offline' ? user.location : null
 
-  return { id: user.id, displayName: user.displayName, location, status: user.status }
+  return {
+    id: user.id,
+    displayName: user.displayName,
+    location,
+    status: user.status,
+  }
 }
 
 /**
@@ -226,7 +231,9 @@ export async function getFriendIds(vrchat: VRChat): Promise<string[]> {
   while (true) {
     const result = await vrchat.getFriends({ query: { n: limit, offset } })
     if (result.error) {
-      logger.error(`Failed to get friends (offset=${offset}): ${result.error.message}`)
+      logger.error(
+        `Failed to get friends (offset=${offset}): ${result.error.message}`
+      )
       break
     }
     for (const friend of result.data) {

@@ -1,6 +1,6 @@
 import * as fs from 'node:fs'
 import * as os from 'node:os'
-import * as path from 'node:path'
+import path from 'node:path'
 import { UserStateRepository } from './user-state-repository'
 
 function tempFilePath(): string {
@@ -85,6 +85,6 @@ describe('UserStateRepository', () => {
     const written = JSON.parse(fs.readFileSync(filePath, 'utf8')) as {
       users: Record<string, unknown>
     }
-    expect(Object.keys(written.users).sort()).toEqual(['u1', 'u2'])
+    expect(Object.keys(written.users).toSorted((a, b) => a.localeCompare(b))).toEqual(['u1', 'u2'])
   })
 })

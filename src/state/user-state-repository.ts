@@ -1,7 +1,7 @@
 import { Logger } from '@book000/node-utils'
 import * as fs from 'node:fs'
 import * as fsPromises from 'node:fs/promises'
-import * as path from 'node:path'
+import path from 'node:path'
 import { toError } from '../logger-utils'
 import {
   migrateStoreData,

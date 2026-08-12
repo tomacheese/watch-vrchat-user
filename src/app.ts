@@ -104,6 +104,16 @@ export class App {
   }
 
   /**
+   * 指定ユーザーの現在の永続 state を取得する（テスト・診断用）
+   *
+   * @param userId ユーザー ID
+   * @returns 現在の state、未初期化または存在しない場合は undefined
+   */
+  getUserState(userId: string) {
+    return this.repository?.get(userId)
+  }
+
+  /**
    * アプリケーションを停止する
    */
   async stop(): Promise<void> {

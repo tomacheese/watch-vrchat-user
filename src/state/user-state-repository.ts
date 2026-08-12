@@ -11,9 +11,8 @@ import {
 
 const logger = Logger.configure('USER-STATE-REPOSITORY')
 
-/** ユーザー state データファイルのパス（環境変数で上書き可能） */
-const DEFAULT_FILE_PATH =
-  process.env.LOCATION_FILE_PATH ?? 'data/user-locations.json'
+/** ユーザー state データファイルの既定パス（環境変数が未設定の場合） */
+const FALLBACK_FILE_PATH = 'data/user-locations.json'
 
 /**
  * `user-locations.json` への store-wide lock 付き atomic な読み書きを担うクラス
@@ -31,8 +30,11 @@ export class UserStateRepository {
    *
    * @param filePath ストアファイルのパス（省略時は環境変数 `LOCATION_FILE_PATH` または既定値）
    */
-  constructor(filePath: string = DEFAULT_FILE_PATH) {
-    this.filePath = filePath
+  constructor(filePath?: string) {
+    // 環境変数はコンストラクタ呼び出し時に読む（モジュール読み込み時に固定すると、
+    // テストごとに `LOCATION_FILE_PATH` を差し替えても反映されない）
+    this.filePath =
+      filePath ?? process.env.LOCATION_FILE_PATH ?? FALLBACK_FILE_PATH
   }
 
   /**

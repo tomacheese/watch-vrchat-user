@@ -60,12 +60,18 @@ pnpm test
 ```
 
 ## アーキテクチャと主要ファイル
-- `src/main.ts`: エントリーポイント。各モジュールを配線し、`friend-location` / `friend-online` / `friend-offline` イベントを処理する
-- `src/websocket-monitor.ts`: VRChat パイプライン WebSocket への接続・再接続とイベント受信を管理する中核モジュール
-- `src/vrchat-client.ts`: VRChat API クライアント (SDK ラッパー)。認証・Cookie 永続化・2FA を担う
-- `src/discord-notifier.ts`: Discord 通知処理 (`location-change` / `online` / `offline`)
-- `src/location-store.ts`: ユーザー位置情報の管理・永続化 (前回値との比較で重複通知を抑制)
-- `src/health-server.ts`: localhost のみでアクセス可能なヘルスチェック HTTP サーバー (WebSocket 接続状態・最終イベント受信時刻を返す)
+- `src/main.ts`: エントリーポイント。設定読み込みと `App` の起動・シグナルハンドリングのみを担う
+- `src/app.ts`: 各モジュールの配線と起動・reconnect・定期 REST reconciliation シーケンスを担う
+- `src/vrchat/session.ts`: VRChat REST 認証・Cookie 永続化・2FA・`getUser`/`isFriend`/`getFriendIds` を担う（Pipeline 開始は担当しない）
+- `src/vrchat/pipeline-transport.ts`: VRChat SDK の raw WebSocket (`open`/`close`/`error`/`message`/`pong`/`readyState`) への唯一のアクセス経路
+- `src/vrchat/pipeline-supervisor.ts`: Pipeline の接続状態・connection generation・liveness・reconnect backoff を管理する
+- `src/vrchat/pipeline-event-router.ts`: `friend-location` / `friend-online` / `friend-offline` を正規化して `UserStateCoordinator` へ渡す
+- `src/state/user-state-reducer.ts`: WebSocket event / REST snapshot 共通の純粋な状態遷移関数
+- `src/state/user-state-repository.ts`: `user-locations.json` への store-wide lock 付き atomic 読み書き
+- `src/state/user-state-coordinator.ts`: ユーザーごとの observation を直列処理する single-writer queue
+- `src/state/reconciler.ts`: REST snapshot を compare-and-enqueue で queue に追記する
+- `src/notifications/discord-notifier.ts`: Discord 通知処理 (`location-change` / `online` / `offline`、bounded timeout 付き)
+- `src/health/health-service.ts`: localhost のみでアクセス可能なヘルスチェック HTTP サーバー (supervisor state・generation・per-user unhealthy 等を返す)
 - `src/config.ts`: 環境変数からの設定読み込みとバリデーション
 - `src/logger-utils.ts`: unknown 型の値を Error に変換する `toError` ヘルパーを提供する
 - `data/`: 永続化データ保存先 (Cookie 等)
@@ -84,7 +90,7 @@ pnpm test
 - 認証はユーザー名 / パスワード + 2FA (TOTP)。取得した Cookie は `data/` に `keyv-file` で永続化し、再ログイン回数を減らす
 - リアルタイム通知は VRChat パイプラインサーバー (`wss://pipeline.vrchat.cloud/`) の WebSocket で配信される
 - 主に利用するイベント: `friend-location` (Location 変更・監視の中心)、`friend-online`、`friend-offline`、`notification`
-- Location 変更検知は `friend-location` を基準に `location-store.ts` で前回値と比較し、同一 Location の重複通知を抑制する
+- Location 変更検知は `friend-location` を基準に `src/state/user-state-reducer.ts` で前回値と比較し、同一 Location の重複通知を抑制する
 - 仕様変更の可能性があるため、公式 (https://creators.vrchat.com/) / 非公式コミュニティ (https://vrchatapi.github.io/) のドキュメントを随時確認する
 
 ## テスト

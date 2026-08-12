@@ -1,6 +1,6 @@
 import { Discord, Logger, type DiscordEmbed } from '@book000/node-utils'
-import type { Config } from './config'
-import { toError } from './logger-utils'
+import type { Config } from '../config'
+import { toError } from '../logger-utils'
 
 const logger = Logger.configure('DISCORD')
 
@@ -54,6 +54,8 @@ const COLORS = {
  */
 export class DiscordNotifier {
   private discord: Discord
+  private readonly timeoutMs = 10_000
+  private readonly retryDelayMs = 1000
 
   /**
    * DiscordNotifier を初期化する
@@ -95,7 +97,6 @@ export class DiscordNotifier {
       timestamp: new Date().toISOString(),
     }
 
-    // ワールド名がある場合は追加
     if (params.worldName) {
       embed.fields?.push({
         name: 'ワールド',
@@ -104,7 +105,6 @@ export class DiscordNotifier {
       })
     }
 
-    // サムネイルがある場合は追加
     if (params.thumbnailUrl) {
       embed.thumbnail = {
         url: params.thumbnailUrl,
@@ -159,7 +159,7 @@ export class DiscordNotifier {
   }
 
   /**
-   * Embed を送信する（リトライ機能付き）
+   * Embed を送信する（bounded timeout + リトライ機能付き）
    *
    * @param embed Discord Embed
    * @param attempt 現在の試行回数
@@ -168,9 +168,10 @@ export class DiscordNotifier {
     const maxAttempts = 3
 
     try {
-      await this.discord.sendMessage({
-        embeds: [embed],
-      })
+      await this.withTimeout(
+        this.discord.sendMessage({ embeds: [embed] }),
+        this.timeoutMs
+      )
     } catch (error) {
       logger.error(
         `Failed to send notification (attempt ${attempt}/${maxAttempts})`,
@@ -178,12 +179,31 @@ export class DiscordNotifier {
       )
 
       if (attempt < maxAttempts) {
-        // リトライ前に待機（試行回数に応じて増加）
-        await this.delay(1000 * attempt)
+        await this.delay(this.retryDelayMs * attempt)
         return this.sendEmbed(embed, attempt + 1)
       }
 
       // これ以上リトライしない。エラーはログにのみ出力して呼び出し元には伝播しない。
+    }
+  }
+
+  /**
+   * Promise に bounded timeout を付与する
+   *
+   * @param promise 対象の Promise
+   * @param ms タイムアウトまでのミリ秒
+   */
+  private async withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+    let timer: NodeJS.Timeout | undefined
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`Discord send timed out after ${ms}ms`))
+      }, ms)
+    })
+    try {
+      return await Promise.race([promise, timeout])
+    } finally {
+      clearTimeout(timer)
     }
   }
 

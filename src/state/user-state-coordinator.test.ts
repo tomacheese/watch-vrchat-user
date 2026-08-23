@@ -16,6 +16,14 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+async function waitFor(condition: () => boolean): Promise<void> {
+  for (let i = 0; i < 200; i++) {
+    if (condition()) return
+    await wait(5)
+  }
+  throw new Error('Condition was not met in time')
+}
+
 describe('UserStateCoordinator', () => {
   it('同一ユーザーの observation を順番に処理し effect を発火する', async () => {
     const repository = new UserStateRepository(tempFilePath())
@@ -47,7 +55,7 @@ describe('UserStateCoordinator', () => {
     coordinator.enqueue('u1', 'Alice', { type: 'location', location: 'wrld_b' })
     coordinator.enqueue('u1', 'Alice', { type: 'offline' })
 
-    await wait(50)
+    await waitFor(() => effects.length === 3)
 
     // no-op effect は onEffect に渡されない（Coordinator の実装が effect.type !== 'no-op' でフィルタする）ため、
     // ここには traveling / wrld_a（baseline 保存のみ）の no-op は含まれない
@@ -149,7 +157,9 @@ describe('UserStateCoordinator', () => {
     expect(effects).toEqual([])
 
     // retry が成功すると head から順に処理され、unhealthy が解消する
-    await wait(50)
+    await waitFor(
+      () => effects.length === 1 && coordinator.getUnhealthy('u1') === undefined
+    )
     expect(effects).toEqual([{ type: 'online' }])
     expect(coordinator.getUnhealthy('u1')).toBeUndefined()
   })

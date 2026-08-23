@@ -6,7 +6,7 @@ index b2cf019580659dc2431d9250eb09f196f73c474c..03de2ab587296514e6dccb52f16a7399
  import 'keyv';
  import 'typed-emitter';
  
--var version = "2.22.7";
-+declare const version = "2.22.7";
+-var version = "2.22.8";
++declare const version = "2.22.8";
  
  export { version };

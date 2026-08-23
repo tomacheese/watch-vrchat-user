@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  vrchat@2.22.7: a452b18fc8779b4bad5d36c15e559e9ddf4725295dd7638a9085c2bc7e529856
+  vrchat@2.22.8: 123d5aba5c6a817d8b3c4139d988c9ca0ae898c01b711850401c6873de50eb6e
 
 importers:
 
@@ -21,8 +21,8 @@ importers:
         specifier: 5.3.5
         version: 5.3.5
       vrchat:
-        specifier: 2.22.7
-        version: 2.22.7(patch_hash=a452b18fc8779b4bad5d36c15e559e9ddf4725295dd7638a9085c2bc7e529856)(supports-color@8.1.1)
+        specifier: 2.22.8
+        version: 2.22.8(patch_hash=123d5aba5c6a817d8b3c4139d988c9ca0ae898c01b711850401c6873de50eb6e)(supports-color@8.1.1)
     devDependencies:
       '@book000/eslint-config':
         specifier: 1.16.41
@@ -2960,8 +2960,8 @@ packages:
     resolution: {integrity: sha512-kiGUalWN+rgBJ/1OHZsBtU4rXZOfj/7rKQxULKlIzwzQSvMJUUNgPwJEEh7gU6xEVxC0ahoOBvN2YI8GH6FNgA==}
     engines: {node: '>=10.12.0'}
 
-  vrchat@2.22.7:
-    resolution: {integrity: sha512-VBX4j9VLsGUaE0Ydy71rkQLDvvy4yZwiocjWnfIml6Arf88WQ/9BTDsg3abE2XrbGcwqSX88U40Emay6DIo+lQ==}
+  vrchat@2.22.8:
+    resolution: {integrity: sha512-FGktb85OMKAQjY02KPm4CoYxnqGdGT5idOXLfkfhPS3FO5CvcAOSKUuoM9YYZuj2WLVtvQ/FV3h0QG186uixIg==}
 
   walker@1.0.8:
     resolution: {integrity: sha512-ts/8E8l5b7kY0vlWLewOkDXMmPdLcVV4GmOQLyxuSswIJsweeFZtAsMF7k1Nszz+TYBQrlYRmzOnr398y1JemQ==}
@@ -6488,7 +6488,7 @@ snapshots:
       '@types/istanbul-lib-coverage': 2.0.6
       convert-source-map: 2.0.0
 
-  vrchat@2.22.7(patch_hash=a452b18fc8779b4bad5d36c15e559e9ddf4725295dd7638a9085c2bc7e529856)(supports-color@8.1.1):
+  vrchat@2.22.8(patch_hash=123d5aba5c6a817d8b3c4139d988c9ca0ae898c01b711850401c6873de50eb6e)(supports-color@8.1.1):
     dependencies:
       cacheable: 1.10.4
       debug: 4.4.3(supports-color@8.1.1)

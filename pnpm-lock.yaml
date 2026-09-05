@@ -25,8 +25,8 @@ importers:
         version: 2.22.8(patch_hash=123d5aba5c6a817d8b3c4139d988c9ca0ae898c01b711850401c6873de50eb6e)(supports-color@8.1.1)
     devDependencies:
       '@book000/eslint-config':
-        specifier: 1.16.52
-        version: 1.16.52(eslint@10.9.1(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3)
+        specifier: 1.16.53
+        version: 1.16.53(eslint@10.9.1(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3)
       '@types/jest':
         specifier: 30.0.0
         version: 30.0.0
@@ -243,8 +243,8 @@ packages:
   '@bcoe/v8-coverage@0.2.3':
     resolution: {integrity: sha512-0hYQ8SB4Db5zvZB4axdMHGwEaQjkZzFjQiN9LVYvIFB2nSUHW9tYpxWriPrWDASIxiaXax83REcLxuSdnGPZtw==}
 
-  '@book000/eslint-config@1.16.52':
-    resolution: {integrity: sha512-g/195NtOvSQfrtYgv914cqhuDD1V0T5pnghUcT4ZxvpPyplpC8qsp8BY3RgoMJZgJHfTF3T6uD2/VYbRFhJc1w==}
+  '@book000/eslint-config@1.16.53':
+    resolution: {integrity: sha512-a0FuHwFGEWU1H1PylgbQMJ9obMn9/VmKRSAyUz7aoc5WodROFfWzhk8pIBPaufq+xFARgDIeXprQiwxIRmRabA==}
     peerDependencies:
       eslint: 10.9.1
 
@@ -1752,10 +1752,6 @@ packages:
 
   globals@15.15.0:
     resolution: {integrity: sha512-7ACyT3wmyp3I61S4fG682L0VA2RGD9otkqGJIwNUMF1SWUombIIk+af1unuDYgMm082aHYwD+mzJvv9Iu8dsgg==}
-    engines: {node: '>=18'}
-
-  globals@17.11.0:
-    resolution: {integrity: sha512-Z2I8hM+PbJDXQDq3Icgpzv+mPdwr68iZUU9d5WW4FuXfDUQfkZaZuvjMv42/5crNyw154+9+VWXbYrUgDXbxNw==}
     engines: {node: '>=18'}
 
   globals@17.12.0:
@@ -3296,7 +3292,7 @@ snapshots:
 
   '@bcoe/v8-coverage@0.2.3': {}
 
-  '@book000/eslint-config@1.16.52(eslint@10.9.1(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3)':
+  '@book000/eslint-config@1.16.53(eslint@10.9.1(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3)':
     dependencies:
       '@typescript-eslint/parser': 8.69.0(eslint@10.9.1(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3)
       eslint: 10.9.1(supports-color@8.1.1)
@@ -4779,7 +4775,7 @@ snapshots:
       entities: 8.0.0
       eslint: 10.9.1(supports-color@8.1.1)
       find-up-simple: 1.0.1
-      globals: 17.11.0
+      globals: 17.12.0
       indent-string: 5.0.0
       is-builtin-module: 5.0.0
       is-identifier: 1.1.0
@@ -5057,8 +5053,6 @@ snapshots:
       path-is-absolute: 1.0.1
 
   globals@15.15.0: {}
-
-  globals@17.11.0: {}
 
   globals@17.12.0: {}
 
@@ -5852,7 +5846,7 @@ snapshots:
       eslint-plugin-promise: 7.3.0(eslint@10.9.1(supports-color@8.1.1))
       eslint-plugin-react: 7.37.5(eslint@10.9.1(supports-color@8.1.1))
       find-up: 8.0.0
-      globals: 17.11.0
+      globals: 17.12.0
       peowly: 1.3.3
       typescript-eslint: 8.69.0(eslint@10.9.1(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3)
     transitivePeerDependencies:

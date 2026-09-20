@@ -73,22 +73,19 @@ function reduceLocation(
     return { nextState, effect: { type: 'online' } }
   }
 
-  if (current.location === null) {
-    return { nextState, effect: { type: 'no-op' } }
-  }
-
-  if (current.location === location) {
-    return { nextState, effect: { type: 'no-op' } }
-  }
-
-  return {
-    nextState,
-    effect: {
-      type: 'location-change',
-      previousLocation: current.location,
-      currentLocation: location,
-    },
-  }
+  return current.location === null
+    ? { nextState, effect: { type: 'no-op' } }
+    : {
+        nextState,
+        effect:
+          current.location === location
+            ? { type: 'no-op' }
+            : {
+                type: 'location-change',
+                previousLocation: current.location,
+                currentLocation: location,
+              },
+      }
 }
 
 /**
@@ -117,20 +114,18 @@ function reduceOnline(
     }
   }
 
-  if (current.presence === 'online') {
-    return { nextState: current, effect: { type: 'no-op' } }
-  }
-
-  return {
-    nextState: {
-      ...current,
-      displayName,
-      presence: 'online',
-      location: null,
-      updatedAt: now(),
-    },
-    effect: { type: 'online' },
-  }
+  return current.presence === 'online'
+    ? { nextState: current, effect: { type: 'no-op' } }
+    : {
+        nextState: {
+          ...current,
+          displayName,
+          presence: 'online',
+          location: null,
+          updatedAt: now(),
+        },
+        effect: { type: 'online' },
+      }
 }
 
 /**
@@ -146,28 +141,26 @@ function reduceOffline(
   displayName: string,
   now: () => string
 ): ReduceResult {
-  if (current === undefined || current.presence === 'offline') {
-    return {
-      nextState: {
-        displayName,
-        presence: 'offline',
-        location: null,
-        updatedAt: now(),
-      },
-      effect: { type: 'no-op' },
-    }
-  }
-
-  return {
-    nextState: {
-      ...current,
-      displayName,
-      presence: 'offline',
-      location: null,
-      updatedAt: now(),
-    },
-    effect: { type: 'offline' },
-  }
+  return current === undefined || current.presence === 'offline'
+    ? {
+        nextState: {
+          displayName,
+          presence: 'offline',
+          location: null,
+          updatedAt: now(),
+        },
+        effect: { type: 'no-op' },
+      }
+    : {
+        nextState: {
+          ...current,
+          displayName,
+          presence: 'offline',
+          location: null,
+          updatedAt: now(),
+        },
+        effect: { type: 'offline' },
+      }
 }
 
 /**
@@ -197,9 +190,7 @@ export function reduce(
     return reduceLocation(current, displayName, observation.location, now)
   }
 
-  if (observation.type === 'online') {
-    return reduceOnline(current, displayName, now)
-  }
-
-  return reduceOffline(current, displayName, now)
+  return observation.type === 'online'
+    ? reduceOnline(current, displayName, now)
+    : reduceOffline(current, displayName, now)
 }

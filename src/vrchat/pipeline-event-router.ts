@@ -65,8 +65,9 @@ function isFriendOnlineEvent(data: unknown): data is FriendOnlineEvent {
  * @returns 有効な場合は true
  */
 function isFriendOfflineEvent(data: unknown): data is FriendOfflineEvent {
-  if (typeof data !== 'object' || data === null) return false
-  return typeof (data as Record<string, unknown>).userId === 'string'
+  return typeof data !== 'object' || data === null
+    ? false
+    : typeof (data as Record<string, unknown>).userId === 'string'
 }
 
 /**

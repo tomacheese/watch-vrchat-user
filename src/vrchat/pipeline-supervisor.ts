@@ -240,10 +240,12 @@ export class PipelineSupervisor {
       onPong: () => {
         if (myGeneration !== this.generation) return
         this.lastPongAt = new Date()
-        if (this.pingTimeoutTimer) {
-          clearTimeout(this.pingTimeoutTimer)
-          this.pingTimeoutTimer = null
+        if (!this.pingTimeoutTimer) {
+          return
         }
+
+        clearTimeout(this.pingTimeoutTimer)
+        this.pingTimeoutTimer = null
       },
     }
   }
@@ -258,13 +260,15 @@ export class PipelineSupervisor {
       () => {
         if (myGeneration !== this.generation) return
         const reference = this.lastMessageAt
-        if (
+        if (!(
           reference &&
           Date.now() - reference.getTime() >= this.staleMessageTimeoutMs
-        ) {
-          this.lastReconnectReason = 'stale message stream'
-          this.startReconnect()
+        )) {
+          return
         }
+
+        this.lastReconnectReason = 'stale message stream'
+        this.startReconnect()
       },
       Math.min(this.staleMessageTimeoutMs, 60_000)
     )
@@ -344,9 +348,11 @@ export class PipelineSupervisor {
       clearInterval(this.pingTimer)
       this.pingTimer = null
     }
-    if (this.pingTimeoutTimer) {
-      clearTimeout(this.pingTimeoutTimer)
-      this.pingTimeoutTimer = null
+    if (!this.pingTimeoutTimer) {
+      return
     }
+
+    clearTimeout(this.pingTimeoutTimer)
+    this.pingTimeoutTimer = null
   }
 }

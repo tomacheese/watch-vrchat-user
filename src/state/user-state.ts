@@ -64,14 +64,11 @@ export function isUserStateStoreData(raw: unknown): raw is UserStateStoreData {
     return false
   }
   const obj = raw as Record<string, unknown>
-  if (
-    obj.schemaVersion !== 2 ||
+  return obj.schemaVersion !== 2 ||
     typeof obj.users !== 'object' ||
     obj.users === null
-  ) {
-    return false
-  }
-  return Object.values(obj.users).every((user) => isValidUserState(user))
+    ? false
+    : Object.values(obj.users).every((user) => isValidUserState(user))
 }
 
 /** legacy (schemaVersion なし) 形式のユーザーレコード */
@@ -110,23 +107,21 @@ function isValidLegacyUserLocation(
  * @returns migrate された UserState
  */
 function migrateLegacyUser(legacy: LegacyUserLocation): UserState {
-  if (legacy.location === ONLINE_SENTINEL) {
-    return {
-      userId: legacy.userId,
-      displayName: legacy.displayName,
-      presence: 'online',
-      location: null,
-      updatedAt: legacy.updatedAt,
-    }
-  }
-
-  return {
-    userId: legacy.userId,
-    displayName: legacy.displayName,
-    presence: legacy.location === null ? 'offline' : 'online',
-    location: legacy.location,
-    updatedAt: legacy.updatedAt,
-  }
+  return legacy.location === ONLINE_SENTINEL
+    ? {
+        userId: legacy.userId,
+        displayName: legacy.displayName,
+        presence: 'online',
+        location: null,
+        updatedAt: legacy.updatedAt,
+      }
+    : {
+        userId: legacy.userId,
+        displayName: legacy.displayName,
+        presence: legacy.location === null ? 'offline' : 'online',
+        location: legacy.location,
+        updatedAt: legacy.updatedAt,
+      }
 }
 
 /**

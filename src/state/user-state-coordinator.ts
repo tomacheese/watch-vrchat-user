@@ -1,4 +1,5 @@
 import { Logger } from '@book000/node-utils'
+import type { ConfigSnapshot } from '../config/config-snapshot'
 import { toError } from '../logger-utils'
 import {
   reduce,
@@ -33,6 +34,10 @@ interface QueueItem {
   displayName: string
   /** 観測値 */
   observation: UserObservation
+  /** enqueue 時点の設定スナップショット（reload をまたいでもこれで評価する） */
+  snapshot: ConfigSnapshot
+  /** enqueue 時点で baseline 構築中だったか（true の間は通知 effect を生成しない） */
+  baseline: boolean
 }
 
 const DEFAULT_INITIAL_BACKOFF_MS = 1000
@@ -51,6 +56,7 @@ export class UserStateCoordinator {
   private readonly processing = new Set<string>()
   private readonly lastSeq = new Map<string, number>()
   private readonly unhealthy = new Map<string, UnhealthyInfo>()
+  private readonly drainWaiters = new Set<() => void>()
   private readonly initialBackoffMs: number
   private readonly maxBackoffMs: number
   private readonly maxQueueSize: number
@@ -59,7 +65,8 @@ export class UserStateCoordinator {
    * UserStateCoordinator を初期化する
    *
    * @param repository 永続化先の Repository
-   * @param onEffect reduce の結果 effect が no-op 以外のときに呼ばれるコールバック
+   * @param onEffect reduce の結果 effect が no-op 以外のときに呼ばれるコールバック（item に添付された設定スナップショット付き）
+   * @param getSnapshot enqueue 時点の設定スナップショットを取得する関数
    * @param options リトライ間隔・queue 上限などのオプション
    */
   constructor(
@@ -67,8 +74,10 @@ export class UserStateCoordinator {
     private readonly onEffect: (
       userId: string,
       displayName: string,
-      effect: ReducerEffect
+      effect: ReducerEffect,
+      snapshot: ConfigSnapshot
     ) => Promise<void>,
+    private readonly getSnapshot: () => ConfigSnapshot,
     options: UserStateCoordinatorOptions = {}
   ) {
     this.initialBackoffMs =
@@ -82,6 +91,8 @@ export class UserStateCoordinator {
    *
    * `displayName` が `userId` と同一（呼び出し元が表示名を持たない場合の
    * フォールバック）のときは Repository が保持する既存の表示名で補完する。
+   *
+   * 設定スナップショットと baseline フラグは enqueue 時点で確定し item に添付する。
    *
    * queue が上限に達している場合は非通知で drop し unhealthy にする
    * (known limitation: drop された中間 transition は REST reconciliation でのみ
@@ -114,7 +125,12 @@ export class UserStateCoordinator {
       return
     }
 
-    queue.push({ displayName: resolvedDisplayName, observation })
+    queue.push({
+      displayName: resolvedDisplayName,
+      observation,
+      snapshot: this.getSnapshot(),
+      baseline: !this.repository.isBaselineCompleted(),
+    })
     this.startProcessingQueue(userId)
   }
 
@@ -126,6 +142,17 @@ export class UserStateCoordinator {
    */
   captureSeq(userId: string): number {
     return this.lastSeq.get(userId) ?? 0
+  }
+
+  /**
+   * 全ユーザーの現在の seq を複製して取得する（REST snapshot 取得開始前の anchor として使う）
+   *
+   * record を持たないユーザー（traveling の WebSocket event のみ受信済み等）も含む。
+   *
+   * @returns ユーザー ID から seq への読み取り専用 Map（未 enqueue のユーザーは含まれない）
+   */
+  captureAllSeqs(): ReadonlyMap<string, number> {
+    return new Map(this.lastSeq)
   }
 
   /**
@@ -152,6 +179,51 @@ export class UserStateCoordinator {
     }
     this.enqueue(userId, displayName, observation)
     return true
+  }
+
+  /**
+   * 指定ユーザーの queue がすべて処理し終わるまで待つ
+   *
+   * 待機中に対象ユーザーのいずれかが unhealthy（persist-failure / queue-overflow）に
+   * なった場合は、処理完了を保証できないため即座に false を返す。
+   *
+   * @param userIds 待機対象のユーザー ID
+   * @returns 全員の queue が空になった場合は true、unhealthy を検知した場合は false
+   */
+  async drain(userIds: string[]): Promise<boolean> {
+    while (true) {
+      if (userIds.some((userId) => this.unhealthy.has(userId))) {
+        return false
+      }
+      if (userIds.every((userId) => this.isIdle(userId))) {
+        return true
+      }
+      await new Promise<void>((resolve) => {
+        this.drainWaiters.add(resolve)
+      })
+    }
+  }
+
+  /**
+   * 指定ユーザーの queue が空で処理ループも動いていないかを返す
+   *
+   * @param userId ユーザー ID
+   * @returns 何も処理中でなければ true
+   */
+  private isIdle(userId: string): boolean {
+    return (
+      (this.queues.get(userId)?.length ?? 0) === 0 &&
+      !this.processing.has(userId)
+    )
+  }
+
+  /** drain の待機者を起こして条件を再評価させる */
+  private notifyDrainWaiters(): void {
+    const waiters = [...this.drainWaiters]
+    this.drainWaiters.clear()
+    for (const resolve of waiters) {
+      resolve()
+    }
   }
 
   /**
@@ -197,14 +269,18 @@ export class UserStateCoordinator {
 
         const item = queue[0]
         const current = this.repository.get(userId)
-        const { nextState, effect } = reduce(
+        const { nextState, deleteUser, effect } = reduce(
+          userId,
           current,
           item.displayName,
-          item.observation
+          item.observation,
+          item.baseline
         )
 
         try {
-          if (nextState) {
+          if (deleteUser) {
+            await this.repository.deleteUser(userId)
+          } else if (nextState) {
             await this.repository.commitUserState(userId, {
               ...nextState,
               userId,
@@ -219,16 +295,19 @@ export class UserStateCoordinator {
           }
 
           if (effect.type !== 'no-op') {
-            await this.onEffect(userId, item.displayName, effect).catch(
-              (error: unknown) => {
-                // 通知失敗はログのみ。persist 済みの state は既に確定しているため、
-                // 通知の再送は行わず次の observation の処理を継続する。
-                logger.error(
-                  `Failed to dispatch effect for user ${userId}`,
-                  toError(error)
-                )
-              }
-            )
+            await this.onEffect(
+              userId,
+              item.displayName,
+              effect,
+              item.snapshot
+            ).catch((error: unknown) => {
+              // 通知失敗はログのみ。persist 済みの state は既に確定しているため、
+              // 通知の再送は行わず次の observation の処理を継続する。
+              logger.error(
+                `Failed to dispatch effect for user ${userId}`,
+                toError(error)
+              )
+            })
           }
         } catch (error) {
           this.markUnhealthy(userId, 'persist-failure')
@@ -246,6 +325,7 @@ export class UserStateCoordinator {
       }
     } finally {
       this.processing.delete(userId)
+      this.notifyDrainWaiters()
       // sleep 中に enqueue が呼ばれ、ループを抜けた直後に新規アイテムが積まれている
       // 可能性があるため、queue が空でなければ処理ループを再起動する
       const queue = this.queues.get(userId)
@@ -283,6 +363,7 @@ export class UserStateCoordinator {
       return
     }
     this.unhealthy.set(userId, { cause, since: new Date().toISOString() })
+    this.notifyDrainWaiters()
   }
 
   /**

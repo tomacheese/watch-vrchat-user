@@ -2,7 +2,7 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import path from 'node:path'
 import { App } from './app'
-import { VRChatSession, isFriend } from './vrchat/session'
+import { VRChatSession } from './vrchat/session'
 import { PipelineSupervisor } from './vrchat/pipeline-supervisor'
 import { Reconciler } from './state/reconciler'
 import type { Config } from './config'
@@ -11,28 +11,43 @@ jest.mock('./vrchat/session')
 jest.mock('./vrchat/pipeline-supervisor')
 jest.mock('./state/reconciler')
 
+const VALID_CONFIG = `version: 1
+destinations:
+  main:
+    type: discord-webhook
+    url: https://discord.com/api/webhooks/1/abc
+rules:
+  - name: any
+    when: event.type == "online"
+    destinations: [main]
+`
+
+let dir: string
+
 function config(): Config {
   return {
     vrchat: { username: 'u', password: 'p' },
-    discord: { webhookUrl: 'https://discord.com/api/webhooks/1/abc' },
-    targetUserIds: ['usr_1'],
+    configPath: path.join(dir, 'config.yaml'),
   }
 }
 
 describe('App.start', () => {
   beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'app-'))
+    fs.writeFileSync(path.join(dir, 'config.yaml'), VALID_CONFIG)
     process.env.HEALTH_PORT = '0'
-    process.env.LOCATION_FILE_PATH = path.join(
-      fs.mkdtempSync(path.join(os.tmpdir(), 'app-')),
-      'user-locations.json'
-    )
+    process.env.STATE_FILE_PATH = path.join(dir, 'friend-states.json')
+    process.env.WORLD_CACHE_FILE_PATH = path.join(dir, 'world-cache.json')
+    ;(VRChatSession.create as jest.Mock).mockReset()
     ;(VRChatSession.create as jest.Mock).mockResolvedValue({
       client: {
         pipeline: { on: jest.fn(), removeAllListeners: jest.fn() },
+        getFavorites: jest
+          .fn()
+          .mockResolvedValue({ data: [], error: undefined }),
       },
       getAuthCookie: jest.fn().mockResolvedValue('cookie'),
     })
-    ;(isFriend as jest.Mock).mockResolvedValue(true)
     ;(PipelineSupervisor as unknown as jest.Mock).mockImplementation(function (
       this: { start: jest.Mock },
       _vrchat: unknown,
@@ -52,7 +67,9 @@ describe('App.start', () => {
 
   afterEach(() => {
     delete process.env.HEALTH_PORT
-    delete process.env.LOCATION_FILE_PATH
+    delete process.env.STATE_FILE_PATH
+    delete process.env.WORLD_CACHE_FILE_PATH
+    fs.rmSync(dir, { recursive: true, force: true })
   })
 
   it('起動シーケンスで VRChatSession -> Supervisor.start -> Reconciler.reconcileAll の順に呼ばれる', async () => {
@@ -66,8 +83,7 @@ describe('App.start', () => {
       .instances[0] as {
       start: jest.Mock<Promise<void>, [() => Promise<string>]>
     }
-    // start() は固定 cookie 文字列ではなく provider 関数を受け取るようになった
-    // ため、渡された provider を実際に呼び出して解決値を検証する
+    // start() は固定 cookie 文字列ではなく provider 関数を受け取る
     expect(supervisorInstance.start).toHaveBeenCalledWith(expect.any(Function))
     const authCookieProvider = supervisorInstance.start.mock.calls[0][0]
     await expect(authCookieProvider()).resolves.toBe('cookie')
@@ -80,11 +96,13 @@ describe('App.start', () => {
     await app.stop()
   })
 
-  it('isFriend の API 呼び出し自体が失敗しても fatal にせず起動を継続する', async () => {
-    ;(isFriend as jest.Mock).mockRejectedValue(new Error('network error'))
+  it('設定ファイルが不正な場合は start() が reject し、認証まで進まない', async () => {
+    fs.writeFileSync(path.join(dir, 'config.yaml'), 'version: 99\n')
     const app = new App(config())
 
-    await expect(app.start()).resolves.toBeUndefined()
+    await expect(app.start()).rejects.toThrow()
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    expect(VRChatSession.create).not.toHaveBeenCalled()
 
     await app.stop()
   })

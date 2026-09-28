@@ -35,6 +35,13 @@ describe('HealthService', () => {
     reconnectAttempts: 0,
     lastReconnectReason: null,
     unhealthyUsers: [],
+    config: {
+      loadedAt: new Date().toISOString(),
+      lastReloadError: null,
+      lastReloadFailedAt: null,
+    },
+    ruleErrors: [],
+    favorites: { lastUpdatedAt: new Date().toISOString(), lastError: null },
   }
 
   afterEach(() => {
@@ -101,6 +108,74 @@ describe('HealthService', () => {
 
     const { status } = await fetchJson(port)
     expect(status).toBe(503)
+
+    service.stop()
+  })
+
+  const degradedCases: [string, Partial<HealthSnapshot>][] = [
+    [
+      'config reload 失敗',
+      {
+        config: {
+          loadedAt: null,
+          lastReloadError: 'bad yaml',
+          lastReloadFailedAt: new Date().toISOString(),
+        },
+      },
+    ],
+    [
+      'rule error',
+      {
+        ruleErrors: [
+          {
+            rule: 'r',
+            count: 1,
+            lastAt: new Date().toISOString(),
+            lastError: 'e',
+          },
+        ],
+      },
+    ],
+    [
+      'favorites 取得失敗',
+      {
+        favorites: { lastUpdatedAt: null, lastError: 'Rate limit error (429)' },
+      },
+    ],
+  ]
+
+  it.each(degradedCases)(
+    '%s の場合は degraded かつ 200 を返す',
+    async (_name, patch) => {
+      process.env.HEALTH_PORT = '0'
+      const service = new HealthService(() => ({
+        ...healthySnapshot,
+        ...patch,
+      }))
+      service.start()
+      const port = await waitForListening(service)
+
+      const { status, body } = await fetchJson(port)
+      expect(status).toBe(200)
+      expect((body as { status: string }).status).toBe('degraded')
+
+      service.stop()
+    }
+  )
+
+  it('unhealthy 条件は degraded 条件より優先される', async () => {
+    process.env.HEALTH_PORT = '0'
+    const service = new HealthService(() => ({
+      ...healthySnapshot,
+      supervisorState: 'reconnecting',
+      favorites: { lastUpdatedAt: null, lastError: 'x' },
+    }))
+    service.start()
+    const port = await waitForListening(service)
+
+    const { status, body } = await fetchJson(port)
+    expect(status).toBe(503)
+    expect((body as { status: string }).status).toBe('unhealthy')
 
     service.stop()
   })

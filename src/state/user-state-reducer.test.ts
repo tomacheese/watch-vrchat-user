@@ -1,7 +1,9 @@
-import { reduce } from './user-state-reducer'
+import { reduce, type UserObservation } from './user-state-reducer'
 import type { UserState } from './user-state'
 
 const FIXED_NOW = () => '2026-01-01T00:00:00.000Z'
+const A = 'wrld_a:1'
+const B = 'wrld_b:2'
 
 function state(overrides: Partial<UserState> = {}): UserState {
   return {
@@ -14,136 +16,200 @@ function state(overrides: Partial<UserState> = {}): UserState {
   }
 }
 
-describe('reduce', () => {
-  it('offline -> online: online 通知を発火する', () => {
-    const current = state({ presence: 'offline', location: null })
-    const result = reduce(current, 'Alice', { type: 'online' }, FIXED_NOW)
-    expect(result.effect).toEqual({ type: 'online' })
-    expect(result.nextState).toMatchObject({
-      presence: 'online',
-      location: null,
-    })
-  })
+function run(
+  current: UserState | undefined,
+  observation: UserObservation,
+  baseline = false
+) {
+  return reduce('u1', current, 'Alice', observation, baseline, FIXED_NOW)
+}
 
-  it('record 不在ユーザーへの最初の online observation は baseline として保存し通知しない（unknown baseline）', () => {
-    const result = reduce(undefined, 'Alice', { type: 'online' }, FIXED_NOW)
-    expect(result.effect).toEqual({ type: 'no-op' })
-    expect(result.nextState).toMatchObject({
-      presence: 'online',
-      location: null,
-    })
-  })
-
-  it('online 中の duplicate online は通知しない', () => {
-    const current = state({ presence: 'online', location: null })
-    const result = reduce(current, 'Alice', { type: 'online' }, FIXED_NOW)
-    expect(result.effect).toEqual({ type: 'no-op' })
-  })
-
-  it('traveling は persisted location を変更せず通知しない', () => {
-    const current = state({ presence: 'online', location: 'wrld_a' })
-    const result = reduce(
-      current,
-      'Alice',
-      { type: 'location', location: 'traveling' },
-      FIXED_NOW
-    )
-    expect(result.effect).toEqual({ type: 'no-op' })
-    expect(result.nextState).toEqual(current)
-  })
-
-  it('online 直後の最初の確定 location は baseline として保存し通知しない', () => {
-    const current = state({ presence: 'online', location: null })
-    const result = reduce(
-      current,
-      'Alice',
-      { type: 'location', location: 'wrld_a' },
-      FIXED_NOW
-    )
-    expect(result.effect).toEqual({ type: 'no-op' })
-    expect(result.nextState).toMatchObject({
-      presence: 'online',
-      location: 'wrld_a',
-    })
-  })
-
-  it('A -> traveling -> B は A -> B の移動通知になる', () => {
-    const current = state({ presence: 'online', location: 'wrld_a' })
-    const result = reduce(
-      current,
-      'Alice',
-      { type: 'location', location: 'wrld_b' },
-      FIXED_NOW
-    )
+describe('reduce (spec §7 遷移表)', () => {
+  it('1. offline -> online（online 観測）は online のみ', () => {
+    const current = state()
+    const result = run(current, { type: 'online' })
+    expect(result.deleteUser).toBe(false)
     expect(result.effect).toEqual({
-      type: 'location-change',
-      previousLocation: 'wrld_a',
-      currentLocation: 'wrld_b',
+      type: 'online',
+      previous: current,
+      current: result.nextState,
     })
-  })
-
-  it('duplicate concrete location は通知しない', () => {
-    const current = state({ presence: 'online', location: 'wrld_a' })
-    const result = reduce(
-      current,
-      'Alice',
-      { type: 'location', location: 'wrld_a' },
-      FIXED_NOW
-    )
-    expect(result.effect).toEqual({ type: 'no-op' })
-  })
-
-  it('friend-online 欠落状態で concrete location を受けても online と推定する', () => {
-    const current = state({ presence: 'offline', location: null })
-    const result = reduce(
-      current,
-      'Alice',
-      { type: 'location', location: 'wrld_a' },
-      FIXED_NOW
-    )
-    expect(result.effect).toEqual({ type: 'online' })
     expect(result.nextState).toMatchObject({
+      userId: 'u1',
       presence: 'online',
-      location: 'wrld_a',
+      location: null,
     })
   })
 
-  it('online -> offline: offline 通知を発火し location を null にする', () => {
-    const current = state({ presence: 'online', location: 'wrld_a' })
-    const result = reduce(current, 'Alice', { type: 'offline' }, FIXED_NOW)
-    expect(result.effect).toEqual({ type: 'offline' })
+  it('1. offline -> online（location 観測）は online のみ', () => {
+    const result = run(state(), { type: 'location', location: A })
+    expect(result.effect).toMatchObject({ type: 'online' })
+    expect(result.nextState).toMatchObject({ presence: 'online', location: A })
+  })
+
+  it('1. online 観測に location があれば state に載せる', () => {
+    const result = run(state(), { type: 'online', location: A })
+    expect(result.effect).toMatchObject({ type: 'online' })
+    expect(result.nextState).toMatchObject({ location: A })
+  })
+
+  it('2. online -> offline は offline のみで location を null にする', () => {
+    const current = state({ presence: 'online', location: A })
+    const result = run(current, { type: 'offline' })
+    expect(result.effect).toEqual({
+      type: 'offline',
+      previous: current,
+      current: result.nextState,
+    })
     expect(result.nextState).toMatchObject({
       presence: 'offline',
       location: null,
     })
   })
 
-  it('record 不在ユーザーへの REST 由来 concrete location は baseline として保存し通知しない（unknown baseline）', () => {
-    const result = reduce(
-      undefined,
-      'Alice',
-      { type: 'location', location: 'wrld_a' },
-      FIXED_NOW
-    )
-    expect(result.effect).toEqual({ type: 'no-op' })
-    expect(result.nextState).toMatchObject({
-      presence: 'online',
-      location: 'wrld_a',
+  it('3. 両方 visible で raw 値が異なれば location-change', () => {
+    const current = state({ presence: 'online', location: A })
+    const result = run(current, { type: 'location', location: B })
+    expect(result.effect).toEqual({
+      type: 'location-change',
+      previous: current,
+      current: result.nextState,
     })
   })
 
-  it('private は stable な confirmed location として扱われる（traveling と異なり通知対象）', () => {
-    const current = state({ presence: 'online', location: 'wrld_a' })
-    const result = reduce(
-      current,
-      'Alice',
-      { type: 'location', location: 'private' },
-      FIXED_NOW
-    )
-    expect(result.effect).toEqual({
-      type: 'location-change',
-      previousLocation: 'wrld_a',
-      currentLocation: 'private',
+  it('4. private への遷移と復帰は location-change なし（state は更新）', () => {
+    const current = state({ presence: 'online', location: A })
+    const toPrivate = run(current, { type: 'location', location: 'private' })
+    expect(toPrivate.effect).toEqual({ type: 'no-op' })
+    expect(toPrivate.nextState).toMatchObject({ location: 'private' })
+
+    const back = run(toPrivate.nextState, { type: 'location', location: B })
+    expect(back.effect).toEqual({ type: 'no-op' })
+    expect(back.nextState).toMatchObject({ location: B })
+  })
+
+  it('4. 未確定 location からの確定は no-op（state のみ更新）', () => {
+    const current = state({ presence: 'online', location: null })
+    const result = run(current, { type: 'location', location: A })
+    expect(result.effect).toEqual({ type: 'no-op' })
+    expect(result.nextState).toMatchObject({ location: A })
+  })
+
+  it('4. 同一 location は no-op で state を変更しない', () => {
+    const current = state({ presence: 'online', location: A })
+    const result = run(current, { type: 'location', location: A })
+    expect(result.effect).toEqual({ type: 'no-op' })
+    expect(result.nextState).toBe(current)
+  })
+
+  it('4. online 中の重複 online 観測は location を維持し no-op', () => {
+    const current = state({ presence: 'online', location: A })
+    const result = run(current, { type: 'online' })
+    expect(result.effect).toEqual({ type: 'no-op' })
+    expect(result.nextState).toBe(current)
+  })
+
+  it('5. traveling は state 不変で no-op（A -> traveling -> B は A -> B）', () => {
+    const current = state({ presence: 'online', location: A })
+    const traveling = run(current, {
+      type: 'location',
+      location: 'traveling:traveling',
     })
+    expect(traveling.effect).toEqual({ type: 'no-op' })
+    expect(traveling.nextState).toBe(current)
+
+    const moved = run(traveling.nextState, { type: 'location', location: B })
+    expect(moved.effect).toMatchObject({
+      type: 'location-change',
+      previous: { location: A },
+      current: { location: B },
+    })
+  })
+
+  it('5. record 不在への traveling は state を作らない', () => {
+    const result = run(undefined, { type: 'location', location: 'traveling' })
+    expect(result.effect).toEqual({ type: 'no-op' })
+    expect(result.nextState).toBeUndefined()
+  })
+
+  it('6. record 不在 + baseline=false は friend-add のみ', () => {
+    for (const observation of [
+      { type: 'online' },
+      { type: 'offline' },
+      { type: 'location', location: A },
+    ] as const) {
+      const result = run(undefined, observation)
+      expect(result.effect).toEqual({
+        type: 'friend-add',
+        previous: undefined,
+        current: result.nextState,
+      })
+      expect(result.nextState).toMatchObject({ userId: 'u1' })
+    }
+    expect(
+      run(undefined, { type: 'location', location: A }).nextState
+    ).toMatchObject({ presence: 'online', location: A })
+  })
+
+  it('7. friend-add observation で record 不在は friend-add', () => {
+    const result = run(undefined, { type: 'friend-add' })
+    expect(result.effect).toMatchObject({
+      type: 'friend-add',
+      previous: undefined,
+    })
+    expect(result.nextState).toMatchObject({
+      userId: 'u1',
+      displayName: 'Alice',
+      presence: 'offline',
+      location: null,
+    })
+  })
+
+  it('8. friend-add observation で record 既存は no-op', () => {
+    const current = state({ presence: 'online', location: A })
+    const result = run(current, { type: 'friend-add' })
+    expect(result.effect).toEqual({ type: 'no-op' })
+    expect(result.nextState).toBe(current)
+    expect(result.deleteUser).toBe(false)
+  })
+
+  it('9. friend-delete で record 既存は friend-delete と deleteUser', () => {
+    const current = state({ presence: 'online', location: A })
+    const result = run(current, { type: 'friend-delete' })
+    expect(result.effect).toEqual({
+      type: 'friend-delete',
+      previous: current,
+      current: undefined,
+    })
+    expect(result.deleteUser).toBe(true)
+    expect(result.nextState).toBeUndefined()
+  })
+
+  it('10. friend-delete で record 不在は no-op', () => {
+    const result = run(undefined, { type: 'friend-delete' })
+    expect(result.effect).toEqual({ type: 'no-op' })
+    expect(result.deleteUser).toBe(false)
+  })
+
+  it('11. baseline=true は通知 effect を生成せず state のみ更新する', () => {
+    const online = run(state(), { type: 'online' }, true)
+    expect(online.effect).toEqual({ type: 'no-op' })
+    expect(online.nextState).toMatchObject({ presence: 'online' })
+
+    const moved = run(
+      state({ presence: 'online', location: A }),
+      { type: 'location', location: B },
+      true
+    )
+    expect(moved.effect).toEqual({ type: 'no-op' })
+    expect(moved.nextState).toMatchObject({ location: B })
+
+    const unknown = run(undefined, { type: 'friend-add' }, true)
+    expect(unknown.effect).toEqual({ type: 'no-op' })
+    expect(unknown.nextState).toMatchObject({ userId: 'u1' })
+
+    const deleted = run(state(), { type: 'friend-delete' }, true)
+    expect(deleted.effect).toEqual({ type: 'no-op' })
+    expect(deleted.deleteUser).toBe(true)
   })
 })

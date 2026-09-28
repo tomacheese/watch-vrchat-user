@@ -13,8 +13,8 @@
 前提・仮定・不確実性を明示し、仮定を事実のように扱わないでください。
 
 ## プロジェクト概要
-- 目的: VRChat ユーザーの Location 変更を監視し、Discord に通知する
-- 主な機能: VRChat WebSocket イベント監視 (補助的に VRChat API ポーリング)、Discord Webhook 通知
+- 目的: VRChat の全フレンドの状態変化を監視し、YAML 設定の CEL ルールに一致したものを Discord に通知する
+- 主な機能: VRChat WebSocket イベント監視 (補助的に Friends API による REST reconciliation)、CEL ルールによる通知条件・通知先 (Discord Webhook) の振り分け、設定ファイルの hot reload
 
 ## 重要ルール
 - **会話言語**: 日本語
@@ -62,19 +62,31 @@ pnpm test
 ## アーキテクチャと主要ファイル
 - `src/main.ts`: エントリーポイント。設定読み込みと `App` の起動・シグナルハンドリングのみを担う
 - `src/app.ts`: 各モジュールの配線と起動・reconnect・定期 REST reconciliation シーケンスを担う
-- `src/vrchat/session.ts`: VRChat REST 認証・Cookie 永続化・2FA・`getUser`/`isFriend`/`getFriendIds` を担う（Pipeline 開始は担当しない）
+- `src/config.ts`: 環境変数からの VRChat 認証情報・パス設定 (`CONFIG_PATH` / `STATE_FILE_PATH` / `WORLD_CACHE_FILE_PATH` 等) の読み込みとバリデーション
+- `src/config/config-file.ts`: YAML 設定ファイルのパース・検証 (destinations の `${ENV_VAR}` 展開を含む)
+- `src/config/config-manager.ts`: 設定ファイルの hot reload と last-known-good の保持
+- `src/config/config-snapshot.ts`: 検証・compile 済みの設定スナップショット
+- `src/rules/rule-engine.ts`: CEL ルールの compile / 評価と `RuleErrorLog`
+- `src/rules/rule-context.ts`: effect から CEL 変数 (`event` / `user` / `previous` / `current`) を組み立てる
+- `src/vrchat/session.ts`: VRChat REST 認証・Cookie 永続化・2FA・Friends API の取得を担う（Pipeline 開始は担当しない）
 - `src/vrchat/pipeline-transport.ts`: VRChat SDK の raw WebSocket (`open`/`close`/`error`/`message`/`pong`/`readyState`) への唯一のアクセス経路
 - `src/vrchat/pipeline-supervisor.ts`: Pipeline の接続状態・connection generation・liveness・reconnect backoff を管理する
-- `src/vrchat/pipeline-event-router.ts`: `friend-location` / `friend-online` / `friend-offline` を正規化して `UserStateCoordinator` へ渡す
-- `src/state/user-state-reducer.ts`: WebSocket event / REST snapshot 共通の純粋な状態遷移関数
-- `src/state/user-state-repository.ts`: `user-locations.json` への store-wide lock 付き atomic 読み書き
+- `src/vrchat/pipeline-event-router.ts`: `friend-location` / `friend-online` / `friend-offline` / `friend-add` / `friend-delete` を正規化して `UserStateCoordinator` へ渡す
+- `src/vrchat/world-resolver.ts`: World 情報の取得と 24 時間 TTL の永続キャッシュ
+- `src/vrchat/favorites-service.ts`: Favorite Friends (`group_0`〜`group_3`) の取得と 1 時間ごとの更新
+- `src/state/location.ts`: raw Location 文字列のパース (visible 判定・World ID・instance type 等)
+- `src/state/user-state.ts`: 全フレンドの永続 state (`FriendState`) の型と検証
+- `src/state/user-state-reducer.ts`: WebSocket event / REST snapshot 共通の純粋な状態遷移関数 (baseline・`friend-add` / `friend-delete` を含む)
+- `src/state/user-state-repository.ts`: `friend-states.json` (schemaVersion 3) への store-wide lock 付き atomic 読み書き
 - `src/state/user-state-coordinator.ts`: ユーザーごとの observation を直列処理する single-writer queue
-- `src/state/reconciler.ts`: REST snapshot を compare-and-enqueue で queue に追記する
-- `src/notifications/discord-notifier.ts`: Discord 通知処理 (`location-change` / `online` / `offline`、bounded timeout 付き)
-- `src/health/health-service.ts`: localhost のみでアクセス可能なヘルスチェック HTTP サーバー (supervisor state・generation・per-user unhealthy 等を返す)
-- `src/config.ts`: 環境変数からの設定読み込みとバリデーション
+- `src/state/reconciler.ts`: Friends API のスナップショットを compare-and-enqueue で queue に追記する
+- `src/notifications/notification-dispatcher.ts`: effect に対して全ルールを評価し、一致した destination ごとに 1 通へまとめて送信を依頼する
+- `src/notifications/embed-builder.ts`: Discord Embed の組み立て (World 情報・一致したルール名の footer 表示を含む)
+- `src/notifications/discord-notifier.ts`: Discord Webhook への送信 (bounded timeout 付き)
+- `src/health/health-service.ts`: localhost のみでアクセス可能なヘルスチェック HTTP サーバー (supervisor state・generation・per-user unhealthy・`config`・`ruleErrors`・`favorites` を返し、`status` は `healthy` / `degraded` / `unhealthy`)
 - `src/logger-utils.ts`: unknown 型の値を Error に変換する `toError` ヘルパーを提供する
-- `data/`: 永続化データ保存先 (Cookie 等)
+- `config.example.yaml`: 通知ルール設定ファイルの例 (`data/config.yaml` として配置する。テストで parse / compile を検証している)
+- `data/`: 永続化データ保存先 (Cookie・`friend-states.json`・`world-cache.json`・`config.yaml` 等)
 
 ## 実装パターン
 - **VRChat API**: `vrchat` パッケージを使用 (パッチ適用済み)
@@ -90,12 +102,13 @@ pnpm test
 - 認証はユーザー名 / パスワード + 2FA (TOTP)。取得した Cookie は `data/` に `keyv-file` で永続化し、再ログイン回数を減らす
 - リアルタイム通知は VRChat パイプラインサーバー (`wss://pipeline.vrchat.cloud/`) の WebSocket で配信される
 - 主に利用するイベント: `friend-location` (Location 変更・監視の中心)、`friend-online`、`friend-offline`、`notification`
-- Location 変更検知は `friend-location` を基準に `src/state/user-state-reducer.ts` で前回値と比較し、同一 Location の重複通知を抑制する
+- Location 変更検知は `friend-location` を基準に `src/state/user-state-reducer.ts` で前回値と比較し、同一 Location の重複通知を抑制する。previous / current の両方が visible (`wrld_` 始まり) の場合のみ `location-change` を生成し、private への遷移や `traveling` は通知しない
+- `friend-add` / `friend-delete` は SDK の型に現れないため、ペイロード形状は非公式ドキュメントに基づく想定であり router 側で型ガード検証する
 - 仕様変更の可能性があるため、公式 (https://creators.vrchat.com/) / 非公式コミュニティ (https://vrchatapi.github.io/) のドキュメントを随時確認する
 
 ## テスト
 - **フレームワーク**: Jest (`ts-jest`)。テスト対象は `**/*.test.ts`
-- **現状**: state reducer/repository/coordinator、pipeline supervisor/transport、session、health-service、app など主要ロジックにテストが整備済み (13 テストスイート、78 テストが成功)
+- **現状**: config・rules・state・vrchat・notifications・health・app の主要ロジックにテストが整備済み (件数は `pnpm test` の出力を参照)
 - **コマンド**: `pnpm test` (カバレッジ計測込み)
 - 新規ロジック追加時は既存のテストパターンに沿ってテストを追加する
 
@@ -133,4 +146,4 @@ pnpm test
 6. PR 本文の崩れがないことを確認する
 
 ## リポジトリ固有
-- `patches/vrchat@2.20.7.patch` によるパッチが適用されているため、`vrchat` パッケージの更新時はパッチの整合性を確認する。
+- `patches/vrchat@2.24.0.patch` によるパッチが適用されているため、`vrchat` パッケージの更新時はパッチの整合性を確認する。

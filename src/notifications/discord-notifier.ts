@@ -1,204 +1,111 @@
 import { Discord, Logger, type DiscordEmbed } from '@book000/node-utils'
-import type { Config } from '../config'
 import { toError } from '../logger-utils'
 
 const logger = Logger.configure('DISCORD')
 
-/** 通知の種類 */
-export type NotificationType = 'location-change' | 'online' | 'offline'
-
-/** Location 変更通知のパラメータ */
-export interface LocationChangeParams {
-  /** ユーザーの表示名 */
-  displayName: string
-  /** ユーザー ID */
-  userId: string
-  /** 前回の Location */
-  previousLocation: string | null
-  /** 現在の Location */
-  currentLocation: string
-  /** ワールド名 */
-  worldName?: string
-  /** サムネイル URL */
-  thumbnailUrl?: string
+/** Embed を送信できるクライアント */
+export interface EmbedClient {
+  sendMessage(message: { embeds: DiscordEmbed[] }): Promise<unknown>
 }
 
-/** オンライン通知のパラメータ */
-export interface OnlineParams {
-  /** ユーザーの表示名 */
-  displayName: string
-  /** ユーザー ID */
-  userId: string
+/** DiscordNotifier の生成オプション */
+export interface DiscordNotifierOptions {
+  /** Webhook URL からクライアントを生成する関数 */
+  createClient?: (url: string) => EmbedClient
+  /** 1 回の送信のタイムアウト (ms) */
+  timeoutMs?: number
+  /** リトライ間隔の基準値 (ms)。試行回数に比例して延びる */
+  retryDelayMs?: number
 }
-
-/** オフライン通知のパラメータ */
-export interface OfflineParams {
-  /** ユーザーの表示名 */
-  displayName: string
-  /** ユーザー ID */
-  userId: string
-}
-
-/** Embed の色 */
-const COLORS = {
-  /** Location 変更（青） */
-  locationChange: 0x00_aa_ff,
-  /** オンライン（緑） */
-  online: 0x00_ff_00,
-  /** オフライン（グレー） */
-  offline: 0x80_80_80,
-} as const
 
 /**
- * Discord 通知を送信するクラス
+ * destination ごとに Discord Webhook へ Embed を送信するクラス
+ *
+ * URL が変わらない限り destination ごとに同じクライアントを再利用する。
  */
 export class DiscordNotifier {
-  private discord: Discord
-  private readonly timeoutMs = 10_000
-  private readonly retryDelayMs = 1000
+  private readonly clients = new Map<
+    string,
+    { url: string; client: EmbedClient }
+  >()
+  private readonly createClient: (url: string) => EmbedClient
+  private readonly timeoutMs: number
+  private readonly retryDelayMs: number
 
   /**
    * DiscordNotifier を初期化する
    *
-   * @param config アプリケーション設定
+   * @param options クライアント生成関数・タイムアウト・リトライ間隔
    */
-  constructor(config: Config) {
-    this.discord = new Discord({
-      webhookUrl: config.discord.webhookUrl,
-    })
+  constructor(options: DiscordNotifierOptions = {}) {
+    this.createClient =
+      options.createClient ?? ((url) => new Discord({ webhookUrl: url }))
+    this.timeoutMs = options.timeoutMs ?? 10_000
+    this.retryDelayMs = options.retryDelayMs ?? 1000
   }
 
   /**
-   * Location 変更通知を送信する
+   * Embed を送信する（bounded timeout + リトライ付き）
    *
-   * @param params 通知パラメータ
-   */
-  async notifyLocationChange(params: LocationChangeParams): Promise<void> {
-    const embed: DiscordEmbed = {
-      title: `\u{1F4CD} ${params.displayName} ロケーション変更`,
-      color: COLORS.locationChange,
-      fields: [
-        {
-          name: 'ユーザー',
-          value: params.displayName,
-          inline: true,
-        },
-        {
-          name: '前の場所',
-          value: params.previousLocation ?? 'N/A',
-          inline: true,
-        },
-        {
-          name: '現在の場所',
-          value: params.currentLocation,
-          inline: true,
-        },
-      ],
-      timestamp: new Date().toISOString(),
-    }
-
-    if (params.worldName) {
-      embed.fields?.push({
-        name: 'ワールド',
-        value: params.worldName,
-        inline: false,
-      })
-    }
-
-    if (params.thumbnailUrl) {
-      embed.thumbnail = {
-        url: params.thumbnailUrl,
-      }
-    }
-
-    await this.sendEmbed(embed)
-  }
-
-  /**
-   * オンライン通知を送信する
+   * 失敗はログにのみ出力し、呼び出し元へは伝播しない。
    *
-   * @param params 通知パラメータ
+   * @param destinationName destination 名
+   * @param url Webhook URL
+   * @param embed 送信する Embed
    */
-  async notifyOnline(params: OnlineParams): Promise<void> {
-    const embed: DiscordEmbed = {
-      title: `\u{1F7E2} ${params.displayName} オンライン`,
-      color: COLORS.online,
-      fields: [
-        {
-          name: 'ユーザー',
-          value: params.displayName,
-          inline: true,
-        },
-      ],
-      timestamp: new Date().toISOString(),
-    }
-
-    await this.sendEmbed(embed)
-  }
-
-  /**
-   * オフライン通知を送信する
-   *
-   * @param params 通知パラメータ
-   */
-  async notifyOffline(params: OfflineParams): Promise<void> {
-    const embed: DiscordEmbed = {
-      title: `\u{26AB} ${params.displayName} オフライン`,
-      color: COLORS.offline,
-      fields: [
-        {
-          name: 'ユーザー',
-          value: params.displayName,
-          inline: true,
-        },
-      ],
-      timestamp: new Date().toISOString(),
-    }
-
-    await this.sendEmbed(embed)
-  }
-
-  /**
-   * Embed を送信する（bounded timeout + リトライ機能付き）
-   *
-   * @param embed Discord Embed
-   * @param attempt 現在の試行回数
-   */
-  private async sendEmbed(embed: DiscordEmbed, attempt = 1): Promise<void> {
+  async send(
+    destinationName: string,
+    url: string,
+    embed: DiscordEmbed
+  ): Promise<void> {
     const maxAttempts = 3
-
-    try {
-      await this.withTimeout(
-        this.discord.sendMessage({ embeds: [embed] }),
-        this.timeoutMs
-      )
-    } catch (error) {
-      logger.error(
-        `Failed to send notification (attempt ${attempt}/${maxAttempts})`,
-        toError(error)
-      )
-
-      if (attempt < maxAttempts) {
-        await this.delay(this.retryDelayMs * attempt)
-        return this.sendEmbed(embed, attempt + 1)
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await this.withTimeout(
+          this.getClient(destinationName, url).sendMessage({ embeds: [embed] })
+        )
+        return
+      } catch (error) {
+        // URL（秘密情報）がエラー文言に含まれていてもログへ出さない
+        const message = toError(error).message.split(url).join('[redacted]')
+        logger.error(
+          `Failed to send notification to "${destinationName}" (attempt ${attempt}/${maxAttempts})`,
+          new Error(message)
+        )
+        if (attempt < maxAttempts) {
+          await this.delay(this.retryDelayMs * attempt)
+        }
       }
-
-      // これ以上リトライしない。エラーはログにのみ出力して呼び出し元には伝播しない。
     }
   }
 
   /**
-   * Promise に bounded timeout を付与する
+   * destination のクライアントを取得する。URL が変わっていれば作り直す
+   *
+   * @param name destination 名
+   * @param url Webhook URL
+   * @returns 再利用または新規生成したクライアント
+   */
+  private getClient(name: string, url: string): EmbedClient {
+    const cached = this.clients.get(name)
+    if (cached?.url === url) return cached.client
+    const client = this.createClient(url)
+    this.clients.set(name, { url, client })
+    return client
+  }
+
+  /**
+   * Promise に送信タイムアウトを付与する
    *
    * @param promise 対象の Promise
-   * @param ms タイムアウトまでのミリ秒
+   * @returns 元の Promise の結果
    */
-  private async withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  private async withTimeout<T>(promise: Promise<T>): Promise<T> {
     let timer: NodeJS.Timeout | undefined
     const timeout = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
-        reject(new Error(`Discord send timed out after ${ms}ms`))
-      }, ms)
+        reject(new Error(`Discord send timed out after ${this.timeoutMs}ms`))
+      }, this.timeoutMs)
     })
     try {
       return await Promise.race([promise, timeout])
@@ -208,7 +115,7 @@ export class DiscordNotifier {
   }
 
   /**
-   * 指定したミリ秒だけ待機するヘルパー
+   * 指定ミリ秒だけ待機する
    *
    * @param ms 待機するミリ秒
    */

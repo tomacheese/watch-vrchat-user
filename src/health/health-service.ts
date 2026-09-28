@@ -16,6 +16,9 @@ export interface UnhealthyUserSnapshot {
   since: string
 }
 
+/** health の総合状態 */
+export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy'
+
 /** health endpoint が公開する観測データ */
 export interface HealthSnapshot {
   /** Pipeline supervisor の状態 */
@@ -36,6 +39,41 @@ export interface HealthSnapshot {
   lastReconnectReason: string | null
   /** unhealthy なユーザーの一覧 */
   unhealthyUsers: UnhealthyUserSnapshot[]
+  /** 設定ファイルの読み込み状態 */
+  config: {
+    loadedAt: string | null
+    lastReloadError: string | null
+    lastReloadFailedAt: string | null
+  }
+  /** 直近のルール評価エラー（ルール名ごとの集計） */
+  ruleErrors: {
+    rule: string
+    count: number
+    lastAt: string
+    lastError: string
+  }[]
+  /** Favorites 取得状態 */
+  favorites: { lastUpdatedAt: string | null; lastError: string | null }
+}
+
+/**
+ * snapshot から総合状態を判定する
+ *
+ * @param snapshot 観測データ
+ * @returns 総合状態
+ */
+export function evaluateStatus(snapshot: HealthSnapshot): HealthStatus {
+  if (
+    snapshot.supervisorState !== 'ready' ||
+    snapshot.unhealthyUsers.length > 0
+  ) {
+    return 'unhealthy'
+  }
+  const isDegraded =
+    snapshot.config.lastReloadError !== null ||
+    snapshot.ruleErrors.length > 0 ||
+    snapshot.favorites.lastError !== null
+  return isDegraded ? 'degraded' : 'healthy'
 }
 
 /**
@@ -116,16 +154,14 @@ export class HealthService {
       response.end(JSON.stringify({ status: 'unhealthy' }))
       return
     }
-    const isHealthy =
-      snapshot.supervisorState === 'ready' &&
-      snapshot.unhealthyUsers.length === 0
-    const statusCode = isHealthy ? 200 : 503
+    const status = evaluateStatus(snapshot)
+    const statusCode = status === 'unhealthy' ? 503 : 200
 
     response.writeHead(statusCode, { 'Content-Type': 'application/json' })
     response.end(
       JSON.stringify(
         {
-          status: isHealthy ? 'healthy' : 'unhealthy',
+          status,
           ...snapshot,
           timestamp: new Date().toISOString(),
         },

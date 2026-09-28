@@ -1,16 +1,24 @@
 import { Logger } from '@book000/node-utils'
 import { toError } from './logger-utils'
 import type { Config } from './config'
+import { ConfigManager } from './config/config-manager'
 import { HealthService, type HealthSnapshot } from './health/health-service'
 import { DiscordNotifier } from './notifications/discord-notifier'
+import { NotificationDispatcher } from './notifications/notification-dispatcher'
+import { RuleErrorLog } from './rules/rule-engine'
 import { Reconciler } from './state/reconciler'
 import { UserStateCoordinator } from './state/user-state-coordinator'
 import { UserStateRepository } from './state/user-state-repository'
-import type { ReducerEffect } from './state/user-state-reducer'
+import { FavoritesService } from './vrchat/favorites-service'
 import { PipelineEventRouter } from './vrchat/pipeline-event-router'
 import { PipelineSupervisor } from './vrchat/pipeline-supervisor'
 import { PipelineTransportAdapter } from './vrchat/pipeline-transport'
-import { isFriend, VRChatSession } from './vrchat/session'
+import {
+  getFriendFavoriteGroups,
+  getWorldInfo,
+  VRChatSession,
+} from './vrchat/session'
+import { WorldResolver } from './vrchat/world-resolver'
 
 const logger = Logger.configure('APP')
 
@@ -27,6 +35,9 @@ export class App {
   private supervisor: PipelineSupervisor | null = null
   private reconciler: Reconciler | null = null
   private healthService: HealthService | null = null
+  private configManager: ConfigManager | null = null
+  private favorites: FavoritesService | null = null
+  private readonly errorLog = new RuleErrorLog()
   private session: VRChatSession | null = null
   private reconcileTimer: NodeJS.Timeout | null = null
 
@@ -40,54 +51,57 @@ export class App {
   /**
    * アプリケーションを起動する
    *
-   * REST セッション確立 -> target user の friend 検証 -> user state load ->
-   * Coordinator/Router 準備 -> Pipeline 接続 (atomic connect) ->
-   * synchronizing 中の REST snapshot cutover -> ready、の順で初期化する。
+   * 設定読み込み (不正なら fatal) -> user state load -> REST セッション確立 ->
+   * Favorites 初回取得 (失敗は非致命) -> Coordinator/Router 準備 ->
+   * Pipeline 接続 (atomic connect) -> synchronizing 中の REST snapshot cutover ->
+   * ready、の順で初期化する。
    */
   async start(): Promise<void> {
     logger.info('Starting watch-vrchat-user...')
 
+    const configManager = new ConfigManager({
+      configPath: this.config.configPath,
+      env: process.env,
+    })
+    configManager.load()
+    this.configManager = configManager
+
     this.repository = new UserStateRepository()
     this.repository.load()
 
-    const notifier = new DiscordNotifier(this.config)
+    this.session = await VRChatSession.create(this.config)
+    const session = this.session
+
+    const favorites = new FavoritesService({
+      fetcher: () => getFriendFavoriteGroups(session.client),
+    })
+    this.favorites = favorites
+    // 失敗は FavoritesService の status に記録される非致命エラー
+    await favorites.refresh()
+
+    const dispatcher = new NotificationDispatcher({
+      worldResolver: new WorldResolver({
+        fetcher: (worldId) => getWorldInfo(session.client, worldId),
+        filePath: process.env.WORLD_CACHE_FILE_PATH,
+      }),
+      favorites,
+      notifier: new DiscordNotifier(),
+      errorLog: this.errorLog,
+    })
     this.coordinator = new UserStateCoordinator(
       this.repository,
-      (userId, displayName, effect) =>
-        this.dispatchEffect(notifier, userId, displayName, effect)
+      (userId, displayName, effect, snapshot) =>
+        dispatcher.handleEffect(userId, displayName, effect, snapshot),
+      () => configManager.getSnapshot()
     )
 
-    this.session = await VRChatSession.create(this.config)
-
-    for (const userId of this.config.targetUserIds) {
-      let friend: boolean
-      try {
-        friend = await isFriend(this.session.client, userId)
-      } catch (error) {
-        // API 呼び出し自体の失敗（一時的なネットワーク不調や 429 等）は
-        // 「フレンドではない」と断定できないため、fatal にせず監視を継続する
-        logger.warn(
-          `Could not verify friend status for ${userId}, continuing to monitor: ${toError(error).message}`
-        )
-        continue
-      }
-      if (!friend) {
-        throw new Error(
-          `Target user ${userId} is not a friend. Add them as a friend before monitoring.`
-        )
-      }
-    }
-
-    const router = new PipelineEventRouter(
-      this.config.targetUserIds,
-      this.coordinator
-    )
+    const router = new PipelineEventRouter(this.coordinator)
     router.attach(this.session.client.pipeline)
 
     const reconciler = new Reconciler(
       () => this.session?.client ?? null,
       this.coordinator,
-      this.config.targetUserIds
+      this.repository
     )
     this.reconciler = reconciler
 
@@ -98,7 +112,6 @@ export class App {
       () => reconciler.reconcileAll()
     )
 
-    const session = this.session
     const getAuthCookie = async (): Promise<string> => {
       const authCookie = await session.getAuthCookie()
       if (!authCookie) {
@@ -119,6 +132,8 @@ export class App {
       })
     }, RECONCILE_INTERVAL_MS)
 
+    favorites.start()
+
     this.healthService = new HealthService(() => this.buildHealthSnapshot())
     this.healthService.start()
 
@@ -136,6 +151,15 @@ export class App {
   }
 
   /**
+   * health endpoint が実際に listen しているポートを取得する（テスト・診断用）
+   *
+   * @returns ポート番号、未起動の場合は 0
+   */
+  getHealthPort(): number {
+    return this.healthService?.getListeningPort() ?? 0
+  }
+
+  /**
    * アプリケーションを停止する
    *
    * shutdown handler (main.ts) の `.catch`/`.finally` が確実に走るよう、
@@ -145,6 +169,16 @@ export class App {
     if (this.reconcileTimer) {
       clearInterval(this.reconcileTimer)
       this.reconcileTimer = null
+    }
+    try {
+      this.configManager?.stop()
+    } catch (error) {
+      logger.error('Error while stopping config manager', toError(error))
+    }
+    try {
+      this.favorites?.stop()
+    } catch (error) {
+      logger.error('Error while stopping favorites service', toError(error))
     }
     try {
       this.supervisor?.stop()
@@ -157,53 +191,6 @@ export class App {
       logger.error('Error while stopping health service', toError(error))
     }
     return Promise.resolve()
-  }
-
-  /**
-   * reduce effect を Discord 通知へ変換して送信する
-   *
-   * @param notifier Discord 通知クラス
-   * @param userId ユーザー ID
-   * @param displayName 表示名
-   * @param effect reduce が生成した effect
-   */
-  private async dispatchEffect(
-    notifier: DiscordNotifier,
-    userId: string,
-    displayName: string,
-    effect: ReducerEffect
-  ): Promise<void> {
-    switch (effect.type) {
-      case 'online': {
-        await notifier.notifyOnline({ displayName, userId })
-        if (effect.location !== undefined) {
-          await notifier.notifyLocationChange({
-            displayName,
-            userId,
-            previousLocation: null,
-            currentLocation: effect.location,
-          })
-        }
-
-        break
-      }
-      case 'offline': {
-        await notifier.notifyOffline({ displayName, userId })
-
-        break
-      }
-      case 'location-change': {
-        await notifier.notifyLocationChange({
-          displayName,
-          userId,
-          previousLocation: effect.previousLocation,
-          currentLocation: effect.currentLocation,
-        })
-
-        break
-      }
-      // No default
-    }
   }
 
   /**
@@ -232,6 +219,16 @@ export class App {
       lastReconnectReason: this.supervisor?.getLastReconnectReason() ?? null,
       reconnectHistory: this.supervisor?.getDiagnosticHistory() ?? [],
       unhealthyUsers,
+      config: this.configManager?.getStatus() ?? {
+        loadedAt: null,
+        lastReloadError: null,
+        lastReloadFailedAt: null,
+      },
+      ruleErrors: this.errorLog.getRecent(Date.now()),
+      favorites: this.favorites?.getStatus() ?? {
+        lastUpdatedAt: null,
+        lastError: null,
+      },
     }
   }
 }

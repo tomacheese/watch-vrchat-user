@@ -1,0 +1,43 @@
+# 通知ルール設定ファイルの例 (data/config.yaml として配置する)
+# Webhook URL は ${ENV_VAR} 形式で環境変数から読み込む (URL 全体が ${NAME} のときのみ展開される)
+version: 1
+
+destinations:
+  main:
+    type: discord-webhook
+    url: ${DISCORD_WEBHOOK_MAIN}
+  dance:
+    type: discord-webhook
+    url: ${DISCORD_WEBHOOK_DANCE}
+
+rules:
+  # 特定ユーザーの Location 変更のみ通知
+  - name: specific-user-location
+    when: |
+      event.type == "location-change" &&
+      user.id == "usr_00000000-0000-0000-0000-000000000000"
+    destinations: [main]
+
+  # 特定ユーザーのオンライン / オフラインのみ通知
+  - name: specific-user-presence
+    when: |
+      (event.type == "online" || event.type == "offline") &&
+      user.id == "usr_00000000-0000-0000-0000-000000000000"
+    destinations: [main]
+
+  # 誰かが World 名に「ダンス」を含む World へ移動したら通知
+  - name: dance-world
+    when: |
+      event.type == "location-change" &&
+      current.location != null &&
+      current.location.visible &&
+      current.location.world.name.contains("ダンス")
+    destinations: [dance]
+
+  # Favorite グループ group_0 のフレンドのオンライン / オフラインを通知
+  - name: favorite-group-0-presence
+    when: |
+      (event.type == "online" || event.type == "offline") &&
+      (("group_0" in current.favoriteGroups) ||
+       ("group_0" in previous.favoriteGroups))
+    destinations: [main]

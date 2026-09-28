@@ -28,7 +28,9 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 
 # 環境変数でデータディレクトリを /data に設定
 ENV COOKIE_FILE_PATH=/data/vrchat-cookies.json
-ENV LOCATION_FILE_PATH=/data/user-locations.json
+ENV STATE_FILE_PATH=/data/friend-states.json
+ENV WORLD_CACHE_FILE_PATH=/data/world-cache.json
+ENV CONFIG_PATH=/data/config.yaml
 
 VOLUME ["/data"]
 

@@ -4,12 +4,39 @@ import path from 'node:path'
 import { UserStateCoordinator } from './user-state-coordinator'
 import { UserStateRepository } from './user-state-repository'
 import type { ReducerEffect } from './user-state-reducer'
+import type { ConfigSnapshot } from '../config/config-snapshot'
 
 function tempFilePath(): string {
   return path.join(
     fs.mkdtempSync(path.join(os.tmpdir(), 'coordinator-')),
-    'user-locations.json'
+    'friend-states.json'
   )
+}
+
+const snapshot: ConfigSnapshot = {
+  destinations: {},
+  rules: [],
+  loadedAt: '2026-01-01T00:00:00.000Z',
+}
+const getSnapshot = (): ConfigSnapshot => snapshot
+
+/** baseline 完了済みで、指定 record を持つ Repository を作る */
+async function completedRepository(
+  ...records: ('offline' | 'online')[]
+): Promise<UserStateRepository> {
+  const repository = new UserStateRepository(tempFilePath())
+  repository.load()
+  await repository.setBaselineCompleted()
+  for (const [i, presence] of records.entries()) {
+    await repository.commitUserState(`u${i + 1}`, {
+      userId: `u${i + 1}`,
+      displayName: 'Alice',
+      presence,
+      location: null,
+      updatedAt: '2025-12-31T00:00:00.000Z',
+    })
+  }
+  return repository
 }
 
 function wait(ms: number): Promise<void> {
@@ -25,25 +52,33 @@ async function waitFor(condition: () => boolean): Promise<void> {
 }
 
 describe('UserStateCoordinator', () => {
+  it('state が変化しない observation では永続化しない', async () => {
+    const repository = await completedRepository('offline')
+    const commit = jest.spyOn(repository, 'commitUserState')
+    const coordinator = new UserStateCoordinator(
+      repository,
+      () => Promise.resolve(),
+      getSnapshot
+    )
+
+    coordinator.enqueue('u1', 'Alice', { type: 'offline' })
+    coordinator.enqueue('u1', 'Alice', { type: 'offline' })
+    await coordinator.drain(['u1'])
+
+    expect(commit).not.toHaveBeenCalled()
+  })
+
   it('同一ユーザーの observation を順番に処理し effect を発火する', async () => {
-    const repository = new UserStateRepository(tempFilePath())
-    repository.load()
-    // record 不在の baseline ケースではなく、既存 record がある通常フローを検証するため、
-    // 既存 offline record がある状態から開始する
-    await repository.commitUserState('u1', {
-      userId: 'u1',
-      displayName: 'Alice',
-      presence: 'offline',
-      location: null,
-      updatedAt: '2025-12-31T00:00:00.000Z',
-    })
+    // baseline 完了済みかつ既存 offline record がある通常フローから開始する
+    const repository = await completedRepository('offline')
     const effects: ReducerEffect[] = []
     const coordinator = new UserStateCoordinator(
       repository,
       (_userId, _displayName, effect) => {
         effects.push(effect)
         return Promise.resolve()
-      }
+      },
+      getSnapshot
     )
 
     coordinator.enqueue('u1', 'Alice', { type: 'online' })
@@ -57,21 +92,21 @@ describe('UserStateCoordinator', () => {
 
     await waitFor(() => effects.length === 4)
 
-    // no-op effect は onEffect に渡されないため、traveling のみ含まれない
-    expect(effects).toEqual([
-      { type: 'online' },
-      {
-        type: 'location-change',
-        previousLocation: null,
-        currentLocation: 'wrld_a',
-      },
-      {
-        type: 'location-change',
-        previousLocation: 'wrld_a',
-        currentLocation: 'wrld_b',
-      },
-      { type: 'offline' },
+    // no-op effect は onEffect に渡されない（Coordinator の実装が effect.type !== 'no-op' でフィルタする）
+    expect(effects.map((effect) => effect.type)).toEqual([
+      'online',
+      'location-change',
+      'location-change',
+      'offline',
     ])
+    expect(effects[1]).toMatchObject({
+      previous: { location: null },
+      current: { location: 'wrld_a' },
+    })
+    expect(effects[2]).toMatchObject({
+      previous: { location: 'wrld_a' },
+      current: { location: 'wrld_b' },
+    })
     expect(repository.get('u1')).toMatchObject({
       presence: 'offline',
       location: null,
@@ -81,8 +116,10 @@ describe('UserStateCoordinator', () => {
   it('appendSnapshotObservation は expectedSeq が古い場合 dropped し false を返す', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
-    const coordinator = new UserStateCoordinator(repository, () =>
-      Promise.resolve()
+    const coordinator = new UserStateCoordinator(
+      repository,
+      () => Promise.resolve(),
+      getSnapshot
     )
 
     const seq = coordinator.captureSeq('u1')
@@ -100,8 +137,10 @@ describe('UserStateCoordinator', () => {
   it('appendSnapshotObservation は queue に変化がなければ true を返し末尾に追記する', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
-    const coordinator = new UserStateCoordinator(repository, () =>
-      Promise.resolve()
+    const coordinator = new UserStateCoordinator(
+      repository,
+      () => Promise.resolve(),
+      getSnapshot
     )
 
     const seq = coordinator.captureSeq('u1')
@@ -115,17 +154,7 @@ describe('UserStateCoordinator', () => {
   })
 
   it('persist が失敗した observation は queue head で保持され、後続を処理しない', async () => {
-    const repository = new UserStateRepository(tempFilePath())
-    repository.load()
-    // online が baseline 保存（no-op）ではなく effect 'online' を発火するよう、
-    // 事前に offline record を実際にコミットしておく
-    await repository.commitUserState('u1', {
-      userId: 'u1',
-      displayName: 'Alice',
-      presence: 'offline',
-      location: null,
-      updatedAt: '2025-12-31T00:00:00.000Z',
-    })
+    const repository = await completedRepository('offline')
 
     // 1 回目の commit だけ失敗させ、以降は実際の commitUserState を通す
     // （mock で完全に置き換えると in-memory state が更新されず retry 後も
@@ -149,6 +178,7 @@ describe('UserStateCoordinator', () => {
         effects.push(effect)
         return Promise.resolve()
       },
+      getSnapshot,
       { initialBackoffMs: 30, maxBackoffMs: 30 }
     )
 
@@ -164,13 +194,9 @@ describe('UserStateCoordinator', () => {
     await waitFor(
       () => effects.length === 2 && coordinator.getUnhealthy('u1') === undefined
     )
-    expect(effects).toEqual([
-      { type: 'online' },
-      {
-        type: 'location-change',
-        previousLocation: null,
-        currentLocation: 'wrld_a',
-      },
+    expect(effects.map((effect) => effect.type)).toEqual([
+      'online',
+      'location-change',
     ])
     expect(coordinator.getUnhealthy('u1')).toBeUndefined()
   })
@@ -185,6 +211,7 @@ describe('UserStateCoordinator', () => {
     const coordinator = new UserStateCoordinator(
       repository,
       () => Promise.resolve(),
+      getSnapshot,
       {
         maxQueueSize: 2,
       }
@@ -211,6 +238,7 @@ describe('UserStateCoordinator', () => {
     const coordinator = new UserStateCoordinator(
       repository,
       () => Promise.resolve(),
+      getSnapshot,
       { maxQueueSize: 2 }
     )
 
@@ -230,5 +258,159 @@ describe('UserStateCoordinator', () => {
 
     // head の commit は成功したが、overflow によるデータ損失自体は解消しない
     expect(coordinator.getUnhealthy('u1')?.cause).toBe('queue-overflow')
+  })
+
+  it('AC-11: onEffect には enqueue 時点の snapshot が渡され、getSnapshot が後で変わっても影響しない', async () => {
+    const repository = await completedRepository('offline')
+    const snapshotA: ConfigSnapshot = { ...snapshot, loadedAt: 'A' }
+    const snapshotB: ConfigSnapshot = { ...snapshot, loadedAt: 'B' }
+    let current = snapshotA
+    const received: ConfigSnapshot[] = []
+    const { promise: gate, resolve: openGate } =
+      // eslint-disable-next-line @typescript-eslint/no-invalid-void-type
+      Promise.withResolvers<void>()
+    const coordinator = new UserStateCoordinator(
+      repository,
+      async (_userId, _displayName, _effect, effectSnapshot) => {
+        received.push(effectSnapshot)
+        await gate
+      },
+      () => current
+    )
+
+    coordinator.enqueue('u1', 'Alice', { type: 'online' }) // snapshot A
+    current = snapshotB
+    coordinator.enqueue('u1', 'Alice', { type: 'offline' }) // snapshot B
+    openGate()
+
+    await waitFor(() => received.length === 2)
+    expect(received).toEqual([snapshotA, snapshotB])
+  })
+
+  it('friend-delete は record を削除し、friend-delete effect を発火する', async () => {
+    const repository = await completedRepository('online')
+    const effects: ReducerEffect[] = []
+    const coordinator = new UserStateCoordinator(
+      repository,
+      (_userId, _displayName, effect) => {
+        effects.push(effect)
+        return Promise.resolve()
+      },
+      getSnapshot
+    )
+
+    coordinator.enqueue('u1', 'u1', { type: 'friend-delete' })
+    await waitFor(() => effects.length === 1)
+
+    expect(effects[0]).toMatchObject({
+      type: 'friend-delete',
+      previous: { userId: 'u1' },
+      current: undefined,
+    })
+    expect(repository.get('u1')).toBeUndefined()
+  })
+
+  it('baseline 未完了中に届いた未知ユーザーの observation は通知なしで state 化される', async () => {
+    const repository = new UserStateRepository(tempFilePath())
+    repository.load()
+    const effects: ReducerEffect[] = []
+    const coordinator = new UserStateCoordinator(
+      repository,
+      (_userId, _displayName, effect) => {
+        effects.push(effect)
+        return Promise.resolve()
+      },
+      getSnapshot
+    )
+
+    coordinator.enqueue('u9', 'Zed', { type: 'location', location: 'wrld_a' })
+    await coordinator.drain(['u9'])
+
+    expect(effects).toEqual([])
+    expect(repository.get('u9')).toMatchObject({
+      presence: 'online',
+      location: 'wrld_a',
+    })
+  })
+
+  it('baseline 完了後の未知ユーザーは friend-add のみを通知する', async () => {
+    const repository = await completedRepository()
+    const effects: ReducerEffect[] = []
+    const coordinator = new UserStateCoordinator(
+      repository,
+      (_userId, _displayName, effect) => {
+        effects.push(effect)
+        return Promise.resolve()
+      },
+      getSnapshot
+    )
+
+    coordinator.enqueue('u9', 'Zed', { type: 'location', location: 'wrld_a' })
+    await coordinator.drain(['u9'])
+
+    expect(effects.map((effect) => effect.type)).toEqual(['friend-add'])
+  })
+
+  describe('drain', () => {
+    it('対象の queue が空になれば true を返す', async () => {
+      const repository = await completedRepository('offline', 'offline')
+      const coordinator = new UserStateCoordinator(
+        repository,
+        () => wait(20),
+        getSnapshot
+      )
+
+      coordinator.enqueue('u1', 'Alice', { type: 'online' })
+      coordinator.enqueue('u2', 'Alice', { type: 'online' })
+
+      await expect(coordinator.drain(['u1', 'u2'])).resolves.toBe(true)
+      expect(repository.get('u1')?.presence).toBe('online')
+      expect(repository.get('u2')?.presence).toBe('online')
+    })
+
+    it('enqueue されていないユーザーだけなら即座に true を返す', async () => {
+      const repository = await completedRepository()
+      const coordinator = new UserStateCoordinator(
+        repository,
+        () => Promise.resolve(),
+        getSnapshot
+      )
+      await expect(coordinator.drain(['u1'])).resolves.toBe(true)
+    })
+
+    it('待機中に persist 失敗で unhealthy になると false を返す', async () => {
+      const repository = await completedRepository('offline')
+      jest
+        .spyOn(repository, 'commitUserState')
+        .mockRejectedValue(new Error('disk full'))
+      const coordinator = new UserStateCoordinator(
+        repository,
+        () => Promise.resolve(),
+        getSnapshot,
+        { initialBackoffMs: 30, maxBackoffMs: 30 }
+      )
+
+      coordinator.enqueue('u1', 'Alice', { type: 'online' })
+
+      await expect(coordinator.drain(['u1'])).resolves.toBe(false)
+    })
+
+    it('queue-overflow 済みのユーザーが対象なら false を返す', async () => {
+      const repository = await completedRepository('offline')
+      jest
+        .spyOn(repository, 'commitUserState')
+        // eslint-disable-next-line @typescript-eslint/no-empty-function -- overflow を作るため commit を永遠に処理中にする
+        .mockReturnValue(new Promise(() => {}))
+      const coordinator = new UserStateCoordinator(
+        repository,
+        () => Promise.resolve(),
+        getSnapshot,
+        { maxQueueSize: 1 }
+      )
+      coordinator.enqueue('u1', 'Alice', { type: 'online' })
+      coordinator.enqueue('u1', 'Alice', { type: 'offline' })
+
+      await expect(coordinator.drain(['u1'])).resolves.toBe(false)
+    })
   })
 })

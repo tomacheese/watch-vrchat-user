@@ -1,15 +1,16 @@
 # watch-vrchat-user
 
-VRChat ユーザーの Location 変更を監視し、Discord に通知するアプリケーションです。
+VRChat の全フレンドの状態変化を監視し、YAML 設定ファイルに書いた CEL ルールに一致したものを Discord に通知するアプリケーションです。
 
 ## 機能
 
-- 指定したユーザーの Location 変更をリアルタイムで監視
-- ユーザーのオンライン/オフライン状態を検知
-- オンライン復帰後に最初に確認した Location を通知
-- Discord Webhook を使用した通知
-- セッションの永続化（2FA の再入力不要）
-- 起動時にユーザーの現在状態を取得
+- 全フレンドの状態 (オンライン / オフライン / Location) をリアルタイムで追跡し、永続化
+- オンライン復帰後に最初に確認した Location を `location-change` として通知対象にする
+- 「通知するか」と「どの Discord Webhook へ通知するか」を CEL ルールで柔軟に指定 (1 イベントが複数ルールに一致した場合は、一致した全 destination へ通知)
+- 同一 destination に複数ルールが一致した場合は 1 通にまとめ、Embed の footer に一致した全ルール名を表示
+- 設定ファイルの hot reload (不正な設定への reload は失敗し、直前の正常な設定で稼働を継続)
+- World 情報の取得 (24 時間キャッシュ) と Favorite Friends (`group_0`〜`group_3`) の取得 (1 時間ごとに更新)
+- セッションの永続化 (2FA の再入力不要)
 
 ## 必要条件
 
@@ -36,17 +37,146 @@ VRCHAT_USERNAME=your_vrchat_username
 VRCHAT_PASSWORD=your_vrchat_password
 VRCHAT_TOTP_SECRET=your_totp_secret  # オプション: TOTP シークレット（設定すると 2FA を自動入力）
 
-# Discord 通知設定
-DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/xxx/yyy
-
-# 監視対象ユーザー ID（カンマ区切り）
-TARGET_USER_IDS=usr_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+# 設定ファイル内の ${ENV_VAR} から参照する Discord Webhook URL (config.example.yaml の例)
+DISCORD_WEBHOOK_MAIN=https://discord.com/api/webhooks/xxx/yyy
+DISCORD_WEBHOOK_DANCE=https://discord.com/api/webhooks/xxx/zzz
 
 # エラー通知設定
 SENTRY_DSN=https://xxx@yyy.example.com/1  # オプション: GlitchTip/Sentry の DSN（未設定の場合、エラー通知は無効化される）
 ```
 
+その他の環境変数は次のとおりです (いずれも任意)。
+
+| 環境変数 | 既定値 (Docker) | 説明 |
+| --- | --- | --- |
+| `CONFIG_PATH` | `/data/config.yaml` | 通知ルール設定ファイル (YAML) のパス |
+| `STATE_FILE_PATH` | `data/friend-states.json` (`/data/friend-states.json`) | 全フレンドの state の保存先 |
+| `WORLD_CACHE_FILE_PATH` | `data/world-cache.json` (`/data/world-cache.json`) | World 情報キャッシュの保存先 |
+
 > **注意**: `VRCHAT_TOTP_SECRET` を設定しない場合、初回起動時に 2FA コードの手動入力が必要です。
+
+### 3. 設定ファイルの作成
+
+`config.example.yaml` を `data/config.yaml` としてコピーし、ルールを編集してください。設定ファイルが存在しない、または不正な状態で起動した場合、起動は失敗します。
+
+```bash
+cp config.example.yaml data/config.yaml  # ローカル実行時は CONFIG_PATH=data/config.yaml を指定する
+```
+
+## 設定ファイル
+
+```yaml
+version: 1
+destinations:
+  main:
+    type: discord-webhook
+    url: ${DISCORD_WEBHOOK_MAIN}
+rules:
+  - name: dance-world
+    enabled: true
+    when: |
+      event.type == "location-change" &&
+      current.location != null &&
+      current.location.visible &&
+      current.location.world.name.contains("ダンス")
+    destinations: [main]
+```
+
+- `version` は `1` 固定です。
+- `destinations` はキーが destination 名で、`type` は `discord-webhook` のみです。`url` は直書きするか、値全体を `${ENV_VAR}` にすると環境変数から展開されます (展開されるのは `destinations.*.url` の値全体が `${NAME}` の場合のみ。環境変数が未定義なら設定エラー)。展開後の URL は `https://discord.com/api/webhooks/` で始まる必要があります。
+- `rules[].name` は必須で、設定内で一意にします。`enabled` は省略すると `true` です。`destinations` は 1 個以上で、定義済みの destination 名のみ指定できます。`when` は boolean を返す CEL 式です (4096 文字以内)。
+- 未知のキーはエラーになります (typo 検出)。`enabled: false` のルールも構文の検証は行われますが、評価はされません。
+- Webhook URL は秘密情報です。設定ファイルに直書きせず、`${ENV_VAR}` で環境変数から渡すことを推奨します。ログや health には出力されません。
+
+### semantic event
+
+`event.type` は次の 5 種のいずれかです。
+
+| `event.type` | 意味 |
+| --- | --- |
+| `online` | フレンドがオフラインからオンラインになった |
+| `offline` | フレンドがオンラインからオフラインになった |
+| `location-change` | オンライン中のフレンドの Location が、公開された別の Location に変わった |
+| `friend-add` | フレンドが追加された |
+| `friend-delete` | フレンドが削除された |
+
+- `location-change` は、変更前後の Location が**どちらも公開**されている (World を特定できる) 場合のみ発生します。private への遷移、private からの復帰、Location 未確定からの確定では発生しません。
+- `traveling` (移動中) は無視され、state も更新されません。
+- 初回起動 (state ファイルが無い場合) は、現在の全フレンドの状態を **通知なしで** 記録する baseline 構築を行います。Favorite group の変更や設定の reload による、過去のイベントの再評価や遡及通知は行われません。
+- WebSocket 経由の検知と、起動時・WebSocket 再接続直後・1 時間ごとの Friends API による同期は、同一の経路を通ります。
+
+### CEL 変数
+
+| 変数 | 内容 |
+| --- | --- |
+| `event.type` | 上記 5 種のいずれか |
+| `user.id` / `user.displayName` | 対象フレンドのユーザー ID と表示名 |
+| `previous` / `current` | イベント前後の状態。`friend-add` では `previous == null`、`friend-delete` では `current == null` |
+
+`previous` / `current` は次のフィールドを持ちます。
+
+- `presence`: `"online"` または `"offline"`
+- `favoriteGroups`: 所属する Favorite group の一覧 (`group_0`〜`group_3`)
+- `location`: offline のときは `null`。online でも Location 未確定の場合は `null` になるため、在席判定は `presence` で行ってください。private などの非公開 Location は `{ visible: false }`。公開 Location は次の構造です。
+  - `location.visible`: `true`
+  - `location.world.id`: World ID
+  - `location.world.name`: World 名 (World 情報が有効な場合のみ存在。取得できない場合、参照したルールは評価エラーとなり、そのルールだけが不一致扱いになる)
+  - `location.instance.name` / `type` / `ownerId` / `region` / `ageGate`
+
+`location.instance.type` は次の 8 種です。
+
+| `type` | 意味 |
+| --- | --- |
+| `public` | Public |
+| `friends-plus` | Friends+ |
+| `friends` | Friends |
+| `invite-plus` | Invite+ |
+| `invite` | Invite |
+| `group-public` | Group Public |
+| `group-plus` | Group+ |
+| `group-members` | Group (メンバーのみ) |
+
+### ルールの例
+
+`config.example.yaml` には次の 4 例が含まれています。`usr_...` の値は実際のユーザー ID に置き換えてください。
+
+```yaml
+rules:
+  # 特定ユーザーの Location 変更のみ通知
+  - name: specific-user-location
+    when: |
+      event.type == "location-change" &&
+      user.id == "usr_00000000-0000-0000-0000-000000000000"
+    destinations: [main]
+
+  # 特定ユーザーのオンライン / オフラインのみ通知
+  - name: specific-user-presence
+    when: |
+      (event.type == "online" || event.type == "offline") &&
+      user.id == "usr_00000000-0000-0000-0000-000000000000"
+    destinations: [main]
+
+  # World 名に「ダンス」を含む World への移動を通知
+  - name: dance-world
+    when: |
+      event.type == "location-change" &&
+      current.location != null &&
+      current.location.visible &&
+      current.location.world.name.contains("ダンス")
+    destinations: [dance]
+
+  # Favorite group group_0 のフレンドのオンライン / オフラインを通知
+  - name: favorite-group-0-presence
+    when: |
+      (event.type == "online" || event.type == "offline") &&
+      (("group_0" in current.favoriteGroups) ||
+       ("group_0" in previous.favoriteGroups))
+    destinations: [main]
+```
+
+### hot reload
+
+設定ファイルを保存すると、数秒の遅延の後に自動で再読み込みされます。再読み込み後の設定は、以降に検知したイベントから適用されます。不正な設定 (YAML の構文エラー、未知のキー、不正な CEL 式など) への reload は失敗し、直前の正常な設定 (last-known-good) で稼働を継続します。失敗は health の `config` に反映されます。ただし、起動時に設定が不正な場合は起動に失敗します。
 
 ## 使用方法
 
@@ -64,6 +194,8 @@ pnpm start
 
 ### Docker を使用する場合
 
+`./data` が `/data` にマウントされるため、`./data/config.yaml` を用意してください。設定ファイルの `${ENV_VAR}` から参照する環境変数は、`compose.yaml` の `environment` に追加してコンテナへ渡します (同梱の `compose.yaml` は `DISCORD_WEBHOOK_MAIN` と `DISCORD_WEBHOOK_DANCE` を渡す例です)。
+
 ```bash
 docker compose up -d
 ```
@@ -74,14 +206,37 @@ docker compose up -d
 docker compose logs -f
 ```
 
-Pipeline の接続診断はログに記録され、localhost の `/health` では直近 25 件を確認できます。接続理由、再接続試行、結果を確認できます。診断イベントにはユーザー情報、Location、Cookie、Webhook URL、raw event payload は含まれません。
+### ヘルスチェック
+
+`HEALTH_HOST` (既定 `127.0.0.1`) と `HEALTH_PORT` (既定 `3000`) の `/health` が JSON を返します。`config` (設定の読み込み状態)、`ruleErrors` (ルール評価エラー)、`favorites` (Favorite Friends の更新状態) を含みます。
+
+- `healthy`: 正常
+- `degraded` (HTTP 200): 設定の reload 失敗中、直近 1 時間内のルール評価エラー、または Favorite Friends の取得失敗がある。通知は last-known-good の設定で継続している
+- `unhealthy` (HTTP 503): WebSocket 接続が ready でない、またはユーザー単位の異常がある
+
+Pipeline の接続診断はログに記録され、`/health` では直近 25 件を確認できます。接続理由、再接続試行、結果を確認できます。診断イベントにはユーザー情報、Location、Cookie、Webhook URL、raw event payload は含まれません。
 
 ## データの永続化
 
 以下のファイルが `data/` ディレクトリに保存されます。
 
 - `vrchat-cookies.json` - VRChat セッション Cookie
-- `user-locations.json` - ユーザーの Location 履歴
+- `friend-states.json` - 全フレンドの state
+- `world-cache.json` - World 情報のキャッシュ (24 時間 TTL)
+- `config.yaml` - 通知ルール設定ファイル (利用者が用意する)
+
+## 旧バージョンからの移行
+
+旧バージョンの環境変数による指定は廃止され、後方互換はありません。
+
+1. 旧 `DISCORD_WEBHOOK_URL` (廃止) を、新しい環境変数 (例: `DISCORD_WEBHOOK_MAIN`) に移し、`destinations` の `url: ${DISCORD_WEBHOOK_MAIN}` から参照します。
+2. 旧 `TARGET_USER_IDS` (廃止) の各ユーザーについて、`user.id == "usr_..."` を条件にしたルールを追加します (上記「ルールの例」の 1・2 番目)。
+3. 旧 `LOCATION_FILE_PATH` (廃止) は不要です。旧 `user-locations.json` は新バージョンに引き継がれません。新バージョンは `friend-states.json` を新規に作成します。
+4. 初回起動では、現在の全フレンドの状態を通知なしで記録する baseline を構築します。この間と直後に、既存の状態を理由とした通知は送られません。
+
+### rollback
+
+旧イメージに戻し、旧環境変数 (`DISCORD_WEBHOOK_URL` / `TARGET_USER_IDS`) を復元すれば戻せます。旧 `user-locations.json` は新バージョンから変更されません。新バージョンが作成した `friend-states.json` などは残りますが、旧バージョンには影響しません。
 
 ## 開発
 

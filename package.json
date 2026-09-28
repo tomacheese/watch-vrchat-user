@@ -29,9 +29,11 @@
   },
   "dependencies": {
     "@book000/node-utils": "1.25.128",
+    "@marcbachmann/cel-js": "8.0.0",
     "keyv": "5.6.0",
     "keyv-file": "5.3.5",
-    "vrchat": "2.24.0"
+    "vrchat": "2.24.0",
+    "yaml": "2.9.1"
   },
   "devDependencies": {
     "@book000/eslint-config": "1.16.71",
@@ -64,13 +66,16 @@
       "ts"
     ],
     "transform": {
-      "^.+\\.ts$": [
+      "^.+\\.[tj]s$": [
         "ts-jest",
         {
           "tsconfig": "tsconfig.json"
         }
       ]
-    }
+    },
+    "transformIgnorePatterns": [
+      "/node_modules/(?!(\\.pnpm/)?@marcbachmann[+/])"
+    ]
   },
   "packageManager": "pnpm@12.6.0"
 }

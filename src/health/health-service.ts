@@ -2,7 +2,10 @@ import { Logger } from '@book000/node-utils'
 import * as http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { toError } from '../logger-utils'
-import type { SupervisorState } from '../vrchat/pipeline-supervisor'
+import type {
+  PipelineDiagnosticEvent,
+  SupervisorState,
+} from '../vrchat/pipeline-supervisor'
 
 const logger = Logger.configure('HEALTH')
 
@@ -37,6 +40,8 @@ export interface HealthSnapshot {
   reconnectAttempts: number
   /** 直近の reconnect 理由 */
   lastReconnectReason: string | null
+  /** 個人情報を含まない直近の接続診断イベント */
+  reconnectHistory: PipelineDiagnosticEvent[]
   /** unhealthy なユーザーの一覧 */
   unhealthyUsers: UnhealthyUserSnapshot[]
   /** 設定ファイルの読み込み状態 */
@@ -81,7 +86,7 @@ export function evaluateStatus(snapshot: HealthSnapshot): HealthStatus {
  *
  * 「プロセスは生きている」と「Pipeline が健全」を区別できるよう、
  * supervisor state・raw readyState・generation・各種タイムスタンプ・
- * per-user unhealthy を個別に観測可能にする。
+ * reconnect の直近履歴・per-user unhealthy を個別に観測可能にする。
  */
 export class HealthService {
   private server: http.Server | null = null

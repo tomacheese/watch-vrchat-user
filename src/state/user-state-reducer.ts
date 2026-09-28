@@ -177,8 +177,16 @@ export function reduce(
         : null
       : target.location
 
+  // online 遷移直後で location が未確定なら、最初の確定 location を location-change として扱う
+  const pending =
+    location === null &&
+    target.presence === 'online' &&
+    (current.firstLocationPending === true || current.presence === 'offline')
+  const wasPending = current.firstLocationPending === true
+
   // 変化が無ければ updatedAt も更新せず、同一 state を返す
   if (
+    wasPending === pending &&
     current.displayName === displayName &&
     current.presence === target.presence &&
     current.location === location
@@ -191,6 +199,7 @@ export function reduce(
     displayName,
     presence: target.presence,
     location,
+    firstLocationPending: pending ? true : undefined,
     updatedAt: now(),
   }
 
@@ -203,7 +212,8 @@ export function reduce(
     )
   } else if (
     target.presence === 'online' &&
-    isVisibleChange(current.location, location)
+    (isVisibleChange(current.location, location) ||
+      (wasPending && parseLocation(location).visible))
   ) {
     effect = emit('location-change', current, next)
   }

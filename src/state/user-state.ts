@@ -11,6 +11,8 @@ export interface UserState {
   presence: Presence
   /** 最後に確定した実 Location（未確定または offline の場合は null） */
   location: string | null
+  /** online 遷移後、最初の確定 Location を通知する必要がある場合は true */
+  firstLocationPending?: boolean
   /** 最終更新日時（ISO 8601 形式） */
   updatedAt: string
 }
@@ -48,6 +50,10 @@ function isValidUserState(value: unknown): value is UserState {
     typeof obj.displayName === 'string' &&
     (obj.presence === 'online' || obj.presence === 'offline') &&
     (obj.location === null || typeof obj.location === 'string') &&
+    (obj.firstLocationPending === undefined ||
+      typeof obj.firstLocationPending === 'boolean') &&
+    (obj.firstLocationPending !== true ||
+      (obj.presence === 'online' && obj.location === null)) &&
     typeof obj.updatedAt === 'string'
   )
 }

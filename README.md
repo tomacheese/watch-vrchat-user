@@ -5,6 +5,7 @@ VRChat の全フレンドの状態変化を監視し、YAML 設定ファイル�
 ## 機能
 
 - 全フレンドの状態 (オンライン / オフライン / Location) をリアルタイムで追跡し、永続化
+- オンライン復帰後に最初に確認した Location を `location-change` として通知対象にする
 - 「通知するか」と「どの Discord Webhook へ通知するか」を CEL ルールで柔軟に指定 (1 イベントが複数ルールに一致した場合は、一致した全 destination へ通知)
 - 同一 destination に複数ルールが一致した場合は 1 通にまとめ、Embed の footer に一致した全ルール名を表示
 - 設定ファイルの hot reload (不正な設定への reload は失敗し、直前の正常な設定で稼働を継続)
@@ -212,6 +213,8 @@ docker compose logs -f
 - `healthy`: 正常
 - `degraded` (HTTP 200): 設定の reload 失敗中、直近 1 時間内のルール評価エラー、または Favorite Friends の取得失敗がある。通知は last-known-good の設定で継続している
 - `unhealthy` (HTTP 503): WebSocket 接続が ready でない、またはユーザー単位の異常がある
+
+Pipeline の接続診断はログに記録され、`/health` では直近 25 件を確認できます。接続理由、再接続試行、結果を確認できます。診断イベントにはユーザー情報、Location、Cookie、Webhook URL、raw event payload は含まれません。
 
 ## データの永続化
 

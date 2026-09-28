@@ -213,3 +213,19 @@ describe('reduce (spec §7 遷移表)', () => {
     expect(deleted.deleteUser).toBe(true)
   })
 })
+
+describe('reduce (online 後の最初の location)', () => {
+  it('location 未確定の online 後、最初の可視 location は location-change になる', () => {
+    const online = run(state(), { type: 'online' })
+    expect(online.nextState?.firstLocationPending).toBe(true)
+    const result = run(online.nextState, { type: 'location', location: A })
+    expect(result.effect).toMatchObject({ type: 'location-change' })
+    expect(result.nextState?.firstLocationPending).toBeUndefined()
+  })
+
+  it('location が確定した online は pending にならない', () => {
+    const result = run(state(), { type: 'online', location: A })
+    expect(result.effect).toMatchObject({ type: 'online' })
+    expect(result.nextState?.firstLocationPending).toBeUndefined()
+  })
+})

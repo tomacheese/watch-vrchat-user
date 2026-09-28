@@ -217,6 +217,7 @@ export class App {
         this.reconciler?.getLastRunAt()?.toISOString() ?? null,
       reconnectAttempts: this.supervisor?.getReconnectAttempts() ?? 0,
       lastReconnectReason: this.supervisor?.getLastReconnectReason() ?? null,
+      reconnectHistory: this.supervisor?.getDiagnosticHistory() ?? [],
       unhealthyUsers,
       config: this.configManager?.getStatus() ?? {
         loadedAt: null,

@@ -83,7 +83,7 @@ pnpm test
 - `src/notifications/notification-dispatcher.ts`: effect に対して全ルールを評価し、一致した destination ごとに 1 通へまとめて送信を依頼する
 - `src/notifications/embed-builder.ts`: Discord Embed の組み立て (World 情報・一致したルール名の footer 表示を含む)
 - `src/notifications/discord-notifier.ts`: Discord Webhook への送信 (bounded timeout 付き)
-- `src/health/health-service.ts`: localhost のみでアクセス可能なヘルスチェック HTTP サーバー (supervisor state・generation・per-user unhealthy・`config`・`ruleErrors`・`favorites` を返し、`status` は `healthy` / `degraded` / `unhealthy`)
+- `src/health/health-service.ts`: localhost のみでアクセス可能なヘルスチェック HTTP サーバー (supervisor state・generation・接続診断履歴・per-user unhealthy・`config`・`ruleErrors`・`favorites` を返し、`status` は `healthy` / `degraded` / `unhealthy`)
 - `src/logger-utils.ts`: unknown 型の値を Error に変換する `toError` ヘルパーを提供する
 - `config.example.yaml`: 通知ルール設定ファイルの例 (`data/config.yaml` として配置する。テストで parse / compile を検証している)
 - `data/`: 永続化データ保存先 (Cookie・`friend-states.json`・`world-cache.json`・`config.yaml` 等)

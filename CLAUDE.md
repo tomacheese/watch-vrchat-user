@@ -71,7 +71,7 @@ pnpm test
 - `src/state/user-state-coordinator.ts`: ユーザーごとの observation を直列処理する single-writer queue
 - `src/state/reconciler.ts`: REST snapshot を compare-and-enqueue で queue に追記する
 - `src/notifications/discord-notifier.ts`: Discord 通知処理 (`location-change` / `online` / `offline`、bounded timeout 付き)
-- `src/health/health-service.ts`: localhost のみでアクセス可能なヘルスチェック HTTP サーバー (supervisor state・generation・per-user unhealthy 等を返す)
+- `src/health/health-service.ts`: localhost のみでアクセス可能なヘルスチェック HTTP サーバー (supervisor state・generation・接続診断履歴・per-user unhealthy 等を返す)
 - `src/config.ts`: 環境変数からの設定読み込みとバリデーション
 - `src/logger-utils.ts`: unknown 型の値を Error に変換する `toError` ヘルパーを提供する
 - `data/`: 永続化データ保存先 (Cookie 等)

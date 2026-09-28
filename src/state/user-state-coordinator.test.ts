@@ -55,12 +55,16 @@ describe('UserStateCoordinator', () => {
     coordinator.enqueue('u1', 'Alice', { type: 'location', location: 'wrld_b' })
     coordinator.enqueue('u1', 'Alice', { type: 'offline' })
 
-    await waitFor(() => effects.length === 3)
+    await waitFor(() => effects.length === 4)
 
-    // no-op effect は onEffect に渡されない（Coordinator の実装が effect.type !== 'no-op' でフィルタする）ため、
-    // ここには traveling / wrld_a（baseline 保存のみ）の no-op は含まれない
+    // no-op effect は onEffect に渡されないため、traveling のみ含まれない
     expect(effects).toEqual([
       { type: 'online' },
+      {
+        type: 'location-change',
+        previousLocation: null,
+        currentLocation: 'wrld_a',
+      },
       {
         type: 'location-change',
         previousLocation: 'wrld_a',
@@ -158,9 +162,16 @@ describe('UserStateCoordinator', () => {
 
     // retry が成功すると head から順に処理され、unhealthy が解消する
     await waitFor(
-      () => effects.length === 1 && coordinator.getUnhealthy('u1') === undefined
+      () => effects.length === 2 && coordinator.getUnhealthy('u1') === undefined
     )
-    expect(effects).toEqual([{ type: 'online' }])
+    expect(effects).toEqual([
+      { type: 'online' },
+      {
+        type: 'location-change',
+        previousLocation: null,
+        currentLocation: 'wrld_a',
+      },
+    ])
     expect(coordinator.getUnhealthy('u1')).toBeUndefined()
   })
 

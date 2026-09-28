@@ -34,6 +34,7 @@ describe('HealthService', () => {
     lastReconciliationAt: new Date().toISOString(),
     reconnectAttempts: 0,
     lastReconnectReason: null,
+    reconnectHistory: [],
     unhealthyUsers: [],
   }
 

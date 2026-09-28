@@ -6,6 +6,7 @@ VRChat ユーザーの Location 変更を監視し、Discord に通知するア�
 
 - 指定したユーザーの Location 変更をリアルタイムで監視
 - ユーザーのオンライン/オフライン状態を検知
+- オンライン復帰後に最初に確認した Location を通知
 - Discord Webhook を使用した通知
 - セッションの永続化（2FA の再入力不要）
 - 起動時にユーザーの現在状態を取得
@@ -72,6 +73,8 @@ docker compose up -d
 ```bash
 docker compose logs -f
 ```
+
+Pipeline の接続診断はログに記録され、localhost の `/health` では直近 25 件を確認できます。接続理由、再接続試行、結果を確認できます。診断イベントにはユーザー情報、Location、Cookie、Webhook URL、raw event payload は含まれません。
 
 ## データの永続化
 

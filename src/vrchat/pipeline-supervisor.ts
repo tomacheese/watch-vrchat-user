@@ -1,6 +1,5 @@
 import { Logger } from '@book000/node-utils'
 import type { VRChat } from 'vrchat'
-import { toError } from '../logger-utils'
 import type {
   PipelineTransport,
   PipelineTransportCallbacks,
@@ -11,6 +10,34 @@ const logger = Logger.configure('PIPELINE-SUPERVISOR')
 /** Pipeline 接続の状態 */
 export type SupervisorState =
   'stopped' | 'connecting' | 'synchronizing' | 'ready' | 'reconnecting'
+
+/** Pipeline の再接続理由を安全な値に限定する */
+export type ReconnectReason =
+  | 'manual'
+  | 'raw close'
+  | 'raw error'
+  | 'stale message stream'
+  | 'pong timeout'
+  | 'ping send failed'
+  | 'reconnect attempt failed'
+
+/** 個人情報を含まない、件数上限付きの Pipeline 診断イベント */
+export interface PipelineDiagnosticEvent {
+  timestamp: string
+  event:
+    | 'connect-started'
+    | 'connect-ready'
+    | 'connect-failed'
+    | 'reconnect-triggered'
+    | 'reconnect-attempt-started'
+    | 'reconnect-attempt-failed'
+    | 'ping-send-failed'
+  generation: number
+  reason?: ReconnectReason | 'startup' | 'reconnect'
+  attempt?: number
+  backoffMs?: number
+  errorType?: string
+}
 
 /** PipelineSupervisor の挙動を調整するオプション */
 export interface PipelineSupervisorOptions {
@@ -32,6 +59,18 @@ const DEFAULT_PING_INTERVAL_MS = 30_000
 const DEFAULT_PONG_TIMEOUT_MS = 35_000
 const DEFAULT_INITIAL_BACKOFF_MS = 1000
 const DEFAULT_MAX_BACKOFF_MS = 300_000
+const DIAGNOSTIC_HISTORY_LIMIT = 25
+
+/**
+ * upstream のメッセージを露出せず、安全なエラー種別を返す
+ *
+ * @param error 種別を確認するエラー
+ * @returns 安全化されたエラー種別
+ */
+function safeErrorType(error: unknown): string {
+  const type = error instanceof Error ? error.name : typeof error
+  return /^[A-Za-z][A-Za-z0-9]{0,31}$/.test(type) ? type : 'Error'
+}
 
 /**
  * Pipeline 接続状態と transport liveness のみを管理するクラス
@@ -44,7 +83,8 @@ export class PipelineSupervisor {
   private lastMessageAt: Date | null = null
   private lastPongAt: Date | null = null
   private reconnectAttempts = 0
-  private lastReconnectReason: string | null = null
+  private lastReconnectReason: ReconnectReason | null = null
+  private readonly diagnosticHistory: PipelineDiagnosticEvent[] = []
   private authCookieProvider: (() => Promise<string>) | null = null
   private staleCheckTimer: NodeJS.Timeout | null = null
   private pingTimer: NodeJS.Timeout | null = null
@@ -108,12 +148,11 @@ export class PipelineSupervisor {
    *
    * @param reason reconnect の理由（health 観測用）
    */
-  requestReconnect(reason: string): void {
+  requestReconnect(reason: ReconnectReason): void {
     if (this.state === 'stopped' || this.state === 'reconnecting') {
       return
     }
-    this.lastReconnectReason = reason
-    this.startReconnect()
+    this.startReconnect(reason)
   }
 
   /**
@@ -166,8 +205,17 @@ export class PipelineSupervisor {
    *
    * @returns 直近の reconnect 理由、reconnect 未発生の場合は null
    */
-  getLastReconnectReason(): string | null {
+  getLastReconnectReason(): ReconnectReason | null {
     return this.lastReconnectReason
+  }
+
+  /**
+   * 個人情報を含まない接続診断履歴を取得する
+   *
+   * @returns 直近の診断イベントのコピー
+   */
+  getDiagnosticHistory(): PipelineDiagnosticEvent[] {
+    return this.diagnosticHistory.map((event) => ({ ...event }))
   }
 
   /**
@@ -176,37 +224,51 @@ export class PipelineSupervisor {
   private async connectOnce(): Promise<void> {
     const myGeneration = this.generation
     this.state = 'connecting'
+    this.recordDiagnostic('connect-started', {
+      reason: myGeneration === 0 ? 'startup' : 'reconnect',
+    })
 
-    if (!this.authCookieProvider) {
-      throw new Error(
-        'PipelineSupervisor.start() was not called with an auth cookie provider'
-      )
+    try {
+      if (!this.authCookieProvider) {
+        throw new Error(
+          'PipelineSupervisor.start() was not called with an auth cookie provider'
+        )
+      }
+      const authCookie = await this.authCookieProvider()
+
+      const callbacks = this.buildCallbacks(myGeneration)
+      await this.transport.connect(this.vrchat, authCookie, callbacks)
+      if (myGeneration !== this.generation) {
+        return
+      }
+
+      // raw socket が open した時点で liveness 監視を開始する。synchronizing
+      // （REST reconciliation）完了を待ってから開始すると、その間に発生した
+      // silent な切断を検知できない窓ができてしまう。
+      // 新しい接続の基準時刻をリセットしないと、reconnect 後も古い generation の
+      // stale な timestamp が残り、stale-message timeout が即座に再発火してしまう
+      // （reconnect storm）。
+      this.lastMessageAt = new Date()
+      this.startLivenessTimers(myGeneration)
+
+      this.state = 'synchronizing'
+      await this.onSynchronize()
+      if (myGeneration !== this.generation) {
+        return
+      }
+
+      this.state = 'ready'
+      this.reconnectAttempts = 0
+      this.recordDiagnostic('connect-ready', {
+        reason: myGeneration === 0 ? 'startup' : 'reconnect',
+      })
+    } catch (error) {
+      this.recordDiagnostic('connect-failed', {
+        reason: myGeneration === 0 ? 'startup' : 'reconnect',
+        errorType: safeErrorType(error),
+      })
+      throw error
     }
-    const authCookie = await this.authCookieProvider()
-
-    const callbacks = this.buildCallbacks(myGeneration)
-    await this.transport.connect(this.vrchat, authCookie, callbacks)
-    if (myGeneration !== this.generation) {
-      return
-    }
-
-    // raw socket が open した時点で liveness 監視を開始する。synchronizing
-    // （REST reconciliation）完了を待ってから開始すると、その間に発生した
-    // silent な切断を検知できない窓ができてしまう。
-    // 新しい接続の基準時刻をリセットしないと、reconnect 後も古い generation の
-    // stale な timestamp が残り、stale-message timeout が即座に再発火してしまう
-    // （reconnect storm）。
-    this.lastMessageAt = new Date()
-    this.startLivenessTimers(myGeneration)
-
-    this.state = 'synchronizing'
-    await this.onSynchronize()
-    if (myGeneration !== this.generation) {
-      return
-    }
-
-    this.state = 'ready'
-    this.reconnectAttempts = 0
   }
 
   /**
@@ -224,14 +286,15 @@ export class PipelineSupervisor {
       onOpen: () => {},
       onClose: () => {
         if (myGeneration !== this.generation) return
-        this.lastReconnectReason = 'raw close'
-        this.startReconnect()
+        this.startReconnect('raw close')
       },
       onError: (error: Error) => {
         if (myGeneration !== this.generation) return
-        logger.error('Raw pipeline error', toError(error))
-        this.lastReconnectReason = 'raw error'
-        this.startReconnect()
+        const errorType = safeErrorType(error)
+        logger.warn(
+          `Pipeline raw error event received (errorType=${errorType})`
+        )
+        this.startReconnect('raw error', errorType)
       },
       onMessage: () => {
         if (myGeneration !== this.generation) return
@@ -267,23 +330,31 @@ export class PipelineSupervisor {
           return
         }
 
-        this.lastReconnectReason = 'stale message stream'
-        this.startReconnect()
+        this.startReconnect('stale message stream')
       },
       Math.min(this.staleMessageTimeoutMs, 60_000)
     )
 
     this.pingTimer = setInterval(() => {
       if (myGeneration !== this.generation) return
-      this.transport.ping(this.vrchat)
+      try {
+        this.transport.ping(this.vrchat)
+      } catch (error) {
+        const errorType = safeErrorType(error)
+        this.recordDiagnostic('ping-send-failed', {
+          reason: 'ping send failed',
+          errorType,
+        })
+        this.startReconnect('ping send failed', errorType)
+        return
+      }
       // 前回 ping の pong 待ちが残っている間は timeout を再設定しない。
       // ここで毎回リセットすると pingIntervalMs < pongTimeoutMs のとき
       // timeout が発火する前に常に打ち消され、pong 未達を検知できなくなる。
       if (this.pingTimeoutTimer) return
       this.pingTimeoutTimer = setTimeout(() => {
         if (myGeneration !== this.generation) return
-        this.lastReconnectReason = 'pong timeout'
-        this.startReconnect()
+        this.startReconnect('pong timeout')
       }, this.pongTimeoutMs)
     }, this.pingIntervalMs)
   }
@@ -293,7 +364,7 @@ export class PipelineSupervisor {
    *
    * generation を invalidate してから capped exponential backoff を待ち、再接続する。
    */
-  private async reconnect(): Promise<void> {
+  private async reconnect(reason: ReconnectReason): Promise<void> {
     if (this.state === 'reconnecting' || this.state === 'stopped') {
       return
     }
@@ -306,7 +377,13 @@ export class PipelineSupervisor {
       this.initialBackoffMs * 2 ** this.reconnectAttempts,
       this.maxBackoffMs
     )
+    const attempt = this.reconnectAttempts + 1
     this.reconnectAttempts += 1
+    this.recordDiagnostic('reconnect-attempt-started', {
+      reason,
+      attempt,
+      backoffMs: delay,
+    })
     await new Promise((resolve) => setTimeout(resolve, delay))
 
     // backoff 待機中に stop() が呼ばれ state が変わっている可能性があるため、
@@ -319,8 +396,15 @@ export class PipelineSupervisor {
     try {
       await this.connectOnce()
     } catch (error) {
-      logger.error('Reconnect attempt failed', toError(error))
-      this.startReconnect()
+      logger.error(
+        `Reconnect attempt failed (errorType=${safeErrorType(error)})`
+      )
+      this.recordDiagnostic('reconnect-attempt-failed', {
+        reason,
+        attempt,
+        errorType: safeErrorType(error),
+      })
+      this.startReconnect('reconnect attempt failed')
     }
   }
 
@@ -330,10 +414,43 @@ export class PipelineSupervisor {
    * このリポジトリの ESLint 設定は `no-void` を禁止しているため、`no-floating-promises`
    * を `void` ではなくこの明示的な `.catch` ラッパーで満たす。
    */
-  private startReconnect(): void {
-    this.reconnect().catch((error: unknown) => {
-      logger.error('Unexpected error during reconnect', toError(error))
+  private startReconnect(reason: ReconnectReason, errorType?: string): void {
+    if (this.state === 'stopped' || this.state === 'reconnecting') {
+      return
+    }
+    this.lastReconnectReason = reason
+    this.recordDiagnostic('reconnect-triggered', { reason, errorType })
+    this.reconnect(reason).catch((error: unknown) => {
+      logger.error(
+        `Unexpected error during reconnect (errorType=${safeErrorType(error)})`
+      )
     })
+  }
+
+  /**
+   * 個人情報を含まない診断イベントを記録し、履歴を一定件数に保つ
+   *
+   * @param event イベント種別
+   * @param details 安全なイベント情報
+   */
+  private recordDiagnostic(
+    event: PipelineDiagnosticEvent['event'],
+    details: Omit<PipelineDiagnosticEvent, 'timestamp' | 'event' | 'generation'>
+  ): void {
+    const entry: PipelineDiagnosticEvent = {
+      timestamp: new Date().toISOString(),
+      event,
+      generation: this.generation,
+      ...details,
+    }
+    this.diagnosticHistory.push(entry)
+    if (this.diagnosticHistory.length > DIAGNOSTIC_HISTORY_LIMIT) {
+      this.diagnosticHistory.shift()
+    }
+
+    logger.info(
+      `Pipeline diagnostic event=${event} generation=${entry.generation}${entry.reason ? ` reason=${entry.reason}` : ''}${entry.attempt === undefined ? '' : ` attempt=${entry.attempt}`}${entry.backoffMs === undefined ? '' : ` backoffMs=${entry.backoffMs}`}${entry.errorType ? ` errorType=${entry.errorType}` : ''}`
+    )
   }
 
   /**

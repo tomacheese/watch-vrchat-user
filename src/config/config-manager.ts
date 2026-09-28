@@ -47,7 +47,8 @@ export class ConfigManager {
   private lastReloadError: string | null = null
   private lastReloadFailedAt: string | null = null
   private stableTimer: NodeJS.Timeout | undefined
-  private watching = false
+  private pollTimer: NodeJS.Timeout | undefined
+  private knownStat: { mtimeMs: number; size: number } | undefined
 
   /**
    * ConfigManager を初期化する
@@ -68,17 +69,17 @@ export class ConfigManager {
    * @throws 設定ファイルの読み込み・検証・compile に失敗した場合
    */
   load(): void {
+    // 読み込みより前に stat を取る。読み込み中の書き換えは次回のポーリングで検知される
+    const { mtimeMs, size } = fs.statSync(this.configPath)
     this.snapshot = this.readSnapshot()
-    if (this.watching) return
-    this.watching = true
-    fs.watchFile(
-      this.configPath,
-      { interval: this.pollIntervalMs },
-      (curr, prev) => {
-        if (curr.mtimeMs === prev.mtimeMs && curr.size === prev.size) return
-        this.scheduleReload()
-      }
-    )
+    this.knownStat = { mtimeMs, size }
+    if (this.pollTimer !== undefined) return
+    // fs.watchFile は比較の基準となる最初の stat を非同期で取るため、
+    // load() 直後の書き換えを取りこぼす。読み込み時点の stat と直接比較する
+    this.pollTimer = setInterval(() => {
+      this.poll()
+    }, this.pollIntervalMs)
+    this.pollTimer.unref()
   }
 
   /**
@@ -111,8 +112,10 @@ export class ConfigManager {
    * ファイル監視と保留中の reload を停止する
    */
   stop(): void {
-    fs.unwatchFile(this.configPath)
-    this.watching = false
+    if (this.pollTimer !== undefined) {
+      clearInterval(this.pollTimer)
+      this.pollTimer = undefined
+    }
     if (this.stableTimer === undefined) return
     clearTimeout(this.stableTimer)
     this.stableTimer = undefined
@@ -132,6 +135,27 @@ export class ConfigManager {
       rules: Object.freeze(rules),
       loadedAt: this.now().toISOString(),
     })
+  }
+
+  /**
+   * 設定ファイルの mtime / size が読み込み時点から変わっていれば reload を予約する
+   */
+  private poll(): void {
+    let stat: fs.Stats
+    try {
+      stat = fs.statSync(this.configPath)
+    } catch {
+      // 置き換え中などで一時的に読めない場合は次回のポーリングに回す
+      return
+    }
+    if (
+      stat.mtimeMs === this.knownStat?.mtimeMs &&
+      stat.size === this.knownStat.size
+    ) {
+      return
+    }
+    this.knownStat = { mtimeMs: stat.mtimeMs, size: stat.size }
+    this.scheduleReload()
   }
 
   /**

@@ -280,7 +280,7 @@ export class UserStateCoordinator {
         try {
           if (deleteUser) {
             await this.repository.deleteUser(userId)
-          } else if (nextState) {
+          } else if (nextState && nextState !== current) {
             await this.repository.commitUserState(userId, {
               ...nextState,
               userId,

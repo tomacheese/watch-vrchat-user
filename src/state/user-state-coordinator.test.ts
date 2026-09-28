@@ -52,6 +52,22 @@ async function waitFor(condition: () => boolean): Promise<void> {
 }
 
 describe('UserStateCoordinator', () => {
+  it('state が変化しない observation では永続化しない', async () => {
+    const repository = await completedRepository('offline')
+    const commit = jest.spyOn(repository, 'commitUserState')
+    const coordinator = new UserStateCoordinator(
+      repository,
+      () => Promise.resolve(),
+      getSnapshot
+    )
+
+    coordinator.enqueue('u1', 'Alice', { type: 'offline' })
+    coordinator.enqueue('u1', 'Alice', { type: 'offline' })
+    await coordinator.drain(['u1'])
+
+    expect(commit).not.toHaveBeenCalled()
+  })
+
   it('同一ユーザーの observation を順番に処理し effect を発火する', async () => {
     // baseline 完了済みかつ既存 offline record がある通常フローから開始する
     const repository = await completedRepository('offline')

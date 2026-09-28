@@ -8,7 +8,7 @@ export type UserObservation =
 
 /** reducer が生成する通知用の semantic effect */
 export type ReducerEffect =
-  | { type: 'online' }
+  | { type: 'online'; location?: string }
   | {
       type: 'location-change'
       previousLocation: string | null
@@ -46,14 +46,15 @@ function reduceLocation(
   location: string,
   now: () => string
 ): ReduceResult {
-  // record 不在ユーザーへの最初の観測は baseline としてのみ保存し通知しない
-  // (offline からの遷移は下の分岐で 'online' として通知する。混同しないよう分離している)
+  // record 不在ユーザーへの最初の観測は baseline としてのみ保存する
+  // 既知の offline からの遷移は下の分岐で通知する
   if (current === undefined) {
     return {
       nextState: {
         displayName,
         presence: 'online',
         location,
+        firstLocationPending: false,
         updatedAt: now(),
       },
       effect: { type: 'no-op' },
@@ -65,12 +66,24 @@ function reduceLocation(
     displayName,
     presence: 'online',
     location,
+    firstLocationPending: false,
     updatedAt: now(),
   }
 
-  // offline から concrete location への遷移は online 通知として扱う
+  // offline から concrete location へ直接遷移した場合は online と Location を通知する
   if (current.presence === 'offline') {
-    return { nextState, effect: { type: 'online' } }
+    return { nextState, effect: { type: 'online', location } }
+  }
+
+  if (current.firstLocationPending) {
+    return {
+      nextState,
+      effect: {
+        type: 'location-change',
+        previousLocation: null,
+        currentLocation: location,
+      },
+    }
   }
 
   return current.location === null
@@ -108,6 +121,7 @@ function reduceOnline(
         displayName,
         presence: 'online',
         location: null,
+        firstLocationPending: false,
         updatedAt: now(),
       },
       effect: { type: 'no-op' },
@@ -122,6 +136,7 @@ function reduceOnline(
           displayName,
           presence: 'online',
           location: null,
+          firstLocationPending: true,
           updatedAt: now(),
         },
         effect: { type: 'online' },
@@ -147,6 +162,7 @@ function reduceOffline(
           displayName,
           presence: 'offline',
           location: null,
+          firstLocationPending: false,
           updatedAt: now(),
         },
         effect: { type: 'no-op' },
@@ -157,6 +173,7 @@ function reduceOffline(
           displayName,
           presence: 'offline',
           location: null,
+          firstLocationPending: false,
           updatedAt: now(),
         },
         effect: { type: 'offline' },

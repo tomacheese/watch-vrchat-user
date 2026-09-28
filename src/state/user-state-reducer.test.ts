@@ -22,6 +22,7 @@ describe('reduce', () => {
     expect(result.nextState).toMatchObject({
       presence: 'online',
       location: null,
+      firstLocationPending: true,
     })
   })
 
@@ -52,18 +53,27 @@ describe('reduce', () => {
     expect(result.nextState).toEqual(current)
   })
 
-  it('online 直後の最初の確定 location は baseline として保存し通知しない', () => {
-    const current = state({ presence: 'online', location: null })
+  it('known offline から online になった後の最初の確定 location を通知する', () => {
+    const current = state({
+      presence: 'online',
+      location: null,
+      firstLocationPending: true,
+    })
     const result = reduce(
       current,
       'Alice',
       { type: 'location', location: 'wrld_a' },
       FIXED_NOW
     )
-    expect(result.effect).toEqual({ type: 'no-op' })
+    expect(result.effect).toEqual({
+      type: 'location-change',
+      previousLocation: null,
+      currentLocation: 'wrld_a',
+    })
     expect(result.nextState).toMatchObject({
       presence: 'online',
       location: 'wrld_a',
+      firstLocationPending: false,
     })
   })
 
@@ -101,7 +111,7 @@ describe('reduce', () => {
       { type: 'location', location: 'wrld_a' },
       FIXED_NOW
     )
-    expect(result.effect).toEqual({ type: 'online' })
+    expect(result.effect).toEqual({ type: 'online', location: 'wrld_a' })
     expect(result.nextState).toMatchObject({
       presence: 'online',
       location: 'wrld_a',

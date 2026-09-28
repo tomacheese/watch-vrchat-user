@@ -1,6 +1,5 @@
 import { Logger } from '@book000/node-utils'
 import type { VRChat } from 'vrchat'
-import { toError } from '../logger-utils'
 
 const logger = Logger.configure('PIPELINE-TRANSPORT')
 
@@ -122,10 +121,8 @@ export class PipelineTransportAdapter implements PipelineTransport {
   close(vrchat: VRChat): void {
     try {
       vrchat.pipeline.close()
-    } catch (error) {
-      logger.warn(
-        `Failed to close pipeline (best-effort): ${toError(error).message}`
-      )
+    } catch {
+      logger.warn('Failed to close pipeline (best-effort)')
     }
   }
 

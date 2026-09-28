@@ -176,6 +176,14 @@ export class App {
     switch (effect.type) {
       case 'online': {
         await notifier.notifyOnline({ displayName, userId })
+        if (effect.location !== undefined) {
+          await notifier.notifyLocationChange({
+            displayName,
+            userId,
+            previousLocation: null,
+            currentLocation: effect.location,
+          })
+        }
 
         break
       }
@@ -222,6 +230,7 @@ export class App {
         this.reconciler?.getLastRunAt()?.toISOString() ?? null,
       reconnectAttempts: this.supervisor?.getReconnectAttempts() ?? 0,
       lastReconnectReason: this.supervisor?.getLastReconnectReason() ?? null,
+      reconnectHistory: this.supervisor?.getDiagnosticHistory() ?? [],
       unhealthyUsers,
     }
   }

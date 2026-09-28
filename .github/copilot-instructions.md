@@ -4,7 +4,7 @@ VRChat ユーザーの Location 変更を WebSocket で監視し、Discord に�
 
 ## レビューで重視する点
 
-- **機密情報の漏洩**: VRChat 認証情報 (ユーザー名・パスワード・TOTP シークレット)、Cookie、Discord Webhook URL をログ出力・エラーメッセージ・コミットに含めていないか。
+- **機密情報の漏洩**: VRChat 認証情報 (ユーザー名・パスワード・TOTP シークレット)、Cookie、Discord Webhook URL、raw event payload をログ出力・エラーメッセージ・コミットに含めていないか。Pipeline 診断では upstream error の message 全体も記録しない。
 - **エラーハンドリング**: WebSocket 切断・再接続、VRChat API 失敗、認証エラーが握りつぶされていないか。`pipeline-supervisor.ts` の接続状態遷移 (`connecting`/`synchronizing`/`ready`/`reconnecting`/`stopped`) や connection generation 管理が破綻していないか。
 - **重複通知の抑制**: Location 変更検知で `user-state-reducer.ts` の前回値比較が正しく、同一 Location の重複通知を防いでいるか。`traveling` が通知・永続化に混入していないか。
 - **型安全性**: `any` の新規使用や `skipLibCheck` による回避がないか。VRChat SDK / WebSocket イベントのペイロードに対する型付けが妥当か。

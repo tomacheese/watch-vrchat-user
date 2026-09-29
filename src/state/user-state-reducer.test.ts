@@ -41,15 +41,17 @@ describe('reduce (spec §7 遷移表)', () => {
     })
   })
 
-  it('1. offline -> online（location 観測）は online のみ', () => {
+  it('1. offline -> online（location 観測）は online と location-change', () => {
     const result = run(state(), { type: 'location', location: A })
     expect(result.effect).toMatchObject({ type: 'online' })
+    expect(result.followUp).toMatchObject({ type: 'location-change' })
     expect(result.nextState).toMatchObject({ presence: 'online', location: A })
   })
 
-  it('1. online 観測に location があれば state に載せる', () => {
+  it('1. online 観測に location があれば state に載せ、location-change も発火する', () => {
     const result = run(state(), { type: 'online', location: A })
     expect(result.effect).toMatchObject({ type: 'online' })
+    expect(result.followUp).toMatchObject({ type: 'location-change' })
     expect(result.nextState).toMatchObject({ location: A })
   })
 
@@ -77,14 +79,14 @@ describe('reduce (spec §7 遷移表)', () => {
     })
   })
 
-  it('4. private への遷移と復帰は location-change なし（state は更新）', () => {
+  it('4. private への遷移は no-op、private からの復帰は location-change', () => {
     const current = state({ presence: 'online', location: A })
     const toPrivate = run(current, { type: 'location', location: 'private' })
     expect(toPrivate.effect).toEqual({ type: 'no-op' })
     expect(toPrivate.nextState).toMatchObject({ location: 'private' })
 
     const back = run(toPrivate.nextState, { type: 'location', location: B })
-    expect(back.effect).toEqual({ type: 'no-op' })
+    expect(back.effect).toMatchObject({ type: 'location-change' })
     expect(back.nextState).toMatchObject({ location: B })
   })
 

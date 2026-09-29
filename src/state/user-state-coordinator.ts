@@ -1,6 +1,8 @@
 import { Logger } from '@book000/node-utils'
 import type { ConfigSnapshot } from '../config/config-snapshot'
 import { toError } from '../logger-utils'
+import { parseLocation } from './location'
+import type { UserState } from './user-state'
 import {
   reduce,
   type ReducerEffect,
@@ -38,6 +40,24 @@ interface QueueItem {
   snapshot: ConfigSnapshot
   /** enqueue 時点で baseline 構築中だったか（true の間は通知 effect を生成しない） */
   baseline: boolean
+}
+
+/**
+ * ログ用に state を要約する（nonce 等を含む raw Location は出さない）
+ * 不可視 Location は private 以外を hidden とし、想定外の値をそのまま出さない
+ *
+ * @param state 要約する state
+ * @returns `presence/world:instanceType` 形式の文字列
+ */
+function describeState(state: UserState | undefined): string {
+  if (state === undefined) return 'none'
+  const parsed = parseLocation(state.location)
+  const location = parsed.visible
+    ? `${parsed.worldId}:${parsed.instance.type}`
+    : state.location === 'private'
+      ? 'private'
+      : 'hidden'
+  return `${state.presence}/${location}`
 }
 
 const DEFAULT_INITIAL_BACKOFF_MS = 1000
@@ -269,7 +289,7 @@ export class UserStateCoordinator {
 
         const item = queue[0]
         const current = this.repository.get(userId)
-        const { nextState, deleteUser, effect } = reduce(
+        const { nextState, deleteUser, effect, followUp } = reduce(
           userId,
           current,
           item.displayName,
@@ -286,6 +306,11 @@ export class UserStateCoordinator {
               userId,
             })
           }
+          if (deleteUser || (nextState && nextState !== current)) {
+            logger.info(
+              `State changed: user=${userId} (${item.displayName}) ${describeState(current)} -> ${describeState(nextState)} effects=${[effect, followUp].flatMap((e) => (e && e.type !== 'no-op' ? [e.type] : [])).join(',') || 'none'}${item.baseline ? ' baseline' : ''}`
+            )
+          }
           queue.shift()
           attempt = 0
           // queue-overflow は observation を取り戻せない永続的なデータ損失のため、
@@ -294,11 +319,12 @@ export class UserStateCoordinator {
             this.unhealthy.delete(userId)
           }
 
-          if (effect.type !== 'no-op') {
+          for (const e of [effect, followUp]) {
+            if (e === undefined || e.type === 'no-op') continue
             await this.onEffect(
               userId,
               item.displayName,
-              effect,
+              e,
               item.snapshot
             ).catch((error: unknown) => {
               // 通知失敗はログのみ。persist 済みの state は既に確定しているため、

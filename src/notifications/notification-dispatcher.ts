@@ -74,7 +74,10 @@ export class NotificationDispatcher {
         Date.now()
       )
     }
-    if (matched.length === 0) return
+    if (matched.length === 0) {
+      logger.info(`No rule matched: event=${effect.type} user=${userId}`)
+      return
+    }
 
     // destination ごとに一致ルール名を設定順でまとめる
     const byDestination = new Map<string, string[]>()
@@ -88,7 +91,7 @@ export class NotificationDispatcher {
       }
     }
     logger.info(
-      `Matched rules: ${matched.join(', ')} -> destinations: ${byDestination.keys().toArray().join(', ')}`
+      `Matched rules: event=${effect.type} user=${userId} ${matched.join(', ')} -> destinations: ${byDestination.keys().toArray().join(', ')}`
     )
 
     const entries = [...byDestination]

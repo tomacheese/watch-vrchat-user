@@ -34,6 +34,8 @@ export interface ReduceResult {
   deleteUser: boolean
   /** 発火すべき通知 effect */
   effect: ReducerEffect
+  /** effect に続けて発火する effect（オンライン化と同時の Location 確定時の `location-change`） */
+  followUp?: ReducerEffect
 }
 
 /**
@@ -71,20 +73,21 @@ function resolveTarget(
 }
 
 /**
- * 2 つの location がどちらも可視で raw 値が異なるかを判定する
+ * online 中の location 変化を location-change とすべきかを判定する
+ *
+ * 変更後が可視で、変更前が確定済み（可視・private のいずれでも可）の場合が対象。
+ * 変更前が未確定（null）の場合は、pending 経由でのみ location-change とする。
  *
  * @param previous 前回の location
  * @param current 今回の location
  * @returns location-change とすべき場合は true
  */
-function isVisibleChange(
+function isLocationChange(
   previous: string | null,
   current: string | null
 ): boolean {
   return (
-    previous !== current &&
-    parseLocation(previous).visible &&
-    parseLocation(current).visible
+    previous !== null && previous !== current && parseLocation(current).visible
   )
 }
 
@@ -204,19 +207,24 @@ export function reduce(
   }
 
   let effect: ReducerEffect = noEffect
+  let followUp: ReducerEffect | undefined
   if (current.presence !== target.presence) {
     effect = emit(
       target.presence === 'online' ? 'online' : 'offline',
       current,
       next
     )
+    // オンライン化と同時に公開 Location が確定した場合は location-change も発火する
+    if (target.presence === 'online' && parseLocation(location).visible) {
+      followUp = emit('location-change', current, next)
+    }
   } else if (
     target.presence === 'online' &&
-    (isVisibleChange(current.location, location) ||
+    (isLocationChange(current.location, location) ||
       (wasPending && parseLocation(location).visible))
   ) {
     effect = emit('location-change', current, next)
   }
 
-  return { nextState: next, deleteUser: false, effect }
+  return { nextState: next, deleteUser: false, effect, followUp }
 }

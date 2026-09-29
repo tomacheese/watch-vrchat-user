@@ -329,7 +329,10 @@ describe('Reconciler.reconcileAll', () => {
       presence: 'online',
       location: 'wrld_ws',
     })
-    expect(effects.map((effect) => effect.type)).toEqual(['online'])
+    expect(effects.map((effect) => effect.type)).toEqual([
+      'online',
+      'location-change',
+    ])
   })
 
   it('persist 失敗で drain が false の間は baselineCompleted を永続化せず、次回に再試行する', async () => {

@@ -287,6 +287,30 @@ describe('UserStateCoordinator', () => {
     expect(received).toEqual([snapshotA, snapshotB])
   })
 
+  it('オンライン化と同時の公開 Location 確定は online に続けて location-change を発火する', async () => {
+    const repository = await completedRepository('offline')
+    const effects: ReducerEffect[] = []
+    const coordinator = new UserStateCoordinator(
+      repository,
+      (_userId, _displayName, effect) => {
+        effects.push(effect)
+        return Promise.resolve()
+      },
+      getSnapshot
+    )
+
+    coordinator.enqueue('u1', 'Alice', {
+      type: 'online',
+      location: 'wrld_a:1~region(jp)',
+    })
+    await waitFor(() => effects.length === 2)
+
+    expect(effects.map((effect) => effect.type)).toEqual([
+      'online',
+      'location-change',
+    ])
+  })
+
   it('friend-delete は record を削除し、friend-delete effect を発火する', async () => {
     const repository = await completedRepository('online')
     const effects: ReducerEffect[] = []

@@ -67,7 +67,7 @@ pnpm test
 - `src/config/config-manager.ts`: 設定ファイルの hot reload と last-known-good の保持
 - `src/config/config-snapshot.ts`: 検証・compile 済みの設定スナップショット
 - `src/rules/rule-engine.ts`: CEL ルールの compile / 評価と `RuleErrorLog`
-- `src/rules/rule-context.ts`: effect から CEL 変数 (`event` / `user` / `previous` / `current`) を組み立てる。`event.type` は `online` / `offline` / `location-change` / `friend-add` / `friend-delete` / `status-change` の 6 種。`previous` / `current` は `status` / `statusDescription` を持つ (未観測なら空文字列)
+- `src/rules/rule-context.ts`: effect から CEL 変数 (`event` / `user` / `previous` / `current`) を組み立てる。`event.type` は `online` / `offline` / `location-change` / `friend-add` / `friend-delete` / `status-change` の 6 種。評価時刻の `event.month` (1〜12) / `event.day` / `event.weekday` (0=日〜6=土) / `event.hour` (0〜23) / `event.minute` も持ち、ローカルタイムゾーンで解釈する (夜間などの時間帯条件に使う)。`previous` / `current` は `status` / `statusDescription` を持つ (未観測なら空文字列)
 - `src/vrchat/session.ts`: VRChat REST 認証・Cookie 永続化・2FA・Friends API の取得を担う（Pipeline 開始は担当しない）。`getFriendsSnapshot` は `profile` (status / statusDescription) を含む `FriendSnapshot` を返す
 - `src/vrchat/pipeline-transport.ts`: VRChat SDK の raw WebSocket (`open`/`close`/`error`/`message`/`pong`/`readyState`) への唯一のアクセス経路
 - `src/vrchat/pipeline-supervisor.ts`: Pipeline の接続状態・connection generation・liveness・reconnect backoff を管理する。10 分間 raw message が途絶えた場合は、ready 状態に限り reconnect 前に REST reconciliation による stale probe (drift 確認) を行う

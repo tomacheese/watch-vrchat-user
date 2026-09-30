@@ -115,6 +115,10 @@ rules:
 | 変数 | 内容 |
 | --- | --- |
 | `event.type` | 上記 6 種のいずれか |
+| `event.month` / `event.day` | ルール評価時の月 (1〜12) と日 (1〜31) |
+| `event.weekday` | ルール評価時の曜日 (0=日〜6=土) |
+| `event.hour` / `event.minute` | ルール評価時の時 (0〜23) と分 (0〜59)。夜間の条件は `event.hour >= 22 \|\| event.hour < 6` のように書く |
+| (時刻の共通事項) | 時刻の変数はアプリのローカルタイムゾーン (本番コンテナは JST) で解釈する |
 | `user.id` / `user.displayName` | 対象フレンドのユーザー ID と表示名 |
 | `previous` / `current` | イベント前後の状態。`friend-add` では `previous == null`、`friend-delete` では `current == null` |
 

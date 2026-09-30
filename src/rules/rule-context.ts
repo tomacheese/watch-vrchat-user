@@ -61,16 +61,26 @@ function buildSide(
  * @param effect 通知対象の effect
  * @param membership 評価時点の Favorite group 所属
  * @param worlds World 解決結果
+ * @param now 評価時刻（`event.month` などの算出に使う。ローカルタイムゾーンで解釈する）
  * @returns CEL コンテキスト
  */
 export function buildContext(
   effect: NotifiableEffect,
   membership: readonly string[],
-  worlds: ContextWorlds = {}
+  worlds: ContextWorlds = {},
+  now: Date = new Date()
 ): Record<string, unknown> {
   const subject = effect.current ?? effect.previous
   return {
-    event: { type: effect.type },
+    // 時刻は CEL の int リテラルと算術・比較できるよう bigint で渡す
+    event: {
+      type: effect.type,
+      month: BigInt(now.getMonth() + 1),
+      day: BigInt(now.getDate()),
+      weekday: BigInt(now.getDay()),
+      hour: BigInt(now.getHours()),
+      minute: BigInt(now.getMinutes()),
+    },
     user: {
       id: subject?.userId ?? '',
       displayName: subject?.displayName ?? '',

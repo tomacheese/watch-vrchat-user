@@ -1,9 +1,29 @@
-import { PipelineSupervisor } from './pipeline-supervisor'
+import {
+  PipelineSupervisor,
+  type PipelineSupervisorOptions,
+} from './pipeline-supervisor'
 import type {
   PipelineTransport,
   PipelineTransportCallbacks,
 } from './pipeline-transport'
 import type { VRChat } from 'vrchat'
+
+const logs: string[] = []
+jest.mock('@book000/node-utils', () => {
+  const record = (...args: unknown[]) => {
+    logs.push(args.map(String).join(' '))
+  }
+  return {
+    Logger: {
+      configure: () => ({
+        info: record,
+        warn: record,
+        error: record,
+        debug: record,
+      }),
+    },
+  }
+})
 
 class FakeTransport implements PipelineTransport {
   callbacksByGeneration: PipelineTransportCallbacks[] = []
@@ -219,6 +239,7 @@ describe('PipelineSupervisor', () => {
 
     jest.advanceTimersByTime(40)
     expect(supervisor.getReconnectAttempts()).toBeGreaterThan(0)
+    supervisor.stop()
     jest.useRealTimers()
   })
 
@@ -246,6 +267,245 @@ describe('PipelineSupervisor', () => {
 
     expect(supervisor.getReconnectAttempts()).toBe(0)
     expect(supervisor.getState()).toBe('ready')
+    supervisor.stop()
     jest.useRealTimers()
+  })
+})
+
+/** stale 判定の閾値（3 分）。判定 interval は 60 秒になり、閾値より短い */
+const STALE_MS = 180_000
+
+type ProbeDrift = () => Promise<number | null>
+
+/**
+ * probe を検証するための supervisor を fake timer 下で起動する
+ *
+ * ping は timer を進めても発火しないよう、十分に長い間隔にしておく。
+ */
+async function startWithProbe(
+  probeDrift: ProbeDrift | undefined,
+  options: PipelineSupervisorOptions = {}
+): Promise<{ transport: FakeTransport; supervisor: PipelineSupervisor }> {
+  const transport = new FakeTransport()
+  const supervisorOptions: PipelineSupervisorOptions = {
+    staleMessageTimeoutMs: STALE_MS,
+    pingIntervalMs: 2_000_000_000,
+    initialBackoffMs: 1,
+    maxBackoffMs: 2,
+    probeDrift,
+    ...options,
+  }
+  const supervisor = new PipelineSupervisor(
+    fakeVrchat,
+    transport,
+    () => Promise.resolve(),
+    supervisorOptions
+  )
+  await supervisor.start(() => Promise.resolve('cookie'))
+  return { transport, supervisor }
+}
+
+function reconnectTriggered(supervisor: PipelineSupervisor) {
+  return supervisor
+    .getDiagnosticHistory()
+    .filter((event) => event.event === 'reconnect-triggered')
+}
+
+describe('PipelineSupervisor の stale 判定 (liveness probe)', () => {
+  beforeEach(() => {
+    jest.useFakeTimers()
+    logs.length = 0
+  })
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  it('AC-1: 無音が閾値を超えても drift=0 なら再接続しない', async () => {
+    const probeDrift = jest.fn(() => Promise.resolve<number | null>(0))
+    const { supervisor } = await startWithProbe(probeDrift)
+
+    await jest.advanceTimersByTimeAsync(STALE_MS)
+
+    expect(probeDrift).toHaveBeenCalledTimes(1)
+    expect(reconnectTriggered(supervisor)).toEqual([])
+    expect(supervisor.getGeneration()).toBe(0)
+    expect(logs.join('\n')).toContain(
+      'Pipeline liveness probe: drift=0 action=keep'
+    )
+    supervisor.stop()
+  })
+
+  it('AC-2: 前回の probe から閾値が経つまで probe を繰り返さない', async () => {
+    const probeDrift = jest.fn(() => Promise.resolve<number | null>(0))
+    const { supervisor } = await startWithProbe(probeDrift)
+
+    await jest.advanceTimersByTimeAsync(STALE_MS)
+    expect(probeDrift).toHaveBeenCalledTimes(1)
+
+    await jest.advanceTimersByTimeAsync(STALE_MS - 60_000)
+    expect(probeDrift).toHaveBeenCalledTimes(1)
+
+    await jest.advanceTimersByTimeAsync(60_000)
+    expect(probeDrift).toHaveBeenCalledTimes(2)
+    supervisor.stop()
+  })
+
+  it('AC-3: drift が 1 以上なら stale message stream で再接続する', async () => {
+    const probeDrift = jest.fn(() => Promise.resolve<number | null>(2))
+    const { supervisor } = await startWithProbe(probeDrift)
+
+    await jest.advanceTimersByTimeAsync(STALE_MS)
+
+    expect(reconnectTriggered(supervisor)).toMatchObject([
+      { reason: 'stale message stream' },
+    ])
+    expect(logs.join('\n')).toContain(
+      'Pipeline liveness probe: drift=2 action=reconnect'
+    )
+    supervisor.stop()
+  })
+
+  it('AC-4: probe が null を返したときは再接続する', async () => {
+    const { supervisor } = await startWithProbe(() => Promise.resolve(null))
+
+    await jest.advanceTimersByTimeAsync(STALE_MS)
+
+    expect(reconnectTriggered(supervisor)).toHaveLength(1)
+    expect(logs.join('\n')).toContain(
+      'Pipeline liveness probe: unverified action=reconnect'
+    )
+    supervisor.stop()
+  })
+
+  it('AC-4: probe が例外を投げたときは再接続する', async () => {
+    const { supervisor } = await startWithProbe(() =>
+      Promise.reject(new Error('probe failed'))
+    )
+
+    await jest.advanceTimersByTimeAsync(STALE_MS)
+
+    expect(reconnectTriggered(supervisor)).toHaveLength(1)
+    supervisor.stop()
+  })
+
+  it('AC-4: probe が probeTimeoutMs 内に完了しないときは再接続する', async () => {
+    const { supervisor } = await startWithProbe(
+      () => new Promise<number | null>(() => undefined),
+      { probeTimeoutMs: 5000 }
+    )
+
+    await jest.advanceTimersByTimeAsync(STALE_MS)
+    expect(reconnectTriggered(supervisor)).toEqual([])
+
+    await jest.advanceTimersByTimeAsync(5000)
+    expect(reconnectTriggered(supervisor)).toHaveLength(1)
+    supervisor.stop()
+  })
+
+  it('AC-5: probe が渡されていなければ従来どおり即座に再接続する', async () => {
+    const { supervisor } = await startWithProbe(undefined)
+
+    await jest.advanceTimersByTimeAsync(STALE_MS)
+
+    expect(reconnectTriggered(supervisor)).toMatchObject([
+      { reason: 'stale message stream' },
+    ])
+    supervisor.stop()
+  })
+
+  it('AC-6: ready 以外の状態では probe せず即座に再接続する', async () => {
+    const probeDrift = jest.fn(() => Promise.resolve<number | null>(0))
+    const transport = new FakeTransport()
+    const supervisor = new PipelineSupervisor(
+      fakeVrchat,
+      transport,
+      () => new Promise<void>(() => undefined),
+      {
+        staleMessageTimeoutMs: STALE_MS,
+        pingIntervalMs: 2_000_000_000,
+        initialBackoffMs: 1,
+        maxBackoffMs: 2,
+        probeDrift,
+      }
+    )
+    supervisor.start(() => Promise.resolve('cookie')).catch(() => undefined)
+    await jest.advanceTimersByTimeAsync(0)
+    expect(supervisor.getState()).toBe('synchronizing')
+
+    await jest.advanceTimersByTimeAsync(STALE_MS)
+
+    expect(probeDrift).not.toHaveBeenCalled()
+    expect(reconnectTriggered(supervisor)).toHaveLength(1)
+    supervisor.stop()
+  })
+
+  it('AC-7: probe の完了前に generation が変わったら結果を無視する', async () => {
+    const { promise, resolve: resolveProbe } = Promise.withResolvers<
+      number | null
+    >()
+    const probeDrift = jest.fn(() => promise)
+    const { transport, supervisor } = await startWithProbe(probeDrift, {
+      probeTimeoutMs: 600_000,
+    })
+
+    await jest.advanceTimersByTimeAsync(STALE_MS)
+    expect(probeDrift).toHaveBeenCalledTimes(1)
+
+    transport.callbacksByGeneration[0].onClose()
+    await jest.advanceTimersByTimeAsync(10)
+    expect(supervisor.getGeneration()).toBe(1)
+    expect(reconnectTriggered(supervisor)).toHaveLength(1)
+
+    resolveProbe(5)
+    await jest.advanceTimersByTimeAsync(0)
+
+    expect(reconnectTriggered(supervisor)).toHaveLength(1)
+    expect(supervisor.getGeneration()).toBe(1)
+    supervisor.stop()
+  })
+
+  it('AC-8: probe の実行中は次の tick でも 2 つ目の probe を開始しない', async () => {
+    const probeDrift = jest.fn(
+      () => new Promise<number | null>(() => undefined)
+    )
+    const { supervisor } = await startWithProbe(probeDrift, {
+      probeTimeoutMs: 600_000,
+    })
+
+    await jest.advanceTimersByTimeAsync(STALE_MS)
+    await jest.advanceTimersByTimeAsync(STALE_MS)
+
+    expect(probeDrift).toHaveBeenCalledTimes(1)
+    supervisor.stop()
+  })
+
+  it('AC-9: probe があっても raw close は従来どおり再接続する', async () => {
+    const probeDrift = jest.fn(() => Promise.resolve<number | null>(0))
+    const { transport, supervisor } = await startWithProbe(probeDrift)
+
+    transport.callbacksByGeneration[0].onClose(1006)
+
+    expect(reconnectTriggered(supervisor)).toMatchObject([
+      { reason: 'raw close' },
+    ])
+    expect(probeDrift).not.toHaveBeenCalled()
+    await jest.advanceTimersByTimeAsync(10)
+    supervisor.stop()
+  })
+
+  it('AC-9: probe があっても pong timeout は従来どおり再接続する', async () => {
+    const probeDrift = jest.fn(() => Promise.resolve<number | null>(0))
+    const { supervisor } = await startWithProbe(probeDrift, {
+      pingIntervalMs: 10,
+      pongTimeoutMs: 20,
+    })
+
+    await jest.advanceTimersByTimeAsync(40)
+
+    expect(reconnectTriggered(supervisor)).toMatchObject([
+      { reason: 'pong timeout' },
+    ])
+    expect(probeDrift).not.toHaveBeenCalled()
+    supervisor.stop()
   })
 })

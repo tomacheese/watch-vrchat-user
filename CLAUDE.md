@@ -70,7 +70,7 @@ pnpm test
 - `src/rules/rule-context.ts`: effect から CEL 変数 (`event` / `user` / `previous` / `current`) を組み立てる
 - `src/vrchat/session.ts`: VRChat REST 認証・Cookie 永続化・2FA・Friends API の取得を担う（Pipeline 開始は担当しない）
 - `src/vrchat/pipeline-transport.ts`: VRChat SDK の raw WebSocket (`open`/`close`/`error`/`message`/`pong`/`readyState`) への唯一のアクセス経路
-- `src/vrchat/pipeline-supervisor.ts`: Pipeline の接続状態・connection generation・liveness・reconnect backoff を管理する
+- `src/vrchat/pipeline-supervisor.ts`: Pipeline の接続状態・connection generation・liveness・reconnect backoff を管理する。10 分間 raw message が途絶えた場合は、ready 状態に限り reconnect 前に REST reconciliation による stale probe (drift 確認) を行う
 - `src/vrchat/pipeline-event-router.ts`: `friend-location` / `friend-online` / `friend-offline` / `friend-add` / `friend-delete` を正規化して `UserStateCoordinator` へ渡す
 - `src/vrchat/world-resolver.ts`: World 情報の取得と 24 時間 TTL の永続キャッシュ
 - `src/vrchat/favorites-service.ts`: Favorite Friends (`group_0`〜`group_3`) の取得と 1 時間ごとの更新
@@ -105,6 +105,7 @@ pnpm test
 - Location 変更検知は `friend-location` を基準に `src/state/user-state-reducer.ts` で前回値と比較し、同一 Location の重複通知を抑制する。current が visible (`wrld_` 始まり) かつ previous が non-null (visible または `private`) の場合に `location-change` を生成する (private → visible も対象)。offline → online で visible な Location を持つ場合は `online` に続けて `location-change` を生成する (reducer が `followUp` として返し、coordinator が effect → followUp の順に dispatch する)。private への遷移、`traveling`、null → visible (online 直後の最初の Location を除く) は何も通知しない
 - coordinator が state 変更ごとに `State changed:` を、dispatcher が `Matched rules:` / `No rule matched:` をログ出力する (事後調査用)
 - supervisor の `reconnect-triggered` 診断ログには、raw close の `closeCode` / `closeReason` (英数字と一部記号のみ・64 文字まで)、`msSinceLastMessage` / `msSinceLastPong` が含まれる。また reconciler は REST 同期のたびに `Reconciliation snapshot applied: friends=N drift=M` を出力する (`drift` は WebSocket で届かなかった差分の目安)
+- supervisor は 10 分間 raw message が途絶え、かつ `ready` 状態のとき、即 reconnect せず先に `Reconciler.reconcileAll()` による liveness probe を実行する。`drift=0` なら reconnect せず `Pipeline liveness probe: drift=0 action=keep msSinceLastMessage=<ms>` を出力する。`drift` が 1 以上、同期不能 (null・例外)、または 120 秒の probe タイムアウトの場合は `Pipeline liveness probe: drift=<N> action=reconnect ...` / `Pipeline liveness probe: unverified action=reconnect ...` を出力して従来どおり reconnect する。probe は沈黙が続く間 10 分ごとに最大 1 回で、`ready` 以外の状態では即 reconnect する。probe 結果はログのみで、reconnect 診断履歴・health には含めない
 - `friend-add` / `friend-delete` は SDK の型に現れないため、ペイロード形状は非公式ドキュメントに基づく想定であり router 側で型ガード検証する
 - 仕様変更の可能性があるため、公式 (https://creators.vrchat.com/) / 非公式コミュニティ (https://vrchatapi.github.io/) のドキュメントを随時確認する
 

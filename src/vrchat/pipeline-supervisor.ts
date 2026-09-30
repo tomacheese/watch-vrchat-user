@@ -59,10 +59,20 @@ export interface PipelineSupervisorOptions {
   initialBackoffMs?: number
   /** reconnect の最大 backoff（ミリ秒） */
   maxBackoffMs?: number
+  /**
+   * 無音が閾値を超えたときに REST 同期で state の食い違い（drift）を確認する関数
+   *
+   * 0 を返した場合は再接続しない。1 以上・null（確認できなかった）・例外・timeout の場合は再接続する。
+   * 省略した場合は、無音が閾値を超えた時点で即座に再接続する。
+   */
+  probeDrift?: () => Promise<number | null>
+  /** probeDrift の完了を待つ上限（ミリ秒）。超えた場合は確認できなかったものとして扱う */
+  probeTimeoutMs?: number
 }
 
 /** raw Pipeline message 全体を liveness 判定に使う既定の heuristic（10 分） */
 const DEFAULT_STALE_MESSAGE_TIMEOUT_MS = 10 * 60 * 1000
+const DEFAULT_PROBE_TIMEOUT_MS = 120_000
 const DEFAULT_PING_INTERVAL_MS = 30_000
 const DEFAULT_PONG_TIMEOUT_MS = 35_000
 const DEFAULT_INITIAL_BACKOFF_MS = 1000
@@ -116,7 +126,11 @@ export class PipelineSupervisor {
   private staleCheckTimer: NodeJS.Timeout | null = null
   private pingTimer: NodeJS.Timeout | null = null
   private pingTimeoutTimer: NodeJS.Timeout | null = null
+  private lastProbeAt: number | null = null
+  private probing = false
 
+  private readonly probeDrift: (() => Promise<number | null>) | undefined
+  private readonly probeTimeoutMs: number
   private readonly staleMessageTimeoutMs: number
   private readonly pingIntervalMs: number
   private readonly pongTimeoutMs: number
@@ -144,6 +158,8 @@ export class PipelineSupervisor {
     this.initialBackoffMs =
       options.initialBackoffMs ?? DEFAULT_INITIAL_BACKOFF_MS
     this.maxBackoffMs = options.maxBackoffMs ?? DEFAULT_MAX_BACKOFF_MS
+    this.probeDrift = options.probeDrift
+    this.probeTimeoutMs = options.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS
   }
 
   /**
@@ -251,6 +267,7 @@ export class PipelineSupervisor {
   private async connectOnce(): Promise<void> {
     const myGeneration = this.generation
     this.state = 'connecting'
+    this.lastProbeAt = null
     this.recordDiagnostic('connect-started', {
       reason: myGeneration === 0 ? 'startup' : 'reconnect',
     })
@@ -360,7 +377,26 @@ export class PipelineSupervisor {
           return
         }
 
-        this.startReconnect('stale message stream')
+        // probe が未指定なら従来どおり即座に再接続する。
+        // ready 以外 (接続処理の途中) は REST probe で判断できないため、同様に即座に再接続する
+        if (!this.probeDrift || this.state !== 'ready') {
+          this.startReconnect('stale message stream')
+          return
+        }
+        if (this.probing) return
+        if (
+          this.lastProbeAt !== null &&
+          Date.now() - this.lastProbeAt < this.staleMessageTimeoutMs
+        ) {
+          return
+        }
+        this.runLivenessProbe(myGeneration, this.probeDrift).catch(
+          (error: unknown) => {
+            logger.error(
+              `Unexpected error during liveness probe (errorType=${safeErrorType(error)})`
+            )
+          }
+        )
       },
       Math.min(this.staleMessageTimeoutMs, 60_000)
     )
@@ -387,6 +423,54 @@ export class PipelineSupervisor {
         this.startReconnect('pong timeout')
       }, this.pongTimeoutMs)
     }, this.pingIntervalMs)
+  }
+
+  /**
+   * 無音が続いたときに REST 同期で drift を確認し、再接続の要否を決める
+   *
+   * drift が 0 のときだけ再接続しない。確認できなかった場合は再接続する。
+   *
+   * @param myGeneration probe を開始した generation
+   * @param probeDrift drift 件数を返す関数（確認できなかった場合は null）
+   */
+  private async runLivenessProbe(
+    myGeneration: number,
+    probeDrift: () => Promise<number | null>
+  ): Promise<void> {
+    this.probing = true
+    this.lastProbeAt = Date.now()
+    let timeoutTimer: NodeJS.Timeout | undefined
+    let drift: number | null
+    try {
+      drift = await Promise.race([
+        probeDrift(),
+        new Promise<null>((resolve) => {
+          timeoutTimer = setTimeout(() => {
+            resolve(null)
+          }, this.probeTimeoutMs)
+        }),
+      ])
+    } catch (error) {
+      logger.warn(
+        `Pipeline liveness probe failed (errorType=${safeErrorType(error)})`
+      )
+      drift = null
+    } finally {
+      clearTimeout(timeoutTimer)
+      this.probing = false
+    }
+    if (myGeneration !== this.generation) return
+
+    const silentMs = this.lastMessageAt
+      ? Date.now() - this.lastMessageAt.getTime()
+      : undefined
+    const action = drift === 0 ? 'keep' : 'reconnect'
+    logger.info(
+      `Pipeline liveness probe: ${drift === null ? 'unverified' : `drift=${drift}`} action=${action} msSinceLastMessage=${silentMs}`
+    )
+    if (action === 'reconnect') {
+      this.startReconnect('stale message stream')
+    }
   }
 
   /**

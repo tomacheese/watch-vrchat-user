@@ -77,13 +77,50 @@ const move: NotifiableEffect = {
   current: state('usr_x', 'online', `${WORLD}:2~hidden(usr_o)~region(eu)`),
 }
 
+describe('event.hour', () => {
+  const night = 'event.hour >= 22 || event.hour < 6'
+  const at = (hour: number) =>
+    evaluateRules(
+      compileRules([rule('r', night)]),
+      buildContext(move, [], {}, new Date(2026, 0, 1, hour))
+    ).matched
+
+  it('夜間の時間帯だけ一致する', () => {
+    expect(at(23)).toEqual(['r'])
+    expect(at(3)).toEqual(['r'])
+    expect(at(12)).toEqual([])
+    expect(at(6)).toEqual([])
+  })
+
+  it('分と組み合わせた算術も評価できる', () => {
+    const after2230 = 'event.hour * 60 + event.minute >= 1350'
+    const at2 = (hour: number, minute: number) =>
+      evaluateRules(
+        compileRules([rule('r', after2230)]),
+        buildContext(move, [], {}, new Date(2026, 0, 1, hour, minute))
+      ).matched
+    expect(at2(22, 30)).toEqual(['r'])
+    expect(at2(22, 29)).toEqual([])
+  })
+})
+
 describe('buildContext', () => {
   it('location-change の previous / current を組み立てる', () => {
-    const ctx = buildContext(move, ['group_0'], {
-      current: { name: 'ダンスワールド' },
-    })
+    const ctx = buildContext(
+      move,
+      ['group_0'],
+      { current: { name: 'ダンスワールド' } },
+      new Date(2026, 0, 2, 23, 45)
+    )
     expect(ctx).toEqual({
-      event: { type: 'location-change' },
+      event: {
+        type: 'location-change',
+        month: 1n,
+        day: 2n,
+        weekday: 5n,
+        hour: 23n,
+        minute: 45n,
+      },
       user: { id: 'usr_x', displayName: 'name-usr_x' },
       previous: {
         presence: 'online',

@@ -96,7 +96,7 @@ rules:
 | --- | --- |
 | `online` | フレンドがオフラインからオンラインになった |
 | `offline` | フレンドがオンラインからオフラインになった |
-| `location-change` | オンライン中のフレンドの Location が、公開された別の Location に変わった (private からの復帰、オンライン化と同時の Location 確定を含む) |
+| `location-change` | オンライン中のフレンドの Location が、公開された別の Location に変わった、または公開 Location から private に変わった (private からの復帰、オンライン化と同時の Location 確定を含む) |
 | `friend-add` | フレンドが追加された |
 | `friend-delete` | フレンドが削除された |
 

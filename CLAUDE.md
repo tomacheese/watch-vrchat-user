@@ -81,7 +81,7 @@ pnpm test
 - `src/state/user-state-coordinator.ts`: ユーザーごとの observation を直列処理する single-writer queue。dispatch 順は effect → followUp → statusEffect
 - `src/state/reconciler.ts`: Friends API のスナップショットを compare-and-enqueue で queue に追記する。snapshot の observation には profile を付与する (ステータスの差分は `drift` に数えない)
 - `src/notifications/notification-dispatcher.ts`: effect に対して全ルールを評価し、一致した destination ごとに 1 通へまとめて送信を依頼する
-- `src/notifications/embed-builder.ts`: Discord Embed の組み立て (World 情報・一致したルール名の footer 表示を含む)。`status-change` では変化したフィールドのみ (ステータス / ステータスメッセージ) を VRChat 上の名称 (Online / Join Me / Ask Me / Do Not Disturb) で表示する
+- `src/notifications/embed-builder.ts`: Discord Embed の組み立て (World 情報・一致したルール名の footer 表示を含む)。`status-change` では変化したフィールドのみ (ステータス / ステータスメッセージ) を VRChat 上の名称 (Online / Join Me / Ask Me / Do Not Disturb) で表示する。直前のステータスが未記録の場合はステータス欄を表示しない
 - `src/notifications/discord-notifier.ts`: Discord Webhook への送信 (bounded timeout 付き)
 - `src/health/health-service.ts`: localhost のみでアクセス可能なヘルスチェック HTTP サーバー (supervisor state・generation・接続診断履歴・per-user unhealthy・`config`・`ruleErrors`・`favorites` を返し、`status` は `healthy` / `degraded` / `unhealthy`)
 - `src/logger-utils.ts`: unknown 型の値を Error に変換する `toError` ヘルパーを提供する
@@ -108,7 +108,7 @@ pnpm test
 - supervisor は 10 分間 raw message が途絶え、かつ `ready` 状態のとき、即 reconnect せず先に `Reconciler.reconcileAll()` による liveness probe を実行する。`drift=0` なら reconnect せず `Pipeline liveness probe: drift=0 action=keep msSinceLastMessage=<ms>` を出力する。`drift` が 1 以上、同期不能 (null・例外)、または 120 秒の probe タイムアウトの場合は `Pipeline liveness probe: drift=<N> action=reconnect ...` / `Pipeline liveness probe: unverified action=reconnect ...` を出力して従来どおり reconnect する。probe は沈黙が続く間 10 分ごとに最大 1 回で、`ready` 以外の状態では即 reconnect する。probe 結果はログのみで、reconnect 診断履歴・health には含めない
 - `friend-add` / `friend-delete` は SDK の型に現れないため、ペイロード形状は非公式ドキュメントに基づく想定であり router 側で型ガード検証する
 - `friend-update` のペイロード形状は実機 (本番アカウント、2026-09-30) で確認済み。`userId`、`user.displayName`、`user.status` (観測値: `active` / `ask me` / `busy` / `join me`)、`user.statusDescription` が文字列で届き、ステータスのみ・メッセージのみの変更は friend-location / friend-online を伴わず単独の `friend-update` として届く。`user.status` / `user.statusDescription` が文字列でない場合は無視する
-- ステータス (`join me` / `active` / `ask me` / `busy`) とステータスメッセージの変化は `status-change` として通知する。`offline` ステータスは記録せず、直前の値を保持する。旧 state レコードには該当フィールドがないため、初回観測は通知せず記録のみ行い、通知は次の変化から始まる
+- ステータス (`join me` / `active` / `ask me` / `busy`) とステータスメッセージの変化は `status-change` として通知する。`offline` ステータスは記録せず、直前の値を保持する。`status-change` はフィールドごとに判定し、記録済みの値が変化したときだけ通知する (ステータスはステータス記録済みの場合のみ、メッセージはメッセージ記録済みの場合のみ。空文字列も記録済みとして扱う)。各フィールドの初回観測は通知せず記録のみ行うため、ステータス未記録 (offline のまま等) のユーザーでもメッセージが記録済みならメッセージ変更は通知される
 - 仕様変更の可能性があるため、公式 (https://creators.vrchat.com/) / 非公式コミュニティ (https://vrchatapi.github.io/) のドキュメントを随時確認する
 
 ## テスト

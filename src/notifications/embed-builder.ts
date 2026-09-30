@@ -143,11 +143,15 @@ export function buildEmbed(
     case 'status-change': {
       const previous = effect.previous
       const current = effect.current
-      if (previous?.status !== current?.status) {
+      // 変更前が未確認のステータスは「なし → X」と誤解されるため表示しない
+      if (
+        previous?.status !== undefined &&
+        previous.status !== current?.status
+      ) {
         fields.push({
           name: 'ステータス',
           value: describeChange(
-            STATUS_LABELS[previous?.status ?? ''] ?? previous?.status,
+            STATUS_LABELS[previous.status] ?? previous.status,
             STATUS_LABELS[current?.status ?? ''] ?? current?.status
           ),
         })

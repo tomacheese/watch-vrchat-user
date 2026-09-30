@@ -345,6 +345,25 @@ describe('buildEmbed', () => {
     ])
   })
 
+  it('status-change は変更前のステータスが未確認なら、メッセージだけを表示する', () => {
+    const embed = buildEmbed(
+      {
+        type: 'status-change',
+        previous: { ...state(WORLD), statusDescription: 'a' },
+        current: {
+          ...state(WORLD),
+          status: 'active',
+          statusDescription: 'b',
+        },
+      },
+      {},
+      ['r']
+    )
+    expect(embed.fields?.slice(1)).toEqual([
+      { name: 'ステータスメッセージ', value: 'a → b' },
+    ])
+  })
+
   it('private は Private、Location 不明は 不明 と表示する', () => {
     const priv = buildEmbed(
       { type: 'online', previous: undefined, current: state('private') },

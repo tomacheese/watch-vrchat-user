@@ -243,7 +243,7 @@ function reducePresence(
  * ステータスの観測値を反映する
  *
  * `offline` はユーザーが自分で選ぶステータスではないため記録せず、直前の値を維持する。
- * 未確認（初回）の場合は通知せず記録だけを行う。
+ * 未確認（初回）の項目は通知せず記録だけを行い、確認済みの項目が変わった場合だけ通知する。
  *
  * @param base presence / location 反映後の state（record が無い場合は undefined）
  * @param profile 観測したステータスとステータスメッセージ
@@ -271,14 +271,18 @@ function applyProfile(
     statusDescription: profile.statusDescription,
     updatedAt: now(),
   }
-  // status は offline 観測では記録されないため、status が確定するまでは未確認として扱い通知しない
-  const known = base.status !== undefined
-  return baseline || !known
-    ? { state: next }
-    : {
-        state: next,
-        effect: { type: 'status-change', previous: base, current: next },
-      }
+  // status は offline 観測では記録されないため、未確認のことがある（その間もメッセージの変更は通知する）
+  const changed =
+    (base.status !== undefined && status !== base.status) ||
+    (base.statusDescription !== undefined &&
+      profile.statusDescription !== base.statusDescription)
+  if (baseline || !changed) return { state: next }
+  // 未確認だった status は変化として扱わないよう、previous 側も新しい値に揃える
+  const previous = base.status === undefined ? { ...base, status } : base
+  return {
+    state: next,
+    effect: { type: 'status-change', previous, current: next },
+  }
 }
 
 /**

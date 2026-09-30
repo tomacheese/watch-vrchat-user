@@ -325,6 +325,51 @@ describe('reduce (ステータス / ステータスメッセージ)', () => {
     expect(result.nextState).toMatchObject({ status: 'active' })
   })
 
+  it('status が未確認でも、確認済みのメッセージが変われば status-change を返す', () => {
+    const current = state({ statusDescription: 'a' })
+    const result = run(current, {
+      type: 'profile',
+      profile: { status: 'offline', statusDescription: 'b' },
+    })
+    expect(result.statusEffect).toEqual({
+      type: 'status-change',
+      previous: current,
+      current: result.nextState,
+    })
+    expect(result.nextState?.status).toBeUndefined()
+  })
+
+  it('status が初めて確認されるのと同時のメッセージ変更では、status は変化として扱わない', () => {
+    const result = run(state({ statusDescription: 'a' }), {
+      type: 'profile',
+      profile: { status: 'active', statusDescription: 'b' },
+    })
+    expect(result.statusEffect).toMatchObject({
+      previous: { status: 'active' },
+      current: { status: 'active' },
+    })
+  })
+
+  it('空文字のメッセージも確認済みとして、変われば通知する', () => {
+    const result = run(state({ statusDescription: '' }), {
+      type: 'profile',
+      profile: { status: 'offline', statusDescription: 'x' },
+    })
+    expect(result.statusEffect?.type).toBe('status-change')
+  })
+
+  it('メッセージも未確認の最初の観測は通知しない', () => {
+    const result = run(state(), {
+      type: 'profile',
+      profile: { status: 'active', statusDescription: 'a' },
+    })
+    expect(result.statusEffect).toBeUndefined()
+    expect(result.nextState).toMatchObject({
+      status: 'active',
+      statusDescription: 'a',
+    })
+  })
+
   it('baseline 中は記録だけを行い通知しない', () => {
     const current = state({ status: 'active', statusDescription: 'a' })
     const result = run(current, { type: 'profile', profile: join }, true)

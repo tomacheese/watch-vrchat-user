@@ -37,6 +37,14 @@ export interface PipelineDiagnosticEvent {
   attempt?: number
   backoffMs?: number
   errorType?: string
+  /** raw close の close code */
+  closeCode?: number
+  /** raw close の reason（英数字と一部記号のみ・長さ制限付きに整形済み） */
+  closeReason?: string
+  /** 再接続トリガー時点で最後の raw message から経過したミリ秒 */
+  msSinceLastMessage?: number
+  /** 再接続トリガー時点で最後の pong から経過したミリ秒 */
+  msSinceLastPong?: number
 }
 
 /** PipelineSupervisor の挙動を調整するオプション */
@@ -70,6 +78,25 @@ const DIAGNOSTIC_HISTORY_LIMIT = 25
 function safeErrorType(error: unknown): string {
   const type = error instanceof Error ? error.name : typeof error
   return /^[A-Za-z][A-Za-z0-9]{0,31}$/.test(type) ? type : 'Error'
+}
+
+/** close reason の最大文字数 */
+const CLOSE_REASON_MAX_LENGTH = 64
+
+/**
+ * upstream の close reason をログに出せる形へ整形する
+ *
+ * 英数字と一部の記号以外は除去し、長さを制限する。
+ *
+ * @param reason raw close の reason
+ * @returns 整形済みの reason。空の場合は undefined
+ */
+function sanitizeCloseReason(reason: Buffer | undefined): string | undefined {
+  const text = reason
+    ?.toString('utf8')
+    .replaceAll(/[^\w .:-]/g, '')
+    .slice(0, CLOSE_REASON_MAX_LENGTH)
+  return text === undefined || text === '' ? undefined : text
 }
 
 /**
@@ -284,9 +311,12 @@ export class PipelineSupervisor {
       // raw open は supervisor 側で liveness 状態を持たないため何もしない
       // eslint-disable-next-line @typescript-eslint/no-empty-function
       onOpen: () => {},
-      onClose: () => {
+      onClose: (code, reason) => {
         if (myGeneration !== this.generation) return
-        this.startReconnect('raw close')
+        this.startReconnect('raw close', undefined, {
+          closeCode: code,
+          closeReason: sanitizeCloseReason(reason),
+        })
       },
       onError: (error: Error) => {
         if (myGeneration !== this.generation) return
@@ -414,12 +444,28 @@ export class PipelineSupervisor {
    * このリポジトリの ESLint 設定は `no-void` を禁止しているため、`no-floating-promises`
    * を `void` ではなくこの明示的な `.catch` ラッパーで満たす。
    */
-  private startReconnect(reason: ReconnectReason, errorType?: string): void {
+  private startReconnect(
+    reason: ReconnectReason,
+    errorType?: string,
+    close?: Pick<PipelineDiagnosticEvent, 'closeCode' | 'closeReason'>
+  ): void {
     if (this.state === 'stopped' || this.state === 'reconnecting') {
       return
     }
     this.lastReconnectReason = reason
-    this.recordDiagnostic('reconnect-triggered', { reason, errorType })
+    // 切断原因の切り分け用に、無通信の長さを残す
+    const now = Date.now()
+    this.recordDiagnostic('reconnect-triggered', {
+      reason,
+      errorType,
+      ...close,
+      msSinceLastMessage: this.lastMessageAt
+        ? now - this.lastMessageAt.getTime()
+        : undefined,
+      msSinceLastPong: this.lastPongAt
+        ? now - this.lastPongAt.getTime()
+        : undefined,
+    })
     this.reconnect(reason).catch((error: unknown) => {
       logger.error(
         `Unexpected error during reconnect (errorType=${safeErrorType(error)})`
@@ -449,7 +495,7 @@ export class PipelineSupervisor {
     }
 
     logger.info(
-      `Pipeline diagnostic event=${event} generation=${entry.generation}${entry.reason ? ` reason=${entry.reason}` : ''}${entry.attempt === undefined ? '' : ` attempt=${entry.attempt}`}${entry.backoffMs === undefined ? '' : ` backoffMs=${entry.backoffMs}`}${entry.errorType ? ` errorType=${entry.errorType}` : ''}`
+      `Pipeline diagnostic event=${event} generation=${entry.generation}${entry.reason ? ` reason=${entry.reason}` : ''}${entry.attempt === undefined ? '' : ` attempt=${entry.attempt}`}${entry.backoffMs === undefined ? '' : ` backoffMs=${entry.backoffMs}`}${entry.errorType ? ` errorType=${entry.errorType}` : ''}${entry.closeCode === undefined ? '' : ` closeCode=${entry.closeCode}`}${entry.closeReason ? ` closeReason="${entry.closeReason}"` : ''}${entry.msSinceLastMessage === undefined ? '' : ` msSinceLastMessage=${entry.msSinceLastMessage}`}${entry.msSinceLastPong === undefined ? '' : ` msSinceLastPong=${entry.msSinceLastPong}`}`
     )
   }
 

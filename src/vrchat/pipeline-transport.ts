@@ -6,7 +6,8 @@ const logger = Logger.configure('PIPELINE-TRANSPORT')
 /** SDK 内部の raw WebSocket が持つ最小限のインターフェース */
 export interface RawWebSocket {
   readyState: number
-  on(event: 'open' | 'close' | 'pong', listener: () => void): void
+  on(event: 'open' | 'pong', listener: () => void): void
+  on(event: 'close', listener: (code?: number, reason?: Buffer) => void): void
   on(event: 'error', listener: (error: Error) => void): void
   on(event: 'message', listener: (data: Buffer) => void): void
   ping(): void
@@ -15,7 +16,8 @@ export interface RawWebSocket {
 /** raw WebSocket lifecycle / liveness イベントのコールバック */
 export interface PipelineTransportCallbacks {
   onOpen: () => void
-  onClose: () => void
+  /** close code / reason は ws が渡す値。テスト等で省略されうる */
+  onClose: (code?: number, reason?: Buffer) => void
   onError: (error: Error) => void
   onMessage: (data: Buffer) => void
   onPong: () => void

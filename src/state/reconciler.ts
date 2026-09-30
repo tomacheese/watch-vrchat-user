@@ -5,6 +5,7 @@ import { getFriendsSnapshot, isFriend } from '../vrchat/session'
 import { isTraveling } from './location'
 import type { UserStateCoordinator } from './user-state-coordinator'
 import type { UserObservation } from './user-state-reducer'
+import type { UserState } from './user-state'
 import type { UserStateRepository } from './user-state-repository'
 
 const logger = Logger.configure('RECONCILER')
@@ -23,6 +24,26 @@ function toObservation(location: string): UserObservation {
   return location === 'offline'
     ? { type: 'offline' }
     : { type: 'location', location }
+}
+
+/**
+ * observation が既存 state と食い違っているかを判定する
+ *
+ * REST 同期で見つかった食い違いは、WebSocket で届かなかった差分の目安になる。
+ *
+ * @param current 既存 state（未知のユーザーは undefined。この場合は食い違いとしない）
+ * @param observation REST snapshot から得た observation
+ * @returns 食い違っている場合は true
+ */
+function differsFromState(
+  current: UserState | undefined,
+  observation: UserObservation
+): boolean {
+  if (current === undefined) return false
+  if (observation.type === 'offline') return current.presence !== 'offline'
+  return observation.type === 'location'
+    ? current.presence !== 'online' || current.location !== observation.location
+    : current.presence !== 'online'
 }
 
 /**
@@ -104,15 +125,23 @@ export class Reconciler {
     this.lastRunAt = new Date()
 
     const touchedUserIds: string[] = []
+    let drift = 0
     for (const [userId, friend] of snapshot) {
       touchedUserIds.push(userId)
-      this.appendOrDrop(
+      const observation = toObservation(friend.location)
+      const differs = differsFromState(this.repository.get(userId), observation)
+      const appended = this.appendOrDrop(
         userId,
         friend.displayName,
-        toObservation(friend.location),
+        observation,
         expectedSeqs.get(userId) ?? 0
       )
+      if (appended && differs) drift++
     }
+    // WebSocket で届かなかった差分の件数（切断原因の調査用）
+    logger.info(
+      `Reconciliation snapshot applied: friends=${snapshot.size} drift=${drift}`
+    )
 
     for (const user of knownUsers) {
       if (snapshot.has(user.userId)) continue
@@ -166,13 +195,14 @@ export class Reconciler {
    * @param displayName 表示名
    * @param observation 追記する observation
    * @param expectedSeq 取得前に控えた seq
+   * @returns 追記した場合は true、stale のため drop した場合は false
    */
   private appendOrDrop(
     userId: string,
     displayName: string,
     observation: UserObservation,
     expectedSeq: number
-  ): void {
+  ): boolean {
     const appended = this.coordinator.appendSnapshotObservation(
       userId,
       displayName,
@@ -184,6 +214,7 @@ export class Reconciler {
         `Snapshot for user ${userId} is stale, dropped (newer WebSocket observation arrived)`
       )
     }
+    return appended
   }
 
   /**

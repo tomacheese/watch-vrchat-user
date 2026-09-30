@@ -96,11 +96,11 @@ rules:
 | --- | --- |
 | `online` | フレンドがオフラインからオンラインになった |
 | `offline` | フレンドがオンラインからオフラインになった |
-| `location-change` | オンライン中のフレンドの Location が、公開された別の Location に変わった (private からの復帰、オンライン化と同時の Location 確定を含む) |
+| `location-change` | オンライン中のフレンドの Location が、公開された別の Location に変わった、または公開 Location から private に変わった (private からの復帰、オンライン化と同時の Location 確定を含む) |
 | `friend-add` | フレンドが追加された |
 | `friend-delete` | フレンドが削除された |
 
-- `location-change` は、変更後の Location が**公開**されている (World を特定できる) 場合に発生します。変更前は公開 Location または private のいずれでもかまいません。オフラインからオンラインになると同時に公開 Location が確定した場合は、`online` に続けて `location-change` も発生します (両方に一致するルールは 2 回通知されます)。private への遷移、Location 未確定からの確定 (オンライン直後の最初の確定を除く) では発生しません。
+- `location-change` は、変更後の Location が**公開**されている (World を特定できる) 場合に発生します。変更前は公開 Location または private のいずれでもかまいません。公開 Location から private への遷移でも発生し、このとき `current.location` は `{ visible: false }` になります (`current.location.visible` を条件に含めていないルールにも一致する点に注意してください)。オフラインからオンラインになると同時に公開 Location が確定した場合は、`online` に続けて `location-change` も発生します (両方に一致するルールは 2 回通知されます)。private の維持、Location 未確定からの確定 (オンライン直後の最初の確定を除く) や未確定からの private では発生しません。
 - 後追い調査のため、state が変化するたびに `State changed: user=... <前> -> <後> effects=...` を、ルール評価のたびに `Matched rules:` または `No rule matched:` をログ (info) に出力します。通知されなかった遷移も、このログで追えます。
 - WebSocket 再接続の原因調査のため、再接続のたびに `reconnect-triggered` の診断ログへ、raw close の `closeCode` / `closeReason` (英数字と一部記号のみ・64 文字まで)、最後のメッセージ・pong からの経過ミリ秒 (`msSinceLastMessage` / `msSinceLastPong`) を出力します。REST 同期のたびに `Reconciliation snapshot applied: friends=N drift=M` を出力し、`drift` は WebSocket で届かなかった差分の目安になります。
 - WebSocket が 10 分間無言になった場合 (接続が `ready` のときのみ)、すぐには再接続せず、まず Friends API との同期で差分を確認します。差分が 0 件なら再接続せず (`Pipeline liveness probe: drift=0 action=keep ...`)、差分がある場合・同期できなかった場合・120 秒以内に完了しなかった場合は再接続します (`Pipeline liveness probe: drift=<N> action=reconnect ...` / `unverified action=reconnect ...`)。この確認は無言が続く間 10 分ごとに最大 1 回で、結果はログのみに出力され `/health` の診断履歴には含まれません。

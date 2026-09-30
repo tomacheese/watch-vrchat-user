@@ -79,15 +79,33 @@ describe('reduce (spec §7 遷移表)', () => {
     })
   })
 
-  it('4. private への遷移は no-op、private からの復帰は location-change', () => {
+  it('4. 公開 -> private と private -> 公開はどちらも location-change', () => {
     const current = state({ presence: 'online', location: A })
     const toPrivate = run(current, { type: 'location', location: 'private' })
-    expect(toPrivate.effect).toEqual({ type: 'no-op' })
+    expect(toPrivate.effect).toEqual({
+      type: 'location-change',
+      previous: current,
+      current: toPrivate.nextState,
+    })
     expect(toPrivate.nextState).toMatchObject({ location: 'private' })
 
     const back = run(toPrivate.nextState, { type: 'location', location: B })
     expect(back.effect).toMatchObject({ type: 'location-change' })
     expect(back.nextState).toMatchObject({ location: B })
+  })
+
+  it('4. private の維持と未確定 location からの private は no-op', () => {
+    const stay = run(state({ presence: 'online', location: 'private' }), {
+      type: 'location',
+      location: 'private',
+    })
+    expect(stay.effect).toEqual({ type: 'no-op' })
+
+    const fromUnknown = run(state({ presence: 'online', location: null }), {
+      type: 'location',
+      location: 'private',
+    })
+    expect(fromUnknown.effect).toEqual({ type: 'no-op' })
   })
 
   it('4. 未確定 location からの確定は no-op（state のみ更新）', () => {

@@ -1,6 +1,14 @@
 /** ユーザーの在席状態 */
 export type Presence = 'online' | 'offline'
 
+/** ユーザーのステータスとステータスメッセージ */
+export interface Profile {
+  /** ステータス（`join me` / `active` / `ask me` / `busy`） */
+  status: string
+  /** ステータスメッセージ */
+  statusDescription: string
+}
+
 /** ユーザーの永続 state */
 export interface UserState {
   /** ユーザー ID */
@@ -13,6 +21,10 @@ export interface UserState {
   location: string | null
   /** online 遷移後、最初の確定 Location を通知する必要がある場合は true */
   firstLocationPending?: boolean
+  /** 最後に確認したステータス（未確認の場合は undefined。`offline` は記録しない） */
+  status?: string
+  /** 最後に確認したステータスメッセージ（未確認の場合は undefined） */
+  statusDescription?: string
   /** 最終更新日時（ISO 8601 形式） */
   updatedAt: string
 }
@@ -54,6 +66,9 @@ function isValidUserState(value: unknown): value is UserState {
       typeof obj.firstLocationPending === 'boolean') &&
     (obj.firstLocationPending !== true ||
       (obj.presence === 'online' && obj.location === null)) &&
+    (obj.status === undefined || typeof obj.status === 'string') &&
+    (obj.statusDescription === undefined ||
+      typeof obj.statusDescription === 'string') &&
     typeof obj.updatedAt === 'string'
   )
 }

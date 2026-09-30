@@ -2,6 +2,7 @@ import { Logger } from '@book000/node-utils'
 import type { VRChat } from 'vrchat'
 import { toError } from '../logger-utils'
 import { getFriendsSnapshot, isFriend } from '../vrchat/session'
+import type { Profile } from './user-state'
 import { isTraveling } from './location'
 import type { UserStateCoordinator } from './user-state-coordinator'
 import type { UserObservation } from './user-state-reducer'
@@ -17,13 +18,14 @@ const RATE_LIMIT_COOLDOWN_MS = 30 * 60 * 1000
  * フレンド一覧の Location を observation へ変換する
  *
  * @param location Friends API の location
+ * @param profile Friends API のステータスとステータスメッセージ
  * @returns observation。traveling は在席のみ確定（location は未確定）として扱う
  */
-function toObservation(location: string): UserObservation {
-  if (isTraveling(location)) return { type: 'online' }
+function toObservation(location: string, profile?: Profile): UserObservation {
+  if (isTraveling(location)) return { type: 'online', profile }
   return location === 'offline'
-    ? { type: 'offline' }
-    : { type: 'location', location }
+    ? { type: 'offline', profile }
+    : { type: 'location', location, profile }
 }
 
 /**
@@ -133,7 +135,7 @@ export class Reconciler {
     let drift = 0
     for (const [userId, friend] of snapshot) {
       touchedUserIds.push(userId)
-      const observation = toObservation(friend.location)
+      const observation = toObservation(friend.location, friend.profile)
       const differs = differsFromState(this.repository.get(userId), observation)
       const appended = this.appendOrDrop(
         userId,

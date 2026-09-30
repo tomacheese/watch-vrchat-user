@@ -24,6 +24,19 @@ const STYLES: Record<
     label: 'フレンド削除',
     color: 0xff_44_44,
   },
+  'status-change': {
+    emoji: '\u{1F4AC}',
+    label: 'ステータス変更',
+    color: 0xaa_55_ff,
+  },
+}
+
+/** ステータスの表示名 (VRChat 上の表記) */
+const STATUS_LABELS: Record<string, string> = {
+  active: 'Online',
+  'join me': 'Join Me',
+  'ask me': 'Ask Me',
+  busy: 'Do Not Disturb',
 }
 
 /** インスタンス種別の表示名 (VRChat 上の表記) */
@@ -71,6 +84,22 @@ function describeLocation(
 }
 
 /**
+ * 変更前後の値を `前 → 後` 形式にする（空文字は「なし」と表示する）
+ *
+ * @param previous 変更前の値
+ * @param current 変更後の値
+ * @returns 表示用文字列
+ */
+function describeChange(
+  previous: string | undefined,
+  current: string | undefined
+): string {
+  const show = (value: string | undefined): string =>
+    value === undefined || value === '' ? 'なし' : value
+  return `${show(previous)} → ${show(current)}`
+}
+
+/**
  * 通知用の Discord Embed を組み立てる
  *
  * @param effect 通知対象の effect
@@ -90,28 +119,63 @@ export function buildEmbed(
   const fields: DiscordEmbedField[] = [
     { name: 'ユーザー', value: name, inline: true },
   ]
-  if (effect.type === 'location-change') {
-    fields.push(
-      {
-        name: '前の場所',
-        value: describeLocation(
-          effect.previous?.location ?? null,
-          worlds.previous
-        ),
-      },
-      {
+  switch (effect.type) {
+    case 'location-change': {
+      fields.push(
+        {
+          name: '前の場所',
+          value: describeLocation(
+            effect.previous?.location ?? null,
+            worlds.previous
+          ),
+        },
+        {
+          name: '現在の場所',
+          value: describeLocation(
+            effect.current?.location ?? null,
+            worlds.current
+          ),
+        }
+      )
+
+      break
+    }
+    case 'status-change': {
+      const previous = effect.previous
+      const current = effect.current
+      if (previous?.status !== current?.status) {
+        fields.push({
+          name: 'ステータス',
+          value: describeChange(
+            STATUS_LABELS[previous?.status ?? ''] ?? previous?.status,
+            STATUS_LABELS[current?.status ?? ''] ?? current?.status
+          ),
+        })
+      }
+      if (previous?.statusDescription !== current?.statusDescription) {
+        fields.push({
+          name: 'ステータスメッセージ',
+          value: describeChange(
+            previous?.statusDescription,
+            current?.statusDescription
+          ),
+        })
+      }
+
+      break
+    }
+    case 'online': {
+      fields.push({
         name: '現在の場所',
         value: describeLocation(
           effect.current?.location ?? null,
           worlds.current
         ),
-      }
-    )
-  } else if (effect.type === 'online') {
-    fields.push({
-      name: '現在の場所',
-      value: describeLocation(effect.current?.location ?? null, worlds.current),
-    })
+      })
+
+      break
+    }
+    // No default
   }
   return {
     title: truncate(

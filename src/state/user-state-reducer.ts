@@ -1,17 +1,23 @@
 import { isTraveling, parseLocation } from './location'
-import type { Presence, UserState } from './user-state'
+import type { Presence, Profile, UserState } from './user-state'
 
 /** WebSocket event / REST snapshot を正規化した観測値 */
 export type UserObservation =
-  | { type: 'online'; location?: string }
-  | { type: 'offline' }
-  | { type: 'location'; location: string }
-  | { type: 'friend-add' }
+  | { type: 'online'; location?: string; profile?: Profile }
+  | { type: 'offline'; profile?: Profile }
+  | { type: 'location'; location: string; profile?: Profile }
+  | { type: 'friend-add'; profile?: Profile }
   | { type: 'friend-delete' }
+  | { type: 'profile'; profile: Profile }
 
 /** 通知対象の semantic event 種別 */
 export type SemanticEventType =
-  'online' | 'offline' | 'location-change' | 'friend-add' | 'friend-delete'
+  | 'online'
+  | 'offline'
+  | 'location-change'
+  | 'friend-add'
+  | 'friend-delete'
+  | 'status-change'
 
 /**
  * reducer が生成する通知用の semantic effect
@@ -36,6 +42,8 @@ export interface ReduceResult {
   effect: ReducerEffect
   /** effect に続けて発火する effect（オンライン化と同時の Location 確定時の `location-change`） */
   followUp?: ReducerEffect
+  /** ステータス・ステータスメッセージが変わった場合の `status-change`（他の effect と同時に発生しうる） */
+  statusEffect?: ReducerEffect
 }
 
 /**
@@ -56,7 +64,7 @@ interface Target {
 function resolveTarget(
   observation: Exclude<
     UserObservation,
-    { type: 'friend-add' } | { type: 'friend-delete' }
+    { type: 'friend-add' } | { type: 'friend-delete' } | { type: 'profile' }
   >
 ): Target {
   // online の location は任意。traveling は確定値ではないため無視する
@@ -94,7 +102,7 @@ function isLocationChange(
 }
 
 /**
- * WebSocket event / REST snapshot 共通の状態遷移を計算する純粋関数
+ * presence / location の状態遷移を計算する（ステータスは扱わない）
  *
  * `baseline` が true の間は、state の更新（および削除）だけを行い、通知 effect は生成しない。
  * 戻り値の state に `userId` を含めるため、呼び出し元の userId を第 1 引数で受け取る。
@@ -107,13 +115,13 @@ function isLocationChange(
  * @param now 現在時刻を返す関数（テスト用に注入可能）
  * @returns 更新後の state・削除要否・発火すべき effect
  */
-export function reduce(
+function reducePresence(
   userId: string,
   current: UserState | undefined,
   displayName: string,
-  observation: UserObservation,
+  observation: Exclude<UserObservation, { type: 'profile' }>,
   baseline: boolean,
-  now: () => string = () => new Date().toISOString()
+  now: () => string
 ): ReduceResult {
   const noEffect: ReducerEffect = { type: 'no-op' }
   const emit = (
@@ -229,4 +237,82 @@ export function reduce(
   }
 
   return { nextState: next, deleteUser: false, effect, followUp }
+}
+
+/**
+ * ステータスの観測値を反映する
+ *
+ * `offline` はユーザーが自分で選ぶステータスではないため記録せず、直前の値を維持する。
+ * 未確認（初回）の場合は通知せず記録だけを行う。
+ *
+ * @param base presence / location 反映後の state（record が無い場合は undefined）
+ * @param profile 観測したステータスとステータスメッセージ
+ * @param baseline baseline 構築中か
+ * @param now 現在時刻を返す関数
+ * @returns 更新後の state と、変化した場合の `status-change` effect
+ */
+function applyProfile(
+  base: UserState | undefined,
+  profile: Profile,
+  baseline: boolean,
+  now: () => string
+): { state: UserState | undefined; effect?: ReducerEffect } {
+  if (base === undefined) return { state: undefined }
+  const status = profile.status === 'offline' ? base.status : profile.status
+  if (
+    status === base.status &&
+    profile.statusDescription === base.statusDescription
+  ) {
+    return { state: base }
+  }
+  const next: UserState = {
+    ...base,
+    status,
+    statusDescription: profile.statusDescription,
+    updatedAt: now(),
+  }
+  // status は offline 観測では記録されないため、status が確定するまでは未確認として扱い通知しない
+  const known = base.status !== undefined
+  return baseline || !known
+    ? { state: next }
+    : {
+        state: next,
+        effect: { type: 'status-change', previous: base, current: next },
+      }
+}
+
+/**
+ * WebSocket event / REST snapshot 共通の状態遷移を計算する純粋関数
+ *
+ * `baseline` が true の間は、state の更新（および削除）だけを行い、通知 effect は生成しない。
+ * 戻り値の state に `userId` を含めるため、呼び出し元の userId を第 1 引数で受け取る。
+ *
+ * @param userId ユーザー ID
+ * @param current 現在の永続 state（未知のユーザーは undefined）
+ * @param displayName ユーザーの表示名
+ * @param observation 正規化済みの観測値
+ * @param baseline enqueue 時に確定した baseline フラグ
+ * @param now 現在時刻を返す関数（テスト用に注入可能）
+ * @returns 更新後の state・削除要否・発火すべき effect（ステータス変化は `statusEffect`）
+ */
+export function reduce(
+  userId: string,
+  current: UserState | undefined,
+  displayName: string,
+  observation: UserObservation,
+  baseline: boolean,
+  now: () => string = () => new Date().toISOString()
+): ReduceResult {
+  // profile 観測は presence / location を変えない（record が無いユーザーは無視する）
+  const result: ReduceResult =
+    observation.type === 'profile'
+      ? { nextState: current, deleteUser: false, effect: { type: 'no-op' } }
+      : reducePresence(userId, current, displayName, observation, baseline, now)
+  const profile =
+    observation.type === 'friend-delete' ? undefined : observation.profile
+  if (profile === undefined || result.deleteUser) return result
+  const applied = applyProfile(result.nextState, profile, baseline, now)
+  return applied.state === result.nextState
+    ? result
+    : { ...result, nextState: applied.state, statusEffect: applied.effect }
 }

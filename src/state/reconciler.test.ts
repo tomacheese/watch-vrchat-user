@@ -6,6 +6,7 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import path from 'node:path'
 import type { VRChat } from 'vrchat'
+import type { FriendSnapshot } from '../vrchat/session'
 import type { ConfigSnapshot } from '../config/config-snapshot'
 import type { ReducerEffect } from './user-state-reducer'
 
@@ -86,9 +87,7 @@ function userState(
   }
 }
 
-function mockSnapshot(
-  entries: Record<string, { displayName: string; location: string }>
-): void {
+function mockSnapshot(entries: Record<string, FriendSnapshot>): void {
   ;(session.getFriendsSnapshot as jest.Mock).mockResolvedValue(
     new Map(Object.entries(entries))
   )
@@ -122,6 +121,24 @@ describe('Reconciler.reconcileAll', () => {
       0
     )
     expect(reconciler.getLastRunAt()).not.toBeNull()
+  })
+
+  it('snapshot のステータスを observation の profile として追記する', async () => {
+    const { coordinator, reconciler } = setup()
+    const appendSpy = jest.spyOn(coordinator, 'appendSnapshotObservation')
+    const profile = { status: 'busy', statusDescription: '作業中' }
+    mockSnapshot({
+      usr_1: { displayName: 'Alice', location: 'wrld_a', profile },
+    })
+
+    await reconciler.reconcileAll()
+
+    expect(appendSpy).toHaveBeenCalledWith(
+      'usr_1',
+      'Alice',
+      { type: 'location', location: 'wrld_a', profile },
+      0
+    )
   })
 
   it('traveling は在席のみ確定した online observation として追記する', async () => {

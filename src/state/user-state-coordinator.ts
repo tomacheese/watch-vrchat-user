@@ -289,13 +289,14 @@ export class UserStateCoordinator {
 
         const item = queue[0]
         const current = this.repository.get(userId)
-        const { nextState, deleteUser, effect, followUp } = reduce(
-          userId,
-          current,
-          item.displayName,
-          item.observation,
-          item.baseline
-        )
+        const { nextState, deleteUser, effect, followUp, statusEffect } =
+          reduce(
+            userId,
+            current,
+            item.displayName,
+            item.observation,
+            item.baseline
+          )
 
         try {
           if (deleteUser) {
@@ -308,7 +309,7 @@ export class UserStateCoordinator {
           }
           if (deleteUser || (nextState && nextState !== current)) {
             logger.info(
-              `State changed: user=${userId} (${item.displayName}) ${describeState(current)} -> ${describeState(nextState)} effects=${[effect, followUp].flatMap((e) => (e && e.type !== 'no-op' ? [e.type] : [])).join(',') || 'none'}${item.baseline ? ' baseline' : ''}`
+              `State changed: user=${userId} (${item.displayName}) ${describeState(current)} -> ${describeState(nextState)} effects=${[effect, followUp, statusEffect].flatMap((e) => (e && e.type !== 'no-op' ? [e.type] : [])).join(',') || 'none'}${item.baseline ? ' baseline' : ''}`
             )
           }
           queue.shift()
@@ -319,7 +320,7 @@ export class UserStateCoordinator {
             this.unhealthy.delete(userId)
           }
 
-          for (const e of [effect, followUp]) {
+          for (const e of [effect, followUp, statusEffect]) {
             if (e === undefined || e.type === 'no-op') continue
             await this.onEffect(
               userId,

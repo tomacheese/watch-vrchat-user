@@ -279,8 +279,51 @@ describe('buildEmbed', () => {
       { previous: { name: 'Old' }, current: { name: 'New' } },
       ['r']
     )
-    expect(embed.fields?.[1].value).toBe('Old (public #1)')
-    expect(embed.fields?.[2].value).toBe('New (friends-plus #2)')
+    expect(embed.fields?.[1].value).toBe('Old (Public #1)')
+    expect(embed.fields?.[2].value).toBe('New (Friends+ #2)')
+  })
+
+  it.each([
+    ['friends', 'Friends'],
+    ['invite', 'Invite'],
+    ['invite-plus', 'Invite+'],
+    ['group-public', 'Group Public'],
+    ['group-plus', 'Group+'],
+    ['group-members', 'Group'],
+  ] as const)('instance 種別 %s は %s と表示する', (type, label) => {
+    const tags: Record<string, string> = {
+      friends: '~friends(usr_a)',
+      invite: '~private(usr_a)',
+      'invite-plus': '~private(usr_a)~canRequestInvite',
+      'group-public': '~group(grp_a)~groupAccessType(public)',
+      'group-plus': '~group(grp_a)~groupAccessType(plus)',
+      'group-members': '~group(grp_a)~groupAccessType(members)',
+    }
+    const embed = buildEmbed(
+      {
+        type: 'online',
+        previous: undefined,
+        current: state(`${WORLD}:1${tags[type]}`),
+      } as never,
+      { current: { name: 'W' } },
+      ['r']
+    )
+    expect(embed.fields?.[1].value).toBe(`W (${label} #1)`)
+  })
+
+  it('private は Private、Location 不明は 不明 と表示する', () => {
+    const priv = buildEmbed(
+      { type: 'online', previous: undefined, current: state('private') },
+      {},
+      ['r']
+    )
+    const unknown = buildEmbed(
+      { type: 'online', previous: undefined, current: state(null) },
+      {},
+      ['r']
+    )
+    expect(priv.fields?.[1].value).toBe('Private')
+    expect(unknown.fields?.[1].value).toBe('不明')
   })
 
   it('上限を超える入力を切り詰める', () => {

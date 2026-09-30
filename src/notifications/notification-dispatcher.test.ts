@@ -311,6 +311,40 @@ describe('buildEmbed', () => {
     expect(embed.fields?.[1].value).toBe(`W (${label} #1)`)
   })
 
+  it('status-change は変わった項目だけを VRChat 上の表記で表示する', () => {
+    const embed = buildEmbed(
+      {
+        type: 'status-change',
+        previous: { ...state(WORLD), status: 'active', statusDescription: '' },
+        current: {
+          ...state(WORLD),
+          status: 'busy',
+          statusDescription: '作業中',
+        },
+      },
+      {},
+      ['r']
+    )
+    expect(embed.title).toBe('💬 Alice ステータス変更')
+    expect(embed.fields?.slice(1)).toEqual([
+      { name: 'ステータス', value: 'Online → Do Not Disturb' },
+      { name: 'ステータスメッセージ', value: 'なし → 作業中' },
+    ])
+
+    const messageOnly = buildEmbed(
+      {
+        type: 'status-change',
+        previous: { ...state(WORLD), status: 'busy', statusDescription: 'a' },
+        current: { ...state(WORLD), status: 'busy', statusDescription: 'b' },
+      },
+      {},
+      ['r']
+    )
+    expect(messageOnly.fields?.slice(1)).toEqual([
+      { name: 'ステータスメッセージ', value: 'a → b' },
+    ])
+  })
+
   it('private は Private、Location 不明は 不明 と表示する', () => {
     const priv = buildEmbed(
       { type: 'online', previous: undefined, current: state('private') },

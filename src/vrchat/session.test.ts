@@ -129,6 +129,31 @@ describe('getFriendsSnapshot', () => {
     })
   })
 
+  it('ステータスとステータスメッセージを profile として載せる', async () => {
+    const getFriends = jest.fn().mockImplementation((options: PagedQuery) =>
+      Promise.resolve({
+        data: options.query.offline
+          ? []
+          : [
+              {
+                id: 'usr_on',
+                displayName: 'On',
+                location: 'wrld_a:1',
+                status: 'join me',
+                statusDescription: 'ダンス募集',
+              },
+            ],
+      })
+    )
+    const snapshot = await getFriendsSnapshot({
+      getFriends,
+    } as unknown as VRChat)
+    expect(snapshot.get('usr_on')?.profile).toEqual({
+      status: 'join me',
+      statusDescription: 'ダンス募集',
+    })
+  })
+
   it('両方に居る場合は online 側を採用する', async () => {
     const getFriends = jest.fn().mockImplementation((options: PagedQuery) =>
       Promise.resolve({

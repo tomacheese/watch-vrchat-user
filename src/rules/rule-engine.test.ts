@@ -87,6 +87,8 @@ describe('buildContext', () => {
       user: { id: 'usr_x', displayName: 'name-usr_x' },
       previous: {
         presence: 'online',
+        status: '',
+        statusDescription: '',
         favoriteGroups: ['group_0'],
         location: {
           visible: true,
@@ -102,6 +104,8 @@ describe('buildContext', () => {
       },
       current: {
         presence: 'online',
+        status: '',
+        statusDescription: '',
         favoriteGroups: ['group_0'],
         location: {
           visible: true,
@@ -219,6 +223,28 @@ describe('compileRules / evaluateRules', () => {
     expect(run(when, online, ['group_0']).matched).toEqual(['r'])
     expect(run(when, online, ['group_1']).matched).toEqual([])
     expect(run(when, online, []).matched).toEqual([])
+  })
+
+  it('status-change では status / statusDescription を CEL から参照できる', () => {
+    const change: NotifiableEffect = {
+      type: 'status-change',
+      previous: {
+        ...state('usr_x', 'online', null),
+        status: 'active',
+        statusDescription: '作業中',
+      },
+      current: {
+        ...state('usr_x', 'online', null),
+        status: 'join me',
+        statusDescription: 'ダンス募集',
+      },
+    }
+    const when =
+      'event.type == "status-change" && current.status == "join me" && current.statusDescription.contains("ダンス") && previous.status != current.status'
+    expect(run(when, change).matched).toEqual(['r'])
+    expect(
+      run('current.statusDescription.contains("睡眠")', change).matched
+    ).toEqual([])
   })
 
   it('friend-delete では previous.favoriteGroups を参照できる', () => {

@@ -162,6 +162,80 @@ describe('PipelineEventRouter', () => {
     expect(enqueueSpy).not.toHaveBeenCalled()
   })
 
+  it('friend-update のステータスを profile observation として enqueue する', () => {
+    const repository = new UserStateRepository(tempFilePath())
+    repository.load()
+    const coordinator = new UserStateCoordinator(
+      repository,
+      () => Promise.resolve(),
+      () => snapshot
+    )
+    const enqueueSpy = jest.spyOn(coordinator, 'enqueue')
+    const router = new PipelineEventRouter(coordinator)
+    const pipeline = fakePipeline()
+    router.attach(pipeline)
+
+    pipeline.emit('friend-update', {
+      userId: 'usr_4',
+      user: {
+        id: 'usr_4',
+        displayName: 'Dave',
+        status: 'busy',
+        statusDescription: '作業中',
+      },
+    })
+    // status を含まない更新（bio / avatar など）と不正な payload は無視する
+    pipeline.emit('friend-update', {
+      userId: 'usr_4',
+      user: { id: 'usr_4', displayName: 'Dave' },
+    })
+    pipeline.emit('friend-update', null)
+
+    expect(enqueueSpy).toHaveBeenCalledTimes(1)
+    expect(enqueueSpy).toHaveBeenCalledWith('usr_4', 'Dave', {
+      type: 'profile',
+      profile: { status: 'busy', statusDescription: '作業中' },
+    })
+  })
+
+  it('friend-online / friend-location の user からステータスを取り出す', () => {
+    const repository = new UserStateRepository(tempFilePath())
+    repository.load()
+    const coordinator = new UserStateCoordinator(
+      repository,
+      () => Promise.resolve(),
+      () => snapshot
+    )
+    const enqueueSpy = jest.spyOn(coordinator, 'enqueue')
+    const router = new PipelineEventRouter(coordinator)
+    const pipeline = fakePipeline()
+    router.attach(pipeline)
+    const user = {
+      id: 'usr_5',
+      displayName: 'Eve',
+      status: 'ask me',
+      statusDescription: 'hi',
+    }
+    const profile = { status: 'ask me', statusDescription: 'hi' }
+
+    pipeline.emit('friend-online', { userId: 'usr_5', user })
+    pipeline.emit('friend-location', {
+      userId: 'usr_5',
+      user,
+      location: 'wrld_a:1',
+    })
+
+    expect(enqueueSpy).toHaveBeenNthCalledWith(1, 'usr_5', 'Eve', {
+      type: 'online',
+      profile,
+    })
+    expect(enqueueSpy).toHaveBeenNthCalledWith(2, 'usr_5', 'Eve', {
+      type: 'location',
+      location: 'wrld_a:1',
+      profile,
+    })
+  })
+
   it('attach を再実行しても listener が重複しない', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()

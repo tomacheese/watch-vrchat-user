@@ -1,5 +1,6 @@
 import { Logger } from '@book000/node-utils'
 import { isTraveling } from '../state/location'
+import type { Profile } from '../state/user-state'
 import type { UserStateCoordinator } from '../state/user-state-coordinator'
 
 const logger = Logger.configure('PIPELINE-EVENT-ROUTER')
@@ -39,6 +40,20 @@ interface FriendDeleteEvent {
 /** Pipeline の `friend-offline` イベントのペイロード */
 interface FriendOfflineEvent {
   userId: string
+}
+
+/**
+ * ペイロードの user からステータスとステータスメッセージを取り出す
+ *
+ * @param user ペイロードの user オブジェクト
+ * @returns 両方が文字列の場合のみ Profile、それ以外は undefined
+ */
+function extractProfile(user: unknown): Profile | undefined {
+  if (typeof user !== 'object' || user === null) return undefined
+  const { status, statusDescription } = user as Record<string, unknown>
+  return typeof status === 'string' && typeof statusDescription === 'string'
+    ? { status, statusDescription }
+    : undefined
 }
 
 /**
@@ -144,6 +159,7 @@ export class PipelineEventRouter {
     pipeline.removeAllListeners('friend-offline')
     pipeline.removeAllListeners('friend-add')
     pipeline.removeAllListeners('friend-delete')
+    pipeline.removeAllListeners('friend-update')
 
     pipeline.on('friend-location', (data: unknown) => {
       if (!isFriendLocationEvent(data)) {
@@ -154,6 +170,7 @@ export class PipelineEventRouter {
       this.coordinator.enqueue(data.userId, data.user.displayName, {
         type: 'location',
         location: data.location,
+        profile: extractProfile(data.user),
       })
     })
 
@@ -167,8 +184,12 @@ export class PipelineEventRouter {
         data.userId,
         data.user.displayName,
         isUsableLocation(data.location)
-          ? { type: 'online', location: data.location }
-          : { type: 'online' }
+          ? {
+              type: 'online',
+              location: data.location,
+              profile: extractProfile(data.user),
+            }
+          : { type: 'online', profile: extractProfile(data.user) }
       )
     })
 
@@ -202,6 +223,21 @@ export class PipelineEventRouter {
       // displayName は Coordinator.enqueue 側で Repository の既存値から補完する
       this.coordinator.enqueue(data.userId, data.userId, {
         type: 'friend-delete',
+      })
+    })
+
+    // friend-update は profile 全般の更新で届く（status / statusDescription を含むペイロードは実機で確認済み）
+    pipeline.on('friend-update', (data: unknown) => {
+      const profile = isFriendOnlineEvent(data)
+        ? extractProfile(data.user)
+        : undefined
+      if (profile === undefined || !isFriendOnlineEvent(data)) {
+        logger.debug('Ignored friend-update event without status', { data })
+        return
+      }
+      this.coordinator.enqueue(data.userId, data.user.displayName, {
+        type: 'profile',
+        profile,
       })
     })
   }

@@ -34,6 +34,13 @@ rules:
       current.location.world.name.contains("ダンス")
     destinations: [dance]
 
+  # 「ダンス」を含むステータスメッセージに変えたら通知
+  - name: status-message-dance
+    when: |
+      event.type == "status-change" &&
+      current.statusDescription.contains("ダンス")
+    destinations: [dance]
+
   # Favorite グループ group_0 のフレンドのオンライン / オフラインを通知
   - name: favorite-group-0-presence
     when: |

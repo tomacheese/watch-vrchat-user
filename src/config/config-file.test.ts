@@ -166,6 +166,6 @@ rules: []
       DISCORD_WEBHOOK_MAIN: 'https://discord.com/api/webhooks/1/a',
       DISCORD_WEBHOOK_DANCE: 'https://discord.com/api/webhooks/2/b',
     })
-    expect(compileRules(parsed.rules)).toHaveLength(4)
+    expect(compileRules(parsed.rules)).toHaveLength(5)
   })
 })

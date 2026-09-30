@@ -46,6 +46,8 @@ function buildSide(
   }
   return {
     presence: state.presence,
+    status: state.status ?? '',
+    statusDescription: state.statusDescription ?? '',
     favoriteGroups: [...membership],
     location,
   }

@@ -3,6 +3,7 @@ import * as readline from 'node:readline'
 import { KeyvFile } from 'keyv-file'
 import { VRChat } from 'vrchat'
 import type { Config } from '../config'
+import type { Profile } from '../state/user-state'
 
 const logger = Logger.configure('VRCHAT-SESSION')
 
@@ -179,6 +180,16 @@ function throwApiError(context: string, message: string): never {
   throw new Error(`${context}: ${message}`)
 }
 
+/** Friends API の snapshot 1 件分 */
+export interface FriendSnapshot {
+  /** 表示名 */
+  displayName: string
+  /** raw Location */
+  location: string
+  /** ステータスとステータスメッセージ（取得できなかった場合は undefined） */
+  profile?: Profile
+}
+
 /**
  * 全フレンドのスナップショットを取得する
  *
@@ -187,12 +198,12 @@ function throwApiError(context: string, message: string): never {
  * いずれかのページ取得が失敗した場合は部分結果を返さず例外を投げる。
  *
  * @param vrchat VRChat クライアント
- * @returns ユーザー ID から表示名と Location への Map
+ * @returns ユーザー ID から表示名・Location・ステータスへの Map
  */
 export async function getFriendsSnapshot(
   vrchat: VRChat
-): Promise<Map<string, { displayName: string; location: string }>> {
-  const snapshot = new Map<string, { displayName: string; location: string }>()
+): Promise<Map<string, FriendSnapshot>> {
+  const snapshot = new Map<string, FriendSnapshot>()
 
   // online を先に処理し、offline 側では既存エントリを上書きしない
   for (const offline of [false, true]) {
@@ -212,6 +223,14 @@ export async function getFriendsSnapshot(
           snapshot.set(friend.id, {
             displayName: friend.displayName,
             location: friend.location,
+            profile:
+              typeof friend.status === 'string' &&
+              typeof friend.statusDescription === 'string'
+                ? {
+                    status: friend.status,
+                    statusDescription: friend.statusDescription,
+                  }
+                : undefined,
           })
         }
       }

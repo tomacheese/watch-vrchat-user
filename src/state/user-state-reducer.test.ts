@@ -249,3 +249,106 @@ describe('reduce (online 後の最初の location)', () => {
     expect(result.nextState?.firstLocationPending).toBeUndefined()
   })
 })
+
+describe('reduce (ステータス / ステータスメッセージ)', () => {
+  const join = { status: 'join me', statusDescription: 'ダンス募集' }
+
+  it('未確認のユーザーには通知せず記録だけを行う', () => {
+    const current = state({ presence: 'online', location: A })
+    const result = run(current, { type: 'profile', profile: join })
+    expect(result.effect).toEqual({ type: 'no-op' })
+    expect(result.statusEffect).toBeUndefined()
+    expect(result.nextState).toMatchObject(join)
+  })
+
+  it('ステータスが変わると status-change を返す', () => {
+    const current = state({
+      presence: 'online',
+      location: A,
+      status: 'active',
+      statusDescription: 'hi',
+    })
+    const result = run(current, {
+      type: 'profile',
+      profile: { status: 'busy', statusDescription: 'hi' },
+    })
+    expect(result.statusEffect).toEqual({
+      type: 'status-change',
+      previous: current,
+      current: result.nextState,
+    })
+    expect(result.nextState).toMatchObject({ status: 'busy' })
+    expect(result.effect).toEqual({ type: 'no-op' })
+  })
+
+  it('ステータスメッセージだけが変わっても status-change を返す', () => {
+    const current = state({ status: 'active', statusDescription: 'a' })
+    const result = run(current, {
+      type: 'profile',
+      profile: { status: 'active', statusDescription: 'b' },
+    })
+    expect(result.statusEffect?.type).toBe('status-change')
+  })
+
+  it('変化が無ければ同一 state を返し effect を出さない', () => {
+    const current = state({ status: 'active', statusDescription: 'a' })
+    const result = run(current, {
+      type: 'profile',
+      profile: { status: 'active', statusDescription: 'a' },
+    })
+    expect(result.nextState).toBe(current)
+    expect(result.statusEffect).toBeUndefined()
+  })
+
+  it('status が offline のときは直前のステータスを維持する', () => {
+    const current = state({ status: 'busy', statusDescription: 'a' })
+    const result = run(current, {
+      type: 'offline',
+      profile: { status: 'offline', statusDescription: 'a' },
+    })
+    expect(result.nextState).toMatchObject({ status: 'busy' })
+    expect(result.statusEffect).toBeUndefined()
+  })
+
+  it('offline 観測でメッセージだけ記録された後の最初の実ステータスは通知しない', () => {
+    const offline = run(state({ presence: 'online', location: A }), {
+      type: 'offline',
+      profile: { status: 'offline', statusDescription: 'a' },
+    })
+    expect(offline.nextState?.status).toBeUndefined()
+    expect(offline.statusEffect).toBeUndefined()
+    const result = run(offline.nextState, {
+      type: 'online',
+      profile: { status: 'active', statusDescription: 'a' },
+    })
+    expect(result.statusEffect).toBeUndefined()
+    expect(result.nextState).toMatchObject({ status: 'active' })
+  })
+
+  it('baseline 中は記録だけを行い通知しない', () => {
+    const current = state({ status: 'active', statusDescription: 'a' })
+    const result = run(current, { type: 'profile', profile: join }, true)
+    expect(result.statusEffect).toBeUndefined()
+    expect(result.nextState).toMatchObject(join)
+  })
+
+  it('online 遷移と同時のステータス変更は両方の effect を返す', () => {
+    const current = state({ status: 'active', statusDescription: 'a' })
+    const result = run(current, { type: 'online', profile: join })
+    expect(result.effect.type).toBe('online')
+    expect(result.statusEffect?.type).toBe('status-change')
+  })
+
+  it('record が無いユーザーへの profile 観測は無視する', () => {
+    const result = run(undefined, { type: 'profile', profile: join })
+    expect(result.nextState).toBeUndefined()
+    expect(result.statusEffect).toBeUndefined()
+  })
+
+  it('friend-add と同時に観測したステータスは記録だけを行う', () => {
+    const result = run(undefined, { type: 'friend-add', profile: join })
+    expect(result.effect.type).toBe('friend-add')
+    expect(result.statusEffect).toBeUndefined()
+    expect(result.nextState).toMatchObject(join)
+  })
+})

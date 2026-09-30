@@ -4,7 +4,7 @@ VRChat の全フレンドの状態変化を監視し、YAML 設定ファイル�
 
 ## 機能
 
-- 全フレンドの状態 (オンライン / オフライン / Location) をリアルタイムで追跡し、永続化
+- 全フレンドの状態 (オンライン / オフライン / Location / ステータス / ステータスメッセージ) をリアルタイムで追跡し、永続化
 - オンライン復帰後に最初に確認した Location を `location-change` として通知対象にする
 - 「通知するか」と「どの Discord Webhook へ通知するか」を CEL ルールで柔軟に指定 (1 イベントが複数ルールに一致した場合は、一致した全 destination へ通知)
 - 同一 destination に複数ルールが一致した場合は 1 通にまとめ、Embed の footer に一致した全ルール名を表示
@@ -90,7 +90,7 @@ rules:
 
 ### semantic event
 
-`event.type` は次の 5 種のいずれかです。
+`event.type` は次の 6 種のいずれかです。
 
 | `event.type` | 意味 |
 | --- | --- |
@@ -99,8 +99,10 @@ rules:
 | `location-change` | オンライン中のフレンドの Location が、公開された別の Location に変わった、または公開 Location から private に変わった (private からの復帰、オンライン化と同時の Location 確定を含む) |
 | `friend-add` | フレンドが追加された |
 | `friend-delete` | フレンドが削除された |
+| `status-change` | フレンドのステータス (Join Me / Online / Ask Me / Do Not Disturb) またはステータスメッセージが変わった |
 
 - `location-change` は、変更後の Location が**公開**されている (World を特定できる) 場合に発生します。変更前は公開 Location または private のいずれでもかまいません。公開 Location から private への遷移でも発生し、このとき `current.location` は `{ visible: false }` になります (`current.location.visible` を条件に含めていないルールにも一致する点に注意してください)。オフラインからオンラインになると同時に公開 Location が確定した場合は、`online` に続けて `location-change` も発生します (両方に一致するルールは 2 回通知されます)。private の維持、Location 未確定からの確定 (オンライン直後の最初の確定を除く) や未確定からの private では発生しません。
+- `status-change` は、ステータスとステータスメッセージのどちらが変わっても発生します (どちらが変わったかは `previous` / `current` の `status` / `statusDescription` を比べてください)。ステータスの値は `join me` / `active` / `ask me` / `busy` です (`active` が Online、`busy` が Do Not Disturb)。オンライン化などの他のイベントと同時に検知した場合は、そのイベントに続けて発生します。各ユーザーの初回の観測 (アップグレード直後を含む) は通知せず記録だけを行うため、変更の通知は次の変化から始まります。`offline` のステータスは記録せず、直前の値を維持します。
 - 後追い調査のため、state が変化するたびに `State changed: user=... <前> -> <後> effects=...` を、ルール評価のたびに `Matched rules:` または `No rule matched:` をログ (info) に出力します。通知されなかった遷移も、このログで追えます。
 - WebSocket 再接続の原因調査のため、再接続のたびに `reconnect-triggered` の診断ログへ、raw close の `closeCode` / `closeReason` (英数字と一部記号のみ・64 文字まで)、最後のメッセージ・pong からの経過ミリ秒 (`msSinceLastMessage` / `msSinceLastPong`) を出力します。REST 同期のたびに `Reconciliation snapshot applied: friends=N drift=M` を出力し、`drift` は WebSocket で届かなかった差分の目安になります。
 - WebSocket が 10 分間無言になった場合 (接続が `ready` のときのみ)、すぐには再接続せず、まず Friends API との同期で差分を確認します。差分が 0 件なら再接続せず (`Pipeline liveness probe: drift=0 action=keep ...`)、差分がある場合・同期できなかった場合・120 秒以内に完了しなかった場合は再接続します (`Pipeline liveness probe: drift=<N> action=reconnect ...` / `unverified action=reconnect ...`)。この確認は無言が続く間 10 分ごとに最大 1 回で、結果はログのみに出力され `/health` の診断履歴には含まれません。
@@ -112,13 +114,14 @@ rules:
 
 | 変数 | 内容 |
 | --- | --- |
-| `event.type` | 上記 5 種のいずれか |
+| `event.type` | 上記 6 種のいずれか |
 | `user.id` / `user.displayName` | 対象フレンドのユーザー ID と表示名 |
 | `previous` / `current` | イベント前後の状態。`friend-add` では `previous == null`、`friend-delete` では `current == null` |
 
 `previous` / `current` は次のフィールドを持ちます。
 
 - `presence`: `"online"` または `"offline"`
+- `status` / `statusDescription`: ステータス (`join me` / `active` / `ask me` / `busy`) とステータスメッセージ。未観測の場合は空文字
 - `favoriteGroups`: 所属する Favorite group の一覧 (`group_0`〜`group_3`)
 - `location`: offline のときは `null`。online でも Location 未確定の場合は `null` になるため、在席判定は `presence` で行ってください。private などの非公開 Location は `{ visible: false }`。公開 Location は次の構造です。
   - `location.visible`: `true`

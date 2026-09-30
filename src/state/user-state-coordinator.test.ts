@@ -113,6 +113,41 @@ describe('UserStateCoordinator', () => {
     })
   })
 
+  it('ステータスの変化は status-change として発火・永続化され、初回は記録だけを行う', async () => {
+    const repository = await completedRepository('online')
+    const effects: ReducerEffect[] = []
+    const coordinator = new UserStateCoordinator(
+      repository,
+      (_userId, _displayName, effect) => {
+        effects.push(effect)
+        return Promise.resolve()
+      },
+      getSnapshot
+    )
+
+    coordinator.enqueue('u1', 'Alice', {
+      type: 'profile',
+      profile: { status: 'active', statusDescription: 'a' },
+    })
+    coordinator.enqueue('u1', 'Alice', {
+      type: 'profile',
+      profile: { status: 'busy', statusDescription: 'a' },
+    })
+    await waitFor(() => effects.length === 1)
+    await coordinator.drain(['u1'])
+
+    expect(effects).toHaveLength(1)
+    expect(effects[0]).toMatchObject({
+      type: 'status-change',
+      previous: { status: 'active' },
+      current: { status: 'busy' },
+    })
+    expect(repository.get('u1')).toMatchObject({
+      status: 'busy',
+      statusDescription: 'a',
+    })
+  })
+
   it('appendSnapshotObservation は expectedSeq が古い場合 dropped し false を返す', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()

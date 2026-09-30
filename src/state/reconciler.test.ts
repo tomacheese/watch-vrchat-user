@@ -9,6 +9,22 @@ import type { VRChat } from 'vrchat'
 import type { ConfigSnapshot } from '../config/config-snapshot'
 import type { ReducerEffect } from './user-state-reducer'
 
+const logs: string[] = []
+jest.mock('@book000/node-utils', () => {
+  const record = (...args: unknown[]) => {
+    logs.push(args.map(String).join(' '))
+  }
+  return {
+    Logger: {
+      configure: () => ({
+        info: record,
+        warn: record,
+        error: record,
+        debug: record,
+      }),
+    },
+  }
+})
 jest.mock('../vrchat/session')
 
 const snapshot: ConfigSnapshot = {
@@ -235,6 +251,23 @@ describe('Reconciler.reconcileAll', () => {
     )
     reloaded.load()
     expect(reloaded.isBaselineCompleted()).toBe(true)
+  })
+
+  it('REST 同期で state と食い違った件数 (drift) をログに出す', async () => {
+    const { repository, coordinator, reconciler } = setup()
+    await repository.setBaselineCompleted()
+    await repository.commitUserState('usr_1', userState('usr_1', 'online'))
+    await repository.commitUserState('usr_2', userState('usr_2', 'offline'))
+    mockSnapshot({
+      usr_1: { displayName: 'usr_1', location: 'offline' },
+      usr_2: { displayName: 'usr_2', location: 'offline' },
+    })
+    logs.length = 0
+
+    await reconciler.reconcileAll()
+    await coordinator.drain(['usr_1', 'usr_2'])
+
+    expect(logs.join('\n')).toContain('friends=2 drift=1')
   })
 
   it('AC-7: baseline 完了後、未知ユーザーは friend-add を生成する', async () => {

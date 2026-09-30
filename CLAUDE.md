@@ -104,6 +104,7 @@ pnpm test
 - 主に利用するイベント: `friend-location` (Location 変更・監視の中心)、`friend-online`、`friend-offline`、`notification`
 - Location 変更検知は `friend-location` を基準に `src/state/user-state-reducer.ts` で前回値と比較し、同一 Location の重複通知を抑制する。current が visible (`wrld_` 始まり) かつ previous が non-null (visible または `private`) の場合に `location-change` を生成する (private → visible も対象)。offline → online で visible な Location を持つ場合は `online` に続けて `location-change` を生成する (reducer が `followUp` として返し、coordinator が effect → followUp の順に dispatch する)。private への遷移、`traveling`、null → visible (online 直後の最初の Location を除く) は何も通知しない
 - coordinator が state 変更ごとに `State changed:` を、dispatcher が `Matched rules:` / `No rule matched:` をログ出力する (事後調査用)
+- supervisor の `reconnect-triggered` 診断ログには、raw close の `closeCode` / `closeReason` (英数字と一部記号のみ・64 文字まで)、`msSinceLastMessage` / `msSinceLastPong` が含まれる。また reconciler は REST 同期のたびに `Reconciliation snapshot applied: friends=N drift=M` を出力する (`drift` は WebSocket で届かなかった差分の目安)
 - `friend-add` / `friend-delete` は SDK の型に現れないため、ペイロード形状は非公式ドキュメントに基づく想定であり router 側で型ガード検証する
 - 仕様変更の可能性があるため、公式 (https://creators.vrchat.com/) / 非公式コミュニティ (https://vrchatapi.github.io/) のドキュメントを随時確認する
 

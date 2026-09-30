@@ -92,6 +92,31 @@ describe('PipelineSupervisor', () => {
     expect(transport.callbacksByGeneration.length).toBe(2)
   })
 
+  it('raw close の close code / reason と無通信時間を診断に残し、reason は整形する', async () => {
+    const transport = new FakeTransport()
+    const supervisor = new PipelineSupervisor(
+      fakeVrchat,
+      transport,
+      () => Promise.resolve(),
+      { initialBackoffMs: 1, maxBackoffMs: 2 }
+    )
+    await supervisor.start(() => Promise.resolve('cookie'))
+
+    transport.callbacksByGeneration[0].onClose(
+      1006,
+      Buffer.from(`bad\nreason<script>${'x'.repeat(100)}`)
+    )
+
+    const triggered = supervisor
+      .getDiagnosticHistory()
+      .find((event) => event.event === 'reconnect-triggered')
+    expect(triggered).toMatchObject({ reason: 'raw close', closeCode: 1006 })
+    expect(triggered?.closeReason).toMatch(/^[\w .:-]{1,64}$/)
+    expect(triggered?.closeReason).not.toContain('<')
+    expect(triggered?.msSinceLastMessage).toBeGreaterThanOrEqual(0)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  })
+
   it('ready 到達時に liveness (lastMessageAt) が初期化され、raw message でさらに更新される', async () => {
     const transport = new FakeTransport()
     const supervisor = new PipelineSupervisor(fakeVrchat, transport, () =>

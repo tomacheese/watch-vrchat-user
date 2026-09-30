@@ -1,5 +1,5 @@
 import type { DiscordEmbed, DiscordEmbedField } from '@book000/node-utils'
-import { parseLocation } from '../state/location'
+import { parseLocation, type InstanceType } from '../state/location'
 import type { NotifiableEffect, ContextWorlds } from '../rules/rule-context'
 import type { WorldResolveResult } from '../vrchat/world-resolver'
 
@@ -26,6 +26,18 @@ const STYLES: Record<
   },
 }
 
+/** インスタンス種別の表示名 (VRChat 上の表記) */
+const INSTANCE_TYPE_LABELS: Record<InstanceType, string> = {
+  public: 'Public',
+  'friends-plus': 'Friends+',
+  friends: 'Friends',
+  invite: 'Invite',
+  'invite-plus': 'Invite+',
+  'group-public': 'Group Public',
+  'group-plus': 'Group+',
+  'group-members': 'Group',
+}
+
 /**
  * 文字数上限を超える場合に末尾を省略記号へ置き換える
  *
@@ -49,8 +61,8 @@ function describeLocation(
   world: WorldResolveResult | undefined
 ): string {
   const parsed = parseLocation(location)
-  if (!parsed.visible) return '非公開または不明'
-  const instance = `${parsed.instance.type}${parsed.instance.name ? ` #${parsed.instance.name}` : ''}`
+  if (!parsed.visible) return location === 'private' ? 'Private' : '不明'
+  const instance = `${INSTANCE_TYPE_LABELS[parsed.instance.type]}${parsed.instance.name ? ` #${parsed.instance.name}` : ''}`
   if (world?.name !== undefined && world.stale !== true) {
     return `${world.name} (${instance})`
   }

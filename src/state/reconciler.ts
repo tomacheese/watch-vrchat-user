@@ -83,31 +83,35 @@ export class Reconciler {
    * 全フレンドの REST snapshot を取得し queue に追記する
    *
    * snapshot の取得に 1 ページでも失敗した場合は差分を一切適用しない。
+   *
+   * @returns 同期を完了できた場合は drift 件数（WebSocket で届かなかった差分の件数）。
+   * 未接続・cooldown 中・429・取得失敗など、同期を確認できなかった場合は null
    */
-  async reconcileAll(): Promise<void> {
+  async reconcileAll(): Promise<number | null> {
     const vrchat = this.getVrchat()
     if (!vrchat) {
       logger.warn('VRChat client is not initialized, skipping reconciliation')
-      return
+      return null
     }
 
     if (this.cooldownUntil && new Date() < this.cooldownUntil) {
       logger.info('Skipping reconciliation due to rate limit cooldown')
-      return
+      return null
     }
     this.cooldownUntil = null
 
     try {
-      await this.reconcile(vrchat)
+      return await this.reconcile(vrchat)
     } catch (error) {
       if (error instanceof Error && error.message.includes('429')) {
         this.cooldownUntil = new Date(Date.now() + RATE_LIMIT_COOLDOWN_MS)
         logger.warn(
           `API rate limit error (429), cooling down for ${RATE_LIMIT_COOLDOWN_MS / 1000 / 60} minutes`
         )
-        return
+        return null
       }
       logger.error('Error reconciling friends', toError(error))
+      return null
     }
   }
 
@@ -115,8 +119,9 @@ export class Reconciler {
    * snapshot の取得・差分の追記・baseline 完了の永続化を行う
    *
    * @param vrchat VRChat クライアント
+   * @returns drift 件数
    */
-  private async reconcile(vrchat: VRChat): Promise<void> {
+  private async reconcile(vrchat: VRChat): Promise<number> {
     // 取得前に全ユーザーの seq を控える（record を持たないユーザーも含む）。未観測は seq 0 とみなす
     const knownUsers = Object.values(this.repository.getAll())
     const expectedSeqs = this.coordinator.captureAllSeqs()
@@ -158,6 +163,7 @@ export class Reconciler {
     if (!this.repository.isBaselineCompleted()) {
       await this.completeBaseline(touchedUserIds)
     }
+    return drift
   }
 
   /**

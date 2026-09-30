@@ -270,6 +270,54 @@ describe('Reconciler.reconcileAll', () => {
     expect(logs.join('\n')).toContain('friends=2 drift=1')
   })
 
+  it('AC-10: snapshot を適用できたとき drift 件数を返す', async () => {
+    const { repository, coordinator, reconciler } = setup()
+    await repository.setBaselineCompleted()
+    await repository.commitUserState('usr_1', userState('usr_1', 'online'))
+    await repository.commitUserState('usr_2', userState('usr_2', 'offline'))
+    mockSnapshot({
+      usr_1: { displayName: 'usr_1', location: 'offline' },
+      usr_2: { displayName: 'usr_2', location: 'offline' },
+    })
+
+    const withDrift = await reconciler.reconcileAll()
+    await coordinator.drain(['usr_1', 'usr_2'])
+    const withoutDrift = await reconciler.reconcileAll()
+
+    expect(withDrift).toBe(1)
+    expect(withoutDrift).toBe(0)
+  })
+
+  it('AC-10: 未接続・429 cooldown 中・取得失敗のときは null を返す', async () => {
+    const { repository, coordinator, reconciler } = setup()
+    const disconnected = new Reconciler(() => null, coordinator, repository)
+    expect(await disconnected.reconcileAll()).toBeNull()
+
+    ;(session.getFriendsSnapshot as jest.Mock).mockRejectedValue(
+      new Error('Rate limit error (429): too many requests')
+    )
+    expect(await reconciler.reconcileAll()).toBeNull()
+    expect(await reconciler.reconcileAll()).toBeNull()
+
+    const failing = setup().reconciler
+    ;(session.getFriendsSnapshot as jest.Mock).mockRejectedValue(
+      new Error('network down')
+    )
+    expect(await failing.reconcileAll()).toBeNull()
+  })
+
+  it('AC-10: friend-delete の確認中に 429 が発生したときは null を返す', async () => {
+    const { repository, reconciler } = setup()
+    await repository.setBaselineCompleted()
+    await repository.commitUserState('usr_1', userState('usr_1', 'online'))
+    mockSnapshot({})
+    ;(session.isFriend as jest.Mock).mockRejectedValue(
+      new Error('Rate limit error (429): too many requests')
+    )
+
+    expect(await reconciler.reconcileAll()).toBeNull()
+  })
+
   it('AC-7: baseline 完了後、未知ユーザーは friend-add を生成する', async () => {
     const { repository, coordinator, reconciler, effects } = setup()
     await repository.setBaselineCompleted()

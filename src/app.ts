@@ -109,7 +109,10 @@ export class App {
     this.supervisor = new PipelineSupervisor(
       this.session.client,
       transport,
-      () => reconciler.reconcileAll()
+      async () => {
+        await reconciler.reconcileAll()
+      },
+      { probeDrift: () => reconciler.reconcileAll() }
     )
 
     const getAuthCookie = async (): Promise<string> => {

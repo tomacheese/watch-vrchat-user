@@ -76,6 +76,7 @@ function resolveTarget(
  * online 中の location 変化を location-change とすべきかを判定する
  *
  * 変更後が可視で、変更前が確定済み（可視・private のいずれでも可）の場合が対象。
+ * 変更後が private の場合は、変更前が可視のときだけ対象（private の維持や未確定からの private は対象外）。
  * 変更前が未確定（null）の場合は、pending 経由でのみ location-change とする。
  *
  * @param previous 前回の location
@@ -86,9 +87,10 @@ function isLocationChange(
   previous: string | null,
   current: string | null
 ): boolean {
-  return (
-    previous !== null && previous !== current && parseLocation(current).visible
-  )
+  return previous === null || previous === current
+    ? false
+    : parseLocation(current).visible ||
+        (current === 'private' && parseLocation(previous).visible)
 }
 
 /**

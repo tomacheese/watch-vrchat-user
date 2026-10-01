@@ -1,6 +1,14 @@
 import type { DiscordEmbed, DiscordEmbedField } from '@book000/node-utils'
-import { parseLocation, type InstanceType } from '../state/location'
-import type { NotifiableEffect, ContextWorlds } from '../rules/rule-context'
+import {
+  parseLocation,
+  type InstanceType,
+  type ParsedInstance,
+} from '../state/location'
+import type {
+  NotifiableEffect,
+  ContextWorlds,
+  ContextOwners,
+} from '../rules/rule-context'
 import type { WorldResolveResult } from '../vrchat/world-resolver'
 
 /** Discord Embed の文字数上限 */
@@ -62,25 +70,83 @@ export function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`
 }
 
+/** VRChat Web のページ URL の起点 */
+const VRCHAT_HOME = 'https://vrchat.com/home'
+
 /**
- * Location とワールド解決結果を表示用文字列にする
+ * Discord の Markdown リンクを組み立てる
+ *
+ * @param text リンクの表示文字列（`[` `]` `\` はエスケープする）
+ * @param url リンク先 URL
+ * @returns Markdown リンク
+ */
+function link(text: string, url: string): string {
+  return `[${text.replaceAll(/[[\\\]]/g, String.raw`\$&`)}](${url})`
+}
+
+/**
+ * ユーザー・グループ ID から VRChat Web のページ URL を求める
+ *
+ * @param id `usr_` または `grp_` の ID
+ * @returns ページ URL
+ */
+function ownerUrl(id: string): string {
+  return `${VRCHAT_HOME}/${id.startsWith('grp_') ? 'group' : 'user'}/${id}`
+}
+
+/**
+ * インスタンスオーナーの表示を組み立てる（取得できない場合は ID を表示する）
+ *
+ * @param instance パース済みインスタンス
+ * @param owner オーナー名の解決結果
+ * @returns ` · 👤 名前` 形式の表示（グループは 👥。オーナーがいない public は空文字）
+ */
+function describeOwner(
+  instance: ParsedInstance,
+  owner: WorldResolveResult | undefined
+): string {
+  if (instance.ownerId === '') return ''
+  const icon = instance.type.startsWith('group') ? '\u{1F465}' : '\u{1F464}'
+  const name =
+    owner?.name !== undefined && owner.stale !== true
+      ? owner.name
+      : instance.ownerId
+  return ` · ${icon} ${link(name, ownerUrl(instance.ownerId))}`
+}
+
+/**
+ * Location とワールド・オーナーの解決結果を表示用文字列にする
  *
  * @param location raw Location
  * @param world ワールド解決結果
+ * @param owner インスタンスオーナー名の解決結果
  * @returns 表示用文字列
  */
 function describeLocation(
   location: string | null,
-  world: WorldResolveResult | undefined
+  world: WorldResolveResult | undefined,
+  owner: WorldResolveResult | undefined
 ): string {
   const parsed = parseLocation(location)
   if (!parsed.visible) return location === 'private' ? 'Private' : '不明'
-  const instance = `${INSTANCE_TYPE_LABELS[parsed.instance.type]}${parsed.instance.name ? ` #${parsed.instance.name}` : ''}`
+  const instanceId = location?.slice(location.indexOf(':') + 1)
+  const launchUrl = `${VRCHAT_HOME}/launch?worldId=${parsed.worldId}${
+    location?.includes(':')
+      ? `&instanceId=${encodeURIComponent(instanceId ?? '')
+          .replaceAll('(', '%28')
+          .replaceAll(')', '%29')}`
+      : ''
+  }`
+  const instance = link(
+    `${INSTANCE_TYPE_LABELS[parsed.instance.type]}${parsed.instance.name ? ` #${parsed.instance.name}` : ''}`,
+    launchUrl
+  )
+  const ownerText = describeOwner(parsed.instance, owner)
   if (world?.name !== undefined && world.stale !== true) {
-    return `${world.name} (${instance})`
+    return `${link(world.name, `${VRCHAT_HOME}/world/${parsed.worldId}`)} · ${instance}${ownerText}`
   }
   const last = world?.lastFetchedAt ? `\n最終取得: ${world.lastFetchedAt}` : ''
-  return `取得失敗 (${parsed.worldId}, ${instance})${last}`
+  return `取得失敗 (${parsed.worldId}) · ${instance}${ownerText}${last}`
 }
 
 /**
@@ -106,18 +172,26 @@ function describeChange(
  * @param worlds ワールド解決結果
  * @param ruleNames 一致したルール名（設定順）
  * @param now タイムスタンプ (ISO 8601)
+ * @param owners インスタンスオーナー名の解決結果
  * @returns Discord Embed
  */
 export function buildEmbed(
   effect: NotifiableEffect,
   worlds: ContextWorlds,
   ruleNames: readonly string[],
-  now: string = new Date().toISOString()
+  now: string = new Date().toISOString(),
+  owners: ContextOwners = {}
 ): DiscordEmbed {
   const style = STYLES[effect.type]
-  const name = (effect.current ?? effect.previous)?.displayName ?? ''
+  const subject = effect.current ?? effect.previous
+  const name = subject?.displayName ?? ''
+  const userId = subject?.userId
   const fields: DiscordEmbedField[] = [
-    { name: 'ユーザー', value: name, inline: true },
+    {
+      name: 'ユーザー',
+      value: userId === undefined ? name : link(name, ownerUrl(userId)),
+      inline: true,
+    },
   ]
   switch (effect.type) {
     case 'location-change': {
@@ -126,14 +200,16 @@ export function buildEmbed(
           name: '前の場所',
           value: describeLocation(
             effect.previous?.location ?? null,
-            worlds.previous
+            worlds.previous,
+            owners.previous
           ),
         },
         {
           name: '現在の場所',
           value: describeLocation(
             effect.current?.location ?? null,
-            worlds.current
+            worlds.current,
+            owners.current
           ),
         }
       )
@@ -173,7 +249,8 @@ export function buildEmbed(
         name: '現在の場所',
         value: describeLocation(
           effect.current?.location ?? null,
-          worlds.current
+          worlds.current,
+          owners.current
         ),
       })
 

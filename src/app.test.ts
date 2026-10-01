@@ -38,6 +38,7 @@ describe('App.start', () => {
     process.env.HEALTH_PORT = '0'
     process.env.STATE_FILE_PATH = path.join(dir, 'friend-states.json')
     process.env.WORLD_CACHE_FILE_PATH = path.join(dir, 'world-cache.json')
+    process.env.OWNER_CACHE_FILE_PATH = path.join(dir, 'owner-cache.json')
     ;(VRChatSession.create as jest.Mock).mockReset()
     ;(VRChatSession.create as jest.Mock).mockResolvedValue({
       client: {
@@ -69,6 +70,7 @@ describe('App.start', () => {
     delete process.env.HEALTH_PORT
     delete process.env.STATE_FILE_PATH
     delete process.env.WORLD_CACHE_FILE_PATH
+    delete process.env.OWNER_CACHE_FILE_PATH
     fs.rmSync(dir, { recursive: true, force: true })
   })
 

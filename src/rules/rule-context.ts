@@ -12,6 +12,9 @@ export interface ContextWorlds {
   current?: WorldResolveResult
 }
 
+/** previous / current それぞれのインスタンスオーナー名の解決結果（通知表示用） */
+export type ContextOwners = ContextWorlds
+
 /**
  * 1 つの state を CEL 公開用の構造へ変換する
  *

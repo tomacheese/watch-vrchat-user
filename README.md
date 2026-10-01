@@ -8,6 +8,7 @@ VRChat の全フレンドの状態変化を監視し、YAML 設定ファイル�
 - オンライン復帰後に最初に確認した Location を `location-change` として通知対象にする
 - 「通知するか」と「どの Discord Webhook へ通知するか」を CEL ルールで柔軟に指定 (1 イベントが複数ルールに一致した場合は、一致した全 destination へ通知)
 - 同一 destination に複数ルールが一致した場合は 1 通にまとめ、Embed の footer に一致した全ルール名を表示
+- Embed のユーザー名・ワールド名・インスタンス表記 (`Friends+ #2` など)・インスタンスオーナーは VRChat Web のリンクになります。インスタンス表記のリンクはそのインスタンスの起動 URL で、Friends+ などでは識別用の乱数 (nonce) を含みます。通知先のチャンネルは他人が見られない場所にしてください
 - 設定ファイルの hot reload (不正な設定への reload は失敗し、直前の正常な設定で稼働を継続)
 - World 情報の取得 (24 時間キャッシュ) と Favorite Friends (`group_0`〜`group_3`) の取得 (1 時間ごとに更新)
 - セッションの永続化 (2FA の再入力不要)
@@ -52,6 +53,7 @@ SENTRY_DSN=https://xxx@yyy.example.com/1  # オプション: GlitchTip/Sentry �
 | `CONFIG_PATH` | `/data/config.yaml` | 通知ルール設定ファイル (YAML) のパス |
 | `STATE_FILE_PATH` | `data/friend-states.json` (`/data/friend-states.json`) | 全フレンドの state の保存先 |
 | `WORLD_CACHE_FILE_PATH` | `data/world-cache.json` (`/data/world-cache.json`) | World 情報キャッシュの保存先 |
+| `OWNER_CACHE_FILE_PATH` | `data/owner-cache.json` (`/data/owner-cache.json`) | インスタンスオーナー名キャッシュの保存先 |
 
 > **注意**: `VRCHAT_TOTP_SECRET` を設定しない場合、初回起動時に 2FA コードの手動入力が必要です。
 
@@ -233,6 +235,7 @@ Pipeline の接続診断はログに記録され、`/health` では直近 25 件
 - `vrchat-cookies.json` - VRChat セッション Cookie
 - `friend-states.json` - 全フレンドの state
 - `world-cache.json` - World 情報のキャッシュ (24 時間 TTL)
+- `owner-cache.json` - インスタンスオーナー (ユーザー名・グループ名) のキャッシュ (24 時間 TTL)
 - `config.yaml` - 通知ルール設定ファイル (利用者が用意する)
 
 ## 旧バージョンからの移行

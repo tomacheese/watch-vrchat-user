@@ -21,7 +21,16 @@ jest.mock('@book000/node-utils', () => {
 
 const URL_MAIN = 'https://discord.com/api/webhooks/1/secret-main'
 const URL_SUB = 'https://discord.com/api/webhooks/2/secret-sub'
+const HOME = 'https://vrchat.com/home'
 const WORLD = 'wrld_00000000-0000-0000-0000-000000000001'
+
+/** Embed に出る world / instance のリンクを組み立てる（括弧は URL エンコードされる） */
+function linked(world: string, label: string, instanceId: string): string {
+  const id = encodeURIComponent(instanceId)
+    .replaceAll('(', '%28')
+    .replaceAll(')', '%29')
+  return `[${world}](${HOME}/world/${WORLD}) · [${label}](${HOME}/launch?worldId=${WORLD}&instanceId=${id})`
+}
 
 function state(location: string | null, name = 'Alice'): UserState {
   return {
@@ -55,6 +64,7 @@ const move: NotifiableEffect = {
 }
 
 function setup(resolve?: jest.Mock) {
+  const ownerResolve = jest.fn().mockResolvedValue({ name: 'Owner Name' })
   const send = jest
     .fn<Promise<void>, [string, string, DiscordEmbed]>()
     .mockResolvedValue()
@@ -69,11 +79,12 @@ function setup(resolve?: jest.Mock) {
           lastFetchedAt: '2026-01-01T00:00:00.000Z',
         }),
     },
+    ownerResolver: { resolve: ownerResolve },
     favorites: { getGroups: () => ['group_0'] },
     notifier: { send },
     errorLog,
   })
-  return { dispatcher, send, record }
+  return { dispatcher, send, record, ownerResolve }
 }
 
 describe('NotificationDispatcher', () => {
@@ -192,6 +203,67 @@ describe('NotificationDispatcher', () => {
     expect(JSON.stringify(embed.fields)).toContain('取得失敗')
   })
 
+  it('インスタンスオーナーを解決して Embed に表示し、public では解決しない', async () => {
+    const { dispatcher, send, ownerResolve } = setup()
+    await dispatcher.handleEffect(
+      'usr_1',
+      'Alice',
+      move,
+      snapshot([rule('a', 'true', ['main'])])
+    )
+    expect(ownerResolve).toHaveBeenCalledTimes(1)
+    expect(ownerResolve).toHaveBeenCalledWith('usr_o')
+    expect(JSON.stringify(send.mock.calls[0][2].fields)).toContain(
+      `👤 [Owner Name](${HOME}/user/usr_o)`
+    )
+  })
+
+  it('ルールに一致しない場合はオーナーを解決しない', async () => {
+    const { dispatcher, send, ownerResolve } = setup()
+    await dispatcher.handleEffect(
+      'usr_1',
+      'Alice',
+      move,
+      snapshot([rule('never', 'false', ['main'])])
+    )
+    expect(send).not.toHaveBeenCalled()
+    expect(ownerResolve).not.toHaveBeenCalled()
+  })
+
+  it('previous 側のオーナーも解決して表示する', async () => {
+    const { dispatcher, send, ownerResolve } = setup()
+    await dispatcher.handleEffect(
+      'usr_1',
+      'Alice',
+      {
+        type: 'location-change',
+        previous: state(`${WORLD}:1~hidden(usr_p)`),
+        current: state(`${WORLD}:2~region(jp)`),
+      },
+      snapshot([rule('a', 'true', ['main'])])
+    )
+    expect(ownerResolve).toHaveBeenCalledTimes(1)
+    expect(ownerResolve).toHaveBeenCalledWith('usr_p')
+    expect(JSON.stringify(send.mock.calls[0][2].fields)).toContain(
+      `👤 [Owner Name](${HOME}/user/usr_p)`
+    )
+  })
+
+  it('オーナーの解決に失敗しても通知は送られ、ID が表示される', async () => {
+    const { dispatcher, send, ownerResolve } = setup()
+    ownerResolve.mockRejectedValue(new Error('down'))
+    await dispatcher.handleEffect(
+      'usr_1',
+      'Alice',
+      move,
+      snapshot([rule('a', 'true', ['main'])])
+    )
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(send.mock.calls[0][2].fields)).toContain(
+      `👤 [usr_o](${HOME}/user/usr_o)`
+    )
+  })
+
   it('stale の場合は最終取得時刻を表示する', () => {
     const embed = buildEmbed(
       move,
@@ -268,7 +340,7 @@ describe('buildEmbed', () => {
     expect(embed.title).toBe(title)
     expect(embed.fields?.[0]).toMatchObject({
       name: 'ユーザー',
-      value: 'Alice',
+      value: `[Alice](${HOME}/user/usr_1)`,
     })
     expect(embed.footer?.text).toBe('検知ルール: r')
   })
@@ -279,8 +351,55 @@ describe('buildEmbed', () => {
       { previous: { name: 'Old' }, current: { name: 'New' } },
       ['r']
     )
-    expect(embed.fields?.[1].value).toBe('Old (Public #1)')
-    expect(embed.fields?.[2].value).toBe('New (Friends+ #2)')
+    expect(embed.fields?.[1].value).toBe(
+      linked('Old', 'Public #1', '1~region(jp)')
+    )
+    expect(embed.fields?.[2].value).toBe(
+      `${linked('New', 'Friends+ #2', '2~hidden(usr_o)')} · 👤 [usr_o](${HOME}/user/usr_o)`
+    )
+  })
+
+  it('オーナー名が解決できていれば名前を、失敗していれば ID を表示する', () => {
+    const resolved = buildEmbed(
+      move,
+      { current: { name: 'New' } },
+      ['r'],
+      undefined,
+      { current: { name: 'Owner Name' } }
+    )
+    expect(resolved.fields?.[2].value).toBe(
+      `${linked('New', 'Friends+ #2', '2~hidden(usr_o)')} · 👤 [Owner Name](${HOME}/user/usr_o)`
+    )
+    const failed = buildEmbed(
+      move,
+      { current: { name: 'New' } },
+      ['r'],
+      undefined,
+      { current: { stale: true } }
+    )
+    expect(failed.fields?.[2].value).toBe(
+      `${linked('New', 'Friends+ #2', '2~hidden(usr_o)')} · 👤 [usr_o](${HOME}/user/usr_o)`
+    )
+  })
+
+  it(String.raw`リンクの表示文字列に含まれる [ ] \ はエスケープされる`, () => {
+    const embed = buildEmbed(
+      {
+        type: 'offline',
+        previous: state(null),
+        current: state(null, String.raw`A[b]c\d`),
+      },
+      {},
+      ['r']
+    )
+    expect(embed.fields?.[0].value).toBe(
+      String.raw`[A\[b\]c\\d](${HOME}/user/usr_1)`
+    )
+  })
+
+  it('public にはオーナー行を出さない', () => {
+    const embed = buildEmbed(move, { previous: { name: 'Old' } }, ['r'])
+    expect(embed.fields?.[1].value).not.toContain('👤')
   })
 
   it.each([
@@ -308,7 +427,27 @@ describe('buildEmbed', () => {
       { current: { name: 'W' } },
       ['r']
     )
-    expect(embed.fields?.[1].value).toBe(`W (${label} #1)`)
+    const ownerIcon = type.startsWith('group') ? '👥' : '👤'
+    const ownerId = type.startsWith('group') ? 'grp_a' : 'usr_a'
+    const ownerUrl = `${HOME}/${type.startsWith('group') ? 'group' : 'user'}/${ownerId}`
+    expect(embed.fields?.[1].value).toBe(
+      `${linked('W', `${label} #1`, `1${tags[type]}`)} · ${ownerIcon} [${ownerId}](${ownerUrl})`
+    )
+  })
+
+  it('インスタンス ID を持たない Location は instanceId なしの起動リンクにする', () => {
+    const embed = buildEmbed(
+      {
+        type: 'online',
+        previous: undefined,
+        current: state(WORLD),
+      } as never,
+      { current: { name: 'W' } },
+      ['r']
+    )
+    const value = String(embed.fields?.[1].value)
+    expect(value).toContain(`${HOME}/launch?worldId=${WORLD}`)
+    expect(value).not.toContain('instanceId=')
   })
 
   it('status-change は変わった項目だけを VRChat 上の表記で表示する', () => {

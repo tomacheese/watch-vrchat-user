@@ -120,4 +120,18 @@ describe('WorldResolver', () => {
       jest.useRealTimers()
     }
   })
+
+  it('label オプションをログ文言に使う', async () => {
+    const fetcher = jest.fn().mockRejectedValue(new Error('boom'))
+    const resolver = new WorldResolver({
+      fetcher,
+      now: () => now,
+      filePath: file,
+      label: 'owner',
+    })
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const result = await resolver.resolve('usr_a')
+    expect(result.stale).toBe(true)
+    warn.mockRestore()
+  })
 })

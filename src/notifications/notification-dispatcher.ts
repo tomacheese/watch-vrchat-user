@@ -15,6 +15,7 @@ const logger = Logger.configure('DISPATCHER')
 /** Dispatcher が依存するコンポーネント（テストで差し替え可能な構造的型） */
 export interface NotificationDispatcherDeps {
   worldResolver: { resolve(worldId: string): Promise<WorldResolveResult> }
+  ownerResolver: { resolve(ownerId: string): Promise<WorldResolveResult> }
   favorites: { getGroups(userId: string): string[] }
   notifier: {
     send(
@@ -79,6 +80,13 @@ export class NotificationDispatcher {
       return
     }
 
+    // owner は表示専用のため、一致したときだけ解決する
+    const [previousOwner, currentOwner] = await Promise.all([
+      this.resolveOwner(effect.previous),
+      this.resolveOwner(effect.current),
+    ])
+    const owners = { previous: previousOwner, current: currentOwner }
+
     // destination ごとに一致ルール名を設定順でまとめる
     const byDestination = new Map<string, string[]>()
     for (const rule of snapshot.rules) {
@@ -106,7 +114,13 @@ export class NotificationDispatcher {
         await this.deps.notifier.send(
           name,
           destination.url,
-          buildEmbed(effect, worlds, ruleNames)
+          buildEmbed(
+            effect,
+            worlds,
+            ruleNames,
+            new Date().toISOString(),
+            owners
+          )
         )
       })
     )
@@ -133,6 +147,22 @@ export class NotificationDispatcher {
     } catch (error) {
       logger.warn(
         `Failed to resolve world ${parsed.worldId}: ${toError(error).message}`
+      )
+      return { stale: true }
+    }
+  }
+
+  /** 可視な Location のインスタンスオーナー名を解決する。オーナーがいない場合は undefined */
+  private async resolveOwner(
+    state: UserState | undefined
+  ): Promise<WorldResolveResult | undefined> {
+    const parsed = parseLocation(state?.location ?? null)
+    if (!parsed.visible || parsed.instance.ownerId === '') return undefined
+    try {
+      return await this.deps.ownerResolver.resolve(parsed.instance.ownerId)
+    } catch (error) {
+      logger.warn(
+        `Failed to resolve owner ${parsed.instance.ownerId}: ${toError(error).message}`
       )
       return { stale: true }
     }

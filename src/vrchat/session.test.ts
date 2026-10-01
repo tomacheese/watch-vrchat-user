@@ -3,6 +3,7 @@ import type { VRChat } from 'vrchat'
 import {
   getFriendFavoriteGroups,
   getFriendsSnapshot,
+  getInstanceOwnerInfo,
   getWorldInfo,
   isFriend,
   VRChatSession,
@@ -309,5 +310,43 @@ describe('getFriendFavoriteGroups', () => {
     await expect(
       getFriendFavoriteGroups({ getFavorites } as unknown as VRChat)
     ).rejects.toThrow('boom')
+  })
+})
+
+describe('getInstanceOwnerInfo', () => {
+  it('usr_ はユーザーの表示名を返す', async () => {
+    const getUser = jest
+      .fn()
+      .mockResolvedValue({ data: { id: 'usr_a', displayName: 'Alice' } })
+    const getGroup = jest.fn()
+    await expect(
+      getInstanceOwnerInfo({ getUser, getGroup } as unknown as VRChat, 'usr_a')
+    ).resolves.toEqual({ id: 'usr_a', name: 'Alice' })
+    expect(getUser).toHaveBeenCalledWith({ path: { userId: 'usr_a' } })
+    expect(getGroup).not.toHaveBeenCalled()
+  })
+
+  it('grp_ はグループ名を返し、名前が無ければ throw する', async () => {
+    const getGroup = jest
+      .fn()
+      .mockResolvedValueOnce({ data: { id: 'grp_a', name: 'Group' } })
+      .mockResolvedValueOnce({ data: { id: 'grp_a' } })
+    const vrchat = { getGroup } as unknown as VRChat
+    await expect(getInstanceOwnerInfo(vrchat, 'grp_a')).resolves.toEqual({
+      id: 'grp_a',
+      name: 'Group',
+    })
+    await expect(getInstanceOwnerInfo(vrchat, 'grp_a')).rejects.toThrow(
+      'has no name'
+    )
+  })
+
+  it('API エラー時は throw する', async () => {
+    const getUser = jest
+      .fn()
+      .mockResolvedValue({ error: { message: 'not found' } })
+    await expect(
+      getInstanceOwnerInfo({ getUser } as unknown as VRChat, 'usr_a')
+    ).rejects.toThrow('not found')
   })
 })

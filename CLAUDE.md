@@ -68,11 +68,11 @@ pnpm test
 - `src/config/config-snapshot.ts`: 検証・compile 済みの設定スナップショット
 - `src/rules/rule-engine.ts`: CEL ルールの compile / 評価と `RuleErrorLog`
 - `src/rules/rule-context.ts`: effect から CEL 変数 (`event` / `user` / `previous` / `current`) を組み立てる。`event.type` は `online` / `offline` / `location-change` / `friend-add` / `friend-delete` / `status-change` の 6 種。評価時刻の `event.month` (1〜12) / `event.day` / `event.weekday` (0=日〜6=土) / `event.hour` (0〜23) / `event.minute` も持ち、ローカルタイムゾーンで解釈する (夜間などの時間帯条件に使う)。`previous` / `current` は `status` / `statusDescription` を持つ (未観測なら空文字列)
-- `src/vrchat/session.ts`: VRChat REST 認証・Cookie 永続化・2FA・Friends API の取得を担う（Pipeline 開始は担当しない）。`getFriendsSnapshot` は `profile` (status / statusDescription) を含む `FriendSnapshot` を返す
+- `src/vrchat/session.ts`: VRChat REST 認証・Cookie 永続化・2FA・Friends API の取得を担う（Pipeline 開始は担当しない）。`getFriendsSnapshot` は `profile` (status / statusDescription) を含む `FriendSnapshot` を返す。`getInstanceOwnerInfo` は `usr_` なら表示名、`grp_` ならグループ名を取得する
 - `src/vrchat/pipeline-transport.ts`: VRChat SDK の raw WebSocket (`open`/`close`/`error`/`message`/`pong`/`readyState`) への唯一のアクセス経路
 - `src/vrchat/pipeline-supervisor.ts`: Pipeline の接続状態・connection generation・liveness・reconnect backoff を管理する。10 分間 raw message が途絶えた場合は、ready 状態に限り reconnect 前に REST reconciliation による stale probe (drift 確認) を行う
 - `src/vrchat/pipeline-event-router.ts`: `friend-location` / `friend-online` / `friend-offline` / `friend-add` / `friend-delete` / `friend-update` を正規化して `UserStateCoordinator` へ渡す。`friend-online` / `friend-location` の `user` からは profile も抽出する
-- `src/vrchat/world-resolver.ts`: World 情報の取得と 24 時間 TTL の永続キャッシュ
+- `src/vrchat/world-resolver.ts`: World 情報の取得と 24 時間 TTL の永続キャッシュ。インスタンスオーナー名の解決にも別インスタンス (`label` オプションでログを区別、キャッシュは `OWNER_CACHE_FILE_PATH`) として使う
 - `src/vrchat/favorites-service.ts`: Favorite Friends (`group_0`〜`group_3`) の取得と 1 時間ごとの更新
 - `src/state/location.ts`: raw Location 文字列のパース (visible 判定・World ID・instance type 等)
 - `src/state/user-state.ts`: 全フレンドの永続 state (`FriendState`) の型と検証。`UserState` は任意の `status` / `statusDescription` を持ち、`Profile` 型も定義する (schemaVersion は据え置き)
@@ -80,13 +80,13 @@ pnpm test
 - `src/state/user-state-repository.ts`: `friend-states.json` (schemaVersion 3) への store-wide lock 付き atomic 読み書き
 - `src/state/user-state-coordinator.ts`: ユーザーごとの observation を直列処理する single-writer queue。dispatch 順は effect → followUp → statusEffect
 - `src/state/reconciler.ts`: Friends API のスナップショットを compare-and-enqueue で queue に追記する。snapshot の observation には profile を付与する (ステータスの差分は `drift` に数えない)
-- `src/notifications/notification-dispatcher.ts`: effect に対して全ルールを評価し、一致した destination ごとに 1 通へまとめて送信を依頼する
-- `src/notifications/embed-builder.ts`: Discord Embed の組み立て (World 情報・一致したルール名の footer 表示を含む)。`status-change` では変化したフィールドのみ (ステータス / ステータスメッセージ) を VRChat 上の名称 (Online / Join Me / Ask Me / Do Not Disturb) で表示する。直前のステータスが未記録の場合はステータス欄を表示しない
+- `src/notifications/notification-dispatcher.ts`: effect に対して全ルールを評価し、一致した destination ごとに 1 通へまとめて送信を依頼する。`ownerResolver` でオーナー名を解決して Embed に渡す
+- `src/notifications/embed-builder.ts`: Discord Embed の組み立て (World 情報・一致したルール名の footer 表示を含む)。公開 Location の欄は 1 行にまとめ、`<ワールド名> · <インスタンス種別 #番号>` の後ろにオーナーを ` · 👤 <表示名>` (グループは ` · 👥 <グループ名>`) で続ける。public (オーナーなし) では付けない。名前を解決できない場合は生の ID を表示する (オーナー名は表示専用で CEL には公開しない)。Embed の表示名はリンクになり、ユーザー欄は `https://vrchat.com/home/user/<usr_id>`、ワールド名は `https://vrchat.com/home/world/<wrld_id>`、インスタンス表記 (`Friends+ #2` など) は `https://vrchat.com/home/launch?worldId=...&instanceId=...` へリンクする。instanceId は Markdown リンクを壊さないよう括弧も含めて URL エンコードする。オーナー名はユーザー / グループ (`https://vrchat.com/home/group/<grp_id>`) のページへリンクする。リンクの表示文字列に含まれる `[` `]` `\` はエスケープする。`status-change` では変化したフィールドのみ (ステータス / ステータスメッセージ) を VRChat 上の名称 (Online / Join Me / Ask Me / Do Not Disturb) で表示する。直前のステータスが未記録の場合はステータス欄を表示しない
 - `src/notifications/discord-notifier.ts`: Discord Webhook への送信 (bounded timeout 付き)
 - `src/health/health-service.ts`: localhost のみでアクセス可能なヘルスチェック HTTP サーバー (supervisor state・generation・接続診断履歴・per-user unhealthy・`config`・`ruleErrors`・`favorites` を返し、`status` は `healthy` / `degraded` / `unhealthy`)
 - `src/logger-utils.ts`: unknown 型の値を Error に変換する `toError` ヘルパーを提供する
 - `config.example.yaml`: 通知ルール設定ファイルの例 (`data/config.yaml` として配置する。テストで parse / compile を検証している)
-- `data/`: 永続化データ保存先 (Cookie・`friend-states.json`・`world-cache.json`・`config.yaml` 等)
+- `data/`: 永続化データ保存先 (Cookie・`friend-states.json`・`world-cache.json`・`owner-cache.json`・`config.yaml` 等)
 
 ## 実装パターン
 - **VRChat API**: `vrchat` パッケージを使用 (パッチ適用済み)

@@ -15,6 +15,7 @@ import { PipelineSupervisor } from './vrchat/pipeline-supervisor'
 import { PipelineTransportAdapter } from './vrchat/pipeline-transport'
 import {
   getFriendFavoriteGroups,
+  getInstanceOwnerInfo,
   getWorldInfo,
   VRChatSession,
 } from './vrchat/session'
@@ -83,6 +84,11 @@ export class App {
       worldResolver: new WorldResolver({
         fetcher: (worldId) => getWorldInfo(session.client, worldId),
         filePath: process.env.WORLD_CACHE_FILE_PATH,
+      }),
+      ownerResolver: new WorldResolver({
+        fetcher: (ownerId) => getInstanceOwnerInfo(session.client, ownerId),
+        filePath: process.env.OWNER_CACHE_FILE_PATH ?? 'data/owner-cache.json',
+        label: 'instance owner',
       }),
       favorites,
       notifier: new DiscordNotifier(),

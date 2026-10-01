@@ -30,6 +30,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 ENV COOKIE_FILE_PATH=/data/vrchat-cookies.json
 ENV STATE_FILE_PATH=/data/friend-states.json
 ENV WORLD_CACHE_FILE_PATH=/data/world-cache.json
+ENV OWNER_CACHE_FILE_PATH=/data/owner-cache.json
 ENV CONFIG_PATH=/data/config.yaml
 
 VOLUME ["/data"]

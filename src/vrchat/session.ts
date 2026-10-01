@@ -267,6 +267,34 @@ export async function getWorldInfo(
 }
 
 /**
+ * インスタンスオーナー (ユーザーまたはグループ) の名前を取得する
+ *
+ * @param vrchat VRChat クライアント
+ * @param ownerId ユーザー ID (`usr_`) またはグループ ID (`grp_`)
+ * @returns オーナーの ID と名前
+ */
+export async function getInstanceOwnerInfo(
+  vrchat: VRChat,
+  ownerId: string
+): Promise<{ id: string; name: string }> {
+  if (ownerId.startsWith('grp_')) {
+    const result = await vrchat.getGroup({ path: { groupId: ownerId } })
+    if (result.error) {
+      throwApiError(`Failed to get group ${ownerId}`, result.error.message)
+    }
+    if (result.data.name === undefined) {
+      throw new Error(`Group ${ownerId} has no name`)
+    }
+    return { id: ownerId, name: result.data.name }
+  }
+  const result = await vrchat.getUser({ path: { userId: ownerId } })
+  if (result.error) {
+    throwApiError(`Failed to get user ${ownerId}`, result.error.message)
+  }
+  return { id: ownerId, name: result.data.displayName }
+}
+
+/**
  * フレンドのお気に入りグループ (group_0 から group_3) をユーザーごとに集約する
  *
  * いずれかのページ取得が失敗した場合は部分結果を返さず例外を投げる。

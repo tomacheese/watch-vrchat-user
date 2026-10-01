@@ -40,10 +40,12 @@ export interface WorldResolverOptions {
   now?: () => number
   /** キャッシュファイルのパス */
   filePath?: string
+  /** ログに出す解決対象の呼称（既定は `world`） */
+  label?: string
 }
 
 /**
- * ワールド名を解決するクラス
+ * ワールド名など ID から名前を解決するクラス
  *
  * TTL 付きの永続キャッシュを持ち、TTL 超過後に取得へ失敗した場合は
  * 古い名前を返さず stale として扱う。同一 worldId の同時取得は共有する。
@@ -52,6 +54,7 @@ export class WorldResolver {
   private readonly fetcher: WorldResolverOptions['fetcher']
   private readonly now: () => number
   private readonly filePath: string
+  private readonly label: string
   private cache: Map<string, CacheEntry> | undefined
   private readonly inFlight = new Map<string, Promise<WorldResolveResult>>()
   private persistQueue: Promise<void> = Promise.resolve()
@@ -65,12 +68,13 @@ export class WorldResolver {
     this.fetcher = options.fetcher
     this.now = options.now ?? (() => Date.now())
     this.filePath = options.filePath ?? WORLD_CACHE_FILE_PATH
+    this.label = options.label ?? 'world'
   }
 
   /**
-   * ワールド名を解決する
+   * 名前を解決する
    *
-   * @param worldId ワールド ID
+   * @param worldId 解決対象の ID
    * @returns 解決結果
    */
   async resolve(worldId: string): Promise<WorldResolveResult> {
@@ -113,7 +117,7 @@ export class WorldResolver {
       return { name: entry.name, lastFetchedAt: entry.fetchedAt }
     } catch (error) {
       logger.warn(
-        `Failed to resolve world ${worldId}: ${toError(error).message}`
+        `Failed to resolve ${this.label} ${worldId}: ${toError(error).message}`
       )
       return old
         ? { stale: true, lastFetchedAt: old.fetchedAt }
@@ -133,7 +137,7 @@ export class WorldResolver {
     let timer: NodeJS.Timeout | undefined
     const timeout = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
-        reject(new Error(`World fetch timed out: ${worldId}`))
+        reject(new Error(`Fetch timed out: ${worldId}`))
       }, FETCH_TIMEOUT_MS)
     })
     try {
@@ -167,7 +171,7 @@ export class WorldResolver {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         logger.warn(
-          `World cache is unreadable, starting empty: ${toError(error).message}`
+          `Cache ${this.filePath} is unreadable, starting empty: ${toError(error).message}`
         )
       }
     }
@@ -192,7 +196,9 @@ export class WorldResolver {
         )
         await fsPromises.rename(tmpPath, this.filePath)
       } catch (error) {
-        logger.warn(`Failed to persist world cache: ${toError(error).message}`)
+        logger.warn(
+          `Failed to persist cache ${this.filePath}: ${toError(error).message}`
+        )
       }
     })
     await this.persistQueue

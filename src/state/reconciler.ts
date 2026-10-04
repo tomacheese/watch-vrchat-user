@@ -22,10 +22,12 @@ const RATE_LIMIT_COOLDOWN_MS = 30 * 60 * 1000
  * @returns observation。traveling は在席のみ確定（location は未確定）として扱う
  */
 function toObservation(location: string, profile?: Profile): UserObservation {
-  if (isTraveling(location)) return { type: 'online', profile }
+  const profileObservation =
+    profile === undefined ? {} : { profile, profileBaseline: true }
+  if (isTraveling(location)) return { type: 'online', ...profileObservation }
   return location === 'offline'
-    ? { type: 'offline', profile }
-    : { type: 'location', location, profile }
+    ? { type: 'offline', ...profileObservation }
+    : { type: 'location', location, ...profileObservation }
 }
 
 /**

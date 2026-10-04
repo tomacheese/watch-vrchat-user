@@ -104,13 +104,13 @@ rules:
 | `status-change` | フレンドのステータス (Join Me / Online / Ask Me / Do Not Disturb) またはステータスメッセージが変わった |
 
 - `location-change` は、変更後の Location が**公開**されている (World を特定できる) 場合に発生します。変更前は公開 Location または private のいずれでもかまいません。公開 Location から private への遷移でも発生し、このとき `current.location` は `{ visible: false }` になります (`current.location.visible` を条件に含めていないルールにも一致する点に注意してください)。オフラインからオンラインになると同時に公開 Location が確定した場合は、`online` に続けて `location-change` も発生します (両方に一致するルールは 2 回通知されます)。private の維持、Location 未確定からの確定 (オンライン直後の最初の確定を除く) や未確定からの private では発生しません。
-- `status-change` は、ステータスとステータスメッセージのどちらが変わっても発生します (どちらが変わったかは `previous` / `current` の `status` / `statusDescription` を比べてください)。ステータスの値は `join me` / `active` / `ask me` / `busy` です (`active` が Online、`busy` が Do Not Disturb)。オンライン化などの他のイベントと同時に検知した場合は、そのイベントに続けて発生します。ステータスとメッセージは項目ごとに、確認済みの値からの変化だけを通知します。各項目の初回の観測 (アップグレード直後を含む) は通知せず記録だけを行うため、変更の通知は次の変化から始まります。`offline` のステータスは記録せず直前の値を維持するため、オフラインのユーザーはステータスが未確認のことがありますが、その間もメッセージの変更は通知されます (Embed には変わった項目だけを表示します)。
+- `status-change` は、WebSocket の `friend-update` や presence / Location event に付いた profile でステータスとステータスメッセージのどちらかが変わると発生します (どちらが変わったかは `previous` / `current` の `status` / `statusDescription` を比べてください)。Friends API の REST snapshot は未確認の profile 項目を初期化する場合だけ使い、確認済みの値を上書きしたり status-change を生成したりしません。ステータスの値は `join me` / `active` / `ask me` / `busy` です (`active` が Online、`busy` が Do Not Disturb)。オンライン化などの他のイベントと同時に検知した場合は、そのイベントに続けて発生します。ステータスとメッセージは項目ごとに、確認済みの値からの変化だけを通知します。各項目の初回の観測 (アップグレード直後を含む) は通知せず記録だけを行うため、変更の通知は次の変化から始まります。`offline` のステータスは記録せず直前の値を維持するため、オフラインのユーザーはステータスが未確認のことがありますが、その間もメッセージの変更は通知されます (Embed には変わった項目だけを表示します)。
 - 後追い調査のため、state が変化するたびに `State changed: user=... <前> -> <後> effects=...` を、ルール評価のたびに `Matched rules:` または `No rule matched:` をログ (info) に出力します。通知されなかった遷移も、このログで追えます。
 - WebSocket 再接続の原因調査のため、再接続のたびに `reconnect-triggered` の診断ログへ、raw close の `closeCode` / `closeReason` (英数字と一部記号のみ・64 文字まで)、最後のメッセージ・pong からの経過ミリ秒 (`msSinceLastMessage` / `msSinceLastPong`) を出力します。REST 同期のたびに `Reconciliation snapshot applied: friends=N drift=M` を出力し、`drift` は WebSocket で届かなかった差分の目安になります。
 - WebSocket が 10 分間無言になった場合 (接続が `ready` のときのみ)、すぐには再接続せず、まず Friends API との同期で差分を確認します。差分が 0 件なら再接続せず (`Pipeline liveness probe: drift=0 action=keep ...`)、差分がある場合・同期できなかった場合・120 秒以内に完了しなかった場合は再接続します (`Pipeline liveness probe: drift=<N> action=reconnect ...` / `unverified action=reconnect ...`)。この確認は無言が続く間 10 分ごとに最大 1 回で、結果はログのみに出力され `/health` の診断履歴には含まれません。
 - `traveling` (移動中) は無視され、state も更新されません。
 - 初回起動 (state ファイルが無い場合) は、現在の全フレンドの状態を **通知なしで** 記録する baseline 構築を行います。Favorite group の変更や設定の reload による、過去のイベントの再評価や遡及通知は行われません。
-- WebSocket 経由の検知と、起動時・WebSocket 再接続直後・1 時間ごとの Friends API による同期は、同一の経路を通ります。
+- WebSocket の status-change 検知は `friend-update` や presence / Location event に付属する profile を使います。Friends API 同期は未確認の profile 項目だけを初期化し、その後は online / offline / Location の状態を照合します。
 
 ### CEL 変数
 

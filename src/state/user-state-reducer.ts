@@ -1,14 +1,24 @@
 import { isTraveling, parseLocation } from './location'
 import type { Presence, Profile, UserState } from './user-state'
 
-/** WebSocket event / REST snapshot を正規化した観測値 */
+/** WebSocket event / REST snapshot を正規化した観測値。profileBaseline は snapshot 値が遷移通知を起こさないようにする */
 export type UserObservation =
-  | { type: 'online'; location?: string; profile?: Profile }
-  | { type: 'offline'; profile?: Profile }
-  | { type: 'location'; location: string; profile?: Profile }
-  | { type: 'friend-add'; profile?: Profile }
+  | {
+      type: 'online'
+      location?: string
+      profile?: Profile
+      profileBaseline?: boolean
+    }
+  | { type: 'offline'; profile?: Profile; profileBaseline?: boolean }
+  | {
+      type: 'location'
+      location: string
+      profile?: Profile
+      profileBaseline?: boolean
+    }
+  | { type: 'friend-add'; profile?: Profile; profileBaseline?: boolean }
   | { type: 'friend-delete' }
-  | { type: 'profile'; profile: Profile }
+  | { type: 'profile'; profile: Profile; profileBaseline?: boolean }
 
 /** 通知対象の semantic event 種別 */
 export type SemanticEventType =
@@ -249,34 +259,41 @@ function reducePresence(
  * @param profile 観測したステータスとステータスメッセージ
  * @param baseline baseline 構築中か
  * @param now 現在時刻を返す関数
+ * @param profileBaseline REST snapshot の profile か
  * @returns 更新後の state と、変化した場合の `status-change` effect
  */
 function applyProfile(
   base: UserState | undefined,
   profile: Profile,
   baseline: boolean,
-  now: () => string
+  now: () => string,
+  profileBaseline = false
 ): { state: UserState | undefined; effect?: ReducerEffect } {
   if (base === undefined) return { state: undefined }
-  const status = profile.status === 'offline' ? base.status : profile.status
-  if (
-    status === base.status &&
-    profile.statusDescription === base.statusDescription
-  ) {
+  const status =
+    profile.status === 'offline' ||
+    (profileBaseline && base.status !== undefined)
+      ? base.status
+      : profile.status
+  const statusDescription =
+    profileBaseline && base.statusDescription !== undefined
+      ? base.statusDescription
+      : profile.statusDescription
+  if (status === base.status && statusDescription === base.statusDescription) {
     return { state: base }
   }
   const next: UserState = {
     ...base,
     status,
-    statusDescription: profile.statusDescription,
+    statusDescription,
     updatedAt: now(),
   }
   // status は offline 観測では記録されないため、未確認のことがある（その間もメッセージの変更は通知する）
   const changed =
     (base.status !== undefined && status !== base.status) ||
     (base.statusDescription !== undefined &&
-      profile.statusDescription !== base.statusDescription)
-  if (baseline || !changed) return { state: next }
+      statusDescription !== base.statusDescription)
+  if (baseline || profileBaseline || !changed) return { state: next }
   // 未確認だった status は変化として扱わないよう、previous 側も新しい値に揃える
   const previous = base.status === undefined ? { ...base, status } : base
   return {
@@ -315,7 +332,15 @@ export function reduce(
   const profile =
     observation.type === 'friend-delete' ? undefined : observation.profile
   if (profile === undefined || result.deleteUser) return result
-  const applied = applyProfile(result.nextState, profile, baseline, now)
+  const profileBaseline =
+    observation.type !== 'friend-delete' && observation.profileBaseline === true
+  const applied = applyProfile(
+    result.nextState,
+    profile,
+    baseline,
+    now,
+    profileBaseline
+  )
   return applied.state === result.nextState
     ? result
     : { ...result, nextState: applied.state, statusEffect: applied.effect }

@@ -32,11 +32,13 @@ function buildSide(
   if (state.location !== null) {
     const parsed = parseLocation(state.location)
     if (parsed.visible) {
-      // World 名は有効な場合のみ存在させる（欠落時は参照した式が評価エラーになる）
+      // 未取得の World 値は含めず、参照する式を評価エラーにする。
       const hasName = world?.name !== undefined && world.stale !== true
+      const hasCapacity = world?.capacity !== undefined && world.stale !== true
       const worldInfo: Record<string, unknown> = {
         id: parsed.worldId,
         ...(hasName && { name: world.name }),
+        ...(hasCapacity && { capacity: world.capacity }),
       }
       location = {
         visible: true,

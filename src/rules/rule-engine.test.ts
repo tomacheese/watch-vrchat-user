@@ -189,6 +189,19 @@ describe('buildContext', () => {
     }) as { current: { location: { world: object } } }
     expect(ctx.current.location.world).toEqual({ id: WORLD })
   })
+
+  it('World の最大人数を current / previous の CEL context に含める', () => {
+    const ctx = buildContext(move, [], {
+      previous: { name: 'Old', capacity: 16 },
+      current: { name: 'New', capacity: 32 },
+    }) as {
+      previous: { location: { world: { capacity: number } } }
+      current: { location: { world: { capacity: number } } }
+    }
+
+    expect(ctx.previous.location.world.capacity).toBe(16)
+    expect(ctx.current.location.world.capacity).toBe(32)
+  })
 })
 
 describe('compileRules / evaluateRules', () => {
@@ -229,6 +242,25 @@ describe('compileRules / evaluateRules', () => {
     expect(
       run(dance, move, [], { current: { name: 'other' } }).matched
     ).toEqual([])
+  })
+
+  it('World の最大人数でルールを評価する', () => {
+    const when =
+      'current.location != null && current.location.world.capacity >= 24'
+    expect(
+      run(when, move, [], { current: { name: 'W', capacity: 32 } }).matched
+    ).toEqual(['r'])
+    expect(
+      run(when, move, [], { current: { name: 'W', capacity: 16 } }).matched
+    ).toEqual([])
+  })
+
+  it('World の最大人数がないとその値を使うルールは評価エラーになる', () => {
+    const result = run('current.location.world.capacity >= 24', move, [], {
+      current: { name: 'W' },
+    })
+    expect(result.matched).toEqual([])
+    expect(result.errors).toHaveLength(1)
   })
 
   it('AC-3/AC-10: world.name 欠落は当該ルールのみ false でエラーが返る', () => {

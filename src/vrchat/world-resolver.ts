@@ -14,10 +14,13 @@ const TTL_MS = 24 * 60 * 60 * 1000
 
 /** 取得のタイムアウト */
 const FETCH_TIMEOUT_MS = 10_000
+const CAPACITY_RETRY_MS = 5 * 60 * 1000
 
 /** キャッシュエントリ */
 interface CacheEntry {
   name: string
+  capacity?: number
+  capacityRetryAfter?: string
   /** 最終取得時刻 (ISO 8601) */
   fetchedAt: string
 }
@@ -26,6 +29,8 @@ interface CacheEntry {
 export interface WorldResolveResult {
   /** ワールド名（TTL 内または取得成功時のみ設定される） */
   name?: string
+  /** ワールドの最大人数（TTL 内または取得成功時のみ設定される） */
+  capacity?: number
   /** 取得に失敗し、有効なワールド名を提供できない場合に true */
   stale?: boolean
   /** 過去に取得した最終時刻 (ISO 8601) */
@@ -35,13 +40,19 @@ export interface WorldResolveResult {
 /** WorldResolver の生成オプション */
 export interface WorldResolverOptions {
   /** ワールド情報の取得関数 */
-  fetcher: (worldId: string) => Promise<{ id: string; name: string }>
+  fetcher: (worldId: string) => Promise<{
+    id: string
+    name: string
+    capacity?: number
+  }>
   /** 現在時刻 (epoch ms) を返す関数 */
   now?: () => number
   /** キャッシュファイルのパス */
   filePath?: string
   /** ログに出す解決対象の呼称（既定は `world`） */
   label?: string
+  /** 最大人数がないキャッシュを再取得する */
+  requireCapacity?: boolean
 }
 
 /**
@@ -55,6 +66,7 @@ export class WorldResolver {
   private readonly now: () => number
   private readonly filePath: string
   private readonly label: string
+  private readonly requireCapacity: boolean
   private cache: Map<string, CacheEntry> | undefined
   private readonly inFlight = new Map<string, Promise<WorldResolveResult>>()
   private persistQueue: Promise<void> = Promise.resolve()
@@ -69,6 +81,7 @@ export class WorldResolver {
     this.now = options.now ?? (() => Date.now())
     this.filePath = options.filePath ?? WORLD_CACHE_FILE_PATH
     this.label = options.label ?? 'world'
+    this.requireCapacity = options.requireCapacity ?? false
   }
 
   /**
@@ -80,8 +93,23 @@ export class WorldResolver {
   async resolve(worldId: string): Promise<WorldResolveResult> {
     const cache = await this.loadCache()
     const entry = cache.get(worldId)
-    if (entry && this.now() - Date.parse(entry.fetchedAt) < TTL_MS) {
-      return { name: entry.name, lastFetchedAt: entry.fetchedAt }
+    const now = this.now()
+    const capacityRetryPending =
+      entry?.capacityRetryAfter !== undefined &&
+      Date.parse(entry.capacityRetryAfter) > now
+    if (entry !== undefined) {
+      const isFresh = now - Date.parse(entry.fetchedAt) < TTL_MS
+      const cacheHasRequiredData =
+        !this.requireCapacity ||
+        entry.capacity !== undefined ||
+        capacityRetryPending
+      if (cacheHasRequiredData && isFresh) {
+        return {
+          name: entry.name,
+          ...(entry.capacity !== undefined && { capacity: entry.capacity }),
+          lastFetchedAt: entry.fetchedAt,
+        }
+      }
     }
 
     const existing = this.inFlight.get(worldId)
@@ -107,18 +135,42 @@ export class WorldResolver {
   ): Promise<WorldResolveResult> {
     try {
       const world = await this.fetchWithTimeout(worldId)
+      if (this.requireCapacity && world.capacity === undefined) {
+        throw new Error(`World capacity is unavailable: ${worldId}`)
+      }
       const entry: CacheEntry = {
         name: world.name,
+        ...(world.capacity !== undefined && { capacity: world.capacity }),
         fetchedAt: new Date(this.now()).toISOString(),
       }
       const cache = await this.loadCache()
       cache.set(worldId, entry)
       await this.persist(cache)
-      return { name: entry.name, lastFetchedAt: entry.fetchedAt }
+      return {
+        name: entry.name,
+        ...(entry.capacity !== undefined && { capacity: entry.capacity }),
+        lastFetchedAt: entry.fetchedAt,
+      }
     } catch (error) {
       logger.warn(
         `Failed to resolve ${this.label} ${worldId}: ${toError(error).message}`
       )
+      if (
+        old &&
+        this.requireCapacity &&
+        old.capacity === undefined &&
+        this.now() - Date.parse(old.fetchedAt) < TTL_MS
+      ) {
+        const cache = await this.loadCache()
+        cache.set(worldId, {
+          ...old,
+          capacityRetryAfter: new Date(
+            this.now() + CAPACITY_RETRY_MS
+          ).toISOString(),
+        })
+        await this.persist(cache)
+        return { name: old.name, lastFetchedAt: old.fetchedAt }
+      }
       return old
         ? { stale: true, lastFetchedAt: old.fetchedAt }
         : { stale: true }
@@ -133,7 +185,7 @@ export class WorldResolver {
    */
   private async fetchWithTimeout(
     worldId: string
-  ): Promise<{ id: string; name: string }> {
+  ): Promise<{ id: string; name: string; capacity?: number }> {
     let timer: NodeJS.Timeout | undefined
     const timeout = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
@@ -162,10 +214,23 @@ export class WorldResolver {
       for (const [id, entry] of Object.entries(parsed)) {
         if (
           typeof entry.name === 'string' &&
+          (entry.capacity === undefined ||
+            (typeof entry.capacity === 'number' &&
+              Number.isFinite(entry.capacity))) &&
+          (entry.capacityRetryAfter === undefined ||
+            (typeof entry.capacityRetryAfter === 'string' &&
+              !Number.isNaN(Date.parse(entry.capacityRetryAfter)))) &&
           typeof entry.fetchedAt === 'string' &&
           !Number.isNaN(Date.parse(entry.fetchedAt))
         ) {
-          cache.set(id, { name: entry.name, fetchedAt: entry.fetchedAt })
+          cache.set(id, {
+            name: entry.name,
+            ...(entry.capacity !== undefined && { capacity: entry.capacity }),
+            ...(entry.capacityRetryAfter !== undefined && {
+              capacityRetryAfter: entry.capacityRetryAfter,
+            }),
+            fetchedAt: entry.fetchedAt,
+          })
         }
       }
     } catch (error) {

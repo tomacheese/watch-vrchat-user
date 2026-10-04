@@ -84,6 +84,7 @@ export class App {
       worldResolver: new WorldResolver({
         fetcher: (worldId) => getWorldInfo(session.client, worldId),
         filePath: process.env.WORLD_CACHE_FILE_PATH,
+        requireCapacity: true,
       }),
       ownerResolver: new WorldResolver({
         fetcher: (ownerId) => getInstanceOwnerInfo(session.client, ownerId),

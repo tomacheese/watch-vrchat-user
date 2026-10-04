@@ -25,7 +25,8 @@
     "lint:tsc": "tsc",
     "preinstall": "npx only-allow pnpm",
     "start": "tsx ./src/main.ts",
-    "test": "jest --runInBand --passWithNoTests --detectOpenHandles --forceExit --coverage"
+    "test": "jest --runInBand --passWithNoTests --detectOpenHandles --forceExit --coverage",
+    "outbox": "tsx ./src/outbox-cli.ts"
   },
   "dependencies": {
     "@book000/node-utils": "1.25.135",

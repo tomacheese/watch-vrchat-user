@@ -6,6 +6,7 @@ import type { Config } from '../config'
 import type { Profile } from '../state/user-state'
 
 const logger = Logger.configure('VRCHAT-SESSION')
+const REQUEST_TIMEOUT_MS = 30_000
 
 /** Cookie ファイルのパス（環境変数で上書き可能） */
 const COOKIE_FILE_PATH =
@@ -16,13 +17,34 @@ const COOKIE_FILE_PATH =
  *
  * @returns ユーザーが入力した 2FA コード
  */
-async function promptTwoFactorCode(): Promise<string> {
+async function promptTwoFactorCode(signal?: AbortSignal): Promise<string> {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
   })
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    const onAbort = (): void => {
+      rl.close()
+    }
+    const onClose = (): void => {
+      signal?.removeEventListener('abort', onAbort)
+      reject(
+        new Error(
+          signal?.aborted
+            ? 'Two-factor prompt aborted'
+            : 'Two-factor input closed'
+        )
+      )
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    rl.once('close', onClose)
+    if (signal?.aborted) {
+      onAbort()
+      return
+    }
     rl.question('Enter 2FA code: ', (answer) => {
+      signal?.removeEventListener('abort', onAbort)
+      rl.removeListener('close', onClose)
       rl.close()
       resolve(answer.trim())
     })
@@ -31,7 +53,7 @@ async function promptTwoFactorCode(): Promise<string> {
 
 /** Cookie データの型定義 */
 interface CookieData {
-  value: { name: string; value: string }[]
+  value?: ({ name?: unknown; value?: unknown } | null)[]
 }
 
 /**
@@ -43,8 +65,124 @@ interface CookieData {
 export class VRChatSession {
   private constructor(
     public readonly client: VRChat,
-    private readonly keyvAdapter: KeyvFile
-  ) {}
+    private readonly keyvAdapter: KeyvFile,
+    private readonly config: Config,
+    private readonly controller: AbortController
+  ) {
+    // SDK の自動認証は raw socket を置き換えるため、REST 認証だけをここで管理する。
+    const sdk = client as unknown as {
+      saveCookies: (headers: Headers) => Promise<void>
+    }
+    client.client.interceptors.response.clear()
+    client.client.interceptors.response.use(
+      async (response, request, options) => {
+        await sdk.saveCookies(response.headers)
+        const meta = (
+          options as {
+            meta?: { sessionAuthentication?: boolean; sessionRetry?: boolean }
+          }
+        ).meta
+        if (
+          response.status !== 401 ||
+          meta?.sessionAuthentication ||
+          meta?.sessionRetry
+        )
+          return response
+        await response.body?.cancel()
+        const rejectedCookie = (request.headers.get('cookie') ?? '')
+          .split(';')
+          .map((item) => item.trim())
+          .find((item) => item.startsWith('auth='))
+          ?.slice(5)
+        const currentCookie = await this.getAuthCookie()
+        if (!currentCookie || currentCookie === rejectedCookie)
+          await this.reauthenticate()
+        const retryOptions = {
+          ...options,
+          method: options.method ?? 'GET',
+          meta: { ...meta, sessionRetry: true },
+          throwOnError: false,
+          responseStyle: 'fields' as const,
+        }
+        const result = await client.client.request(retryOptions)
+        const status = (result.response as Response | undefined)?.status ?? 503
+        return Response.json(
+          result.data ?? {
+            error: { message: 'VRChat request failed', status_code: status },
+          },
+          { status }
+        )
+      }
+    )
+  }
+
+  private authentication: Promise<void> | undefined
+  private checking: Promise<string> | undefined
+
+  /** Cookie を REST で検証し、失効時は再認証する。並行呼び出しは共有する。 */
+  getAuthenticatedCookie(): Promise<string> {
+    this.checking ??= this.checkAuthentication().finally(() => {
+      this.checking = undefined
+    })
+    return this.checking
+  }
+
+  /** REST リクエストを停止する。 */
+  stop(): void {
+    this.controller.abort(new Error('VRChat session stopped'))
+  }
+
+  /** Cookie の保存完了を待つ。 */
+  async flush(): Promise<void> {
+    const cookies = await this.getSdkCookies()
+    if (cookies)
+      await this.keyvAdapter.set(
+        'keyv:cookies',
+        JSON.stringify({ value: cookies })
+      )
+  }
+
+  /** 現在の REST 認証を確認する。 */
+  private async checkAuthentication(): Promise<string> {
+    const result = await this.client.getCurrentUser({
+      meta: { sessionAuthentication: true },
+    })
+    if (!(result.data && 'displayName' in result.data)) {
+      if (
+        result.error &&
+        (result.response as Response | undefined)?.status !== 401
+      )
+        throw new Error('Failed to verify VRChat session')
+      await this.reauthenticate()
+    }
+    const cookie = await this.getAuthCookie()
+    if (!cookie) throw new Error('Authenticated session has no auth cookie')
+    return cookie
+  }
+
+  /** 失効した REST セッションを一度だけ更新する。 */
+  private reauthenticate(): Promise<void> {
+    this.authentication ??= this.login().finally(() => {
+      this.authentication = undefined
+    })
+    return this.authentication
+  }
+
+  /** SDK の再帰的な 401 処理を避けてログインする。 */
+  private async login(): Promise<void> {
+    this.controller.signal.throwIfAborted()
+    const result = await this.client.login({
+      username: this.config.vrchat.username,
+      password: this.config.vrchat.password,
+      totpSecret: this.config.vrchat.totpSecret,
+      twoFactorCode: this.config.vrchat.totpSecret
+        ? undefined
+        : promptTwoFactorCode,
+      meta: { sessionAuthentication: true },
+    })
+    if (result.error || !('displayName' in result.data))
+      throw new Error('Failed to authenticate VRChat session')
+  }
 
   /**
    * VRChat REST セッションを確立する
@@ -54,14 +192,43 @@ export class VRChatSession {
    * @param config アプリケーション設定
    * @returns 確立された VRChatSession
    */
-  static async create(config: Config): Promise<VRChatSession> {
+  static async create(
+    config: Config,
+    signal?: AbortSignal
+  ): Promise<VRChatSession> {
     logger.info('Initializing VRChat session...')
 
     const keyvAdapter = new KeyvFile({
       filename: COOKIE_FILE_PATH,
       writeDelay: 100,
     })
+    const controller = new AbortController()
+    if (signal) {
+      const abort = (): void => {
+        controller.abort(signal.reason)
+      }
+      if (signal.aborted) abort()
+      else signal.addEventListener('abort', abort, { once: true })
+      controller.signal.addEventListener(
+        'abort',
+        () => {
+          signal.removeEventListener('abort', abort)
+        },
+        { once: true }
+      )
+    }
     const client = new VRChat({
+      fetch: (input, init) =>
+        fetch(input, {
+          ...init,
+          signal: AbortSignal.any([
+            ...(input instanceof Request ? [input.signal] : []),
+            ...(init?.signal ? [init.signal] : []),
+            controller.signal,
+            ...(signal ? [signal] : []),
+            AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          ]),
+        }),
       baseUrl: 'https://api.vrchat.cloud/api/1',
       application: {
         name: 'watch-vrchat-user',
@@ -71,35 +238,25 @@ export class VRChatSession {
       keyv: keyvAdapter,
     })
 
-    logger.info('Checking existing session...')
-    const currentUserResult = await client.getCurrentUser()
-
-    if (currentUserResult.data && 'displayName' in currentUserResult.data) {
-      logger.info(`Session restored: ${currentUserResult.data.displayName}`)
-      return new VRChatSession(client, keyvAdapter)
+    const session = new VRChatSession(client, keyvAdapter, config, controller)
+    try {
+      await session.getAuthenticatedCookie()
+      logger.info('VRChat session authenticated')
+      return session
+    } catch (error) {
+      session.stop()
+      throw error
     }
+  }
 
-    logger.info('No valid session, logging in...')
-    const loginResult = await client.login({
-      username: config.vrchat.username,
-      password: config.vrchat.password,
-      totpSecret: config.vrchat.totpSecret,
-      twoFactorCode: config.vrchat.totpSecret ? undefined : promptTwoFactorCode,
-    })
-
-    if (loginResult.error) {
-      throw new Error(`Failed to login: ${loginResult.error.message}`)
-    }
-
-    const data = loginResult.data
-    if (!('displayName' in data)) {
-      throw new Error(
-        'Login succeeded but user data is incomplete (no displayName)'
-      )
-    }
-    logger.info(`Logged in as ${data.displayName}`)
-
-    return new VRChatSession(client, keyvAdapter)
+  /** SDK のメモリ上の Cookie を取得する。 */
+  private getSdkCookies(): Promise<
+    { name: string; value: string }[] | undefined
+  > {
+    const sdk = this.client as unknown as
+      | { getCookies?: () => Promise<{ name: string; value: string }[]> }
+      | undefined
+    return sdk?.getCookies ? sdk.getCookies() : Promise.resolve(undefined)
   }
 
   /**
@@ -108,34 +265,40 @@ export class VRChatSession {
    * @returns auth cookie の値、取得できない場合は undefined
    */
   async getAuthCookie(): Promise<string | undefined> {
+    const sdkCookies = await this.getSdkCookies()
+    if (sdkCookies)
+      return sdkCookies.find((cookie) => cookie.name === 'auth')?.value
     const cookiesData = await this.keyvAdapter.get('keyv:cookies')
     if (!cookiesData) {
       logger.warn('No cookies data found')
       return undefined
     }
 
-    let parsed: CookieData
+    let parsed: CookieData | null
     if (typeof cookiesData === 'string') {
       try {
-        parsed = JSON.parse(cookiesData) as CookieData
+        parsed = JSON.parse(cookiesData) as CookieData | null
       } catch {
         logger.error('Failed to parse cookies data')
         return undefined
       }
     } else if (typeof cookiesData === 'object') {
-      parsed = cookiesData as CookieData
+      parsed = cookiesData
     } else {
       logger.error('Unexpected cookies data type')
       return undefined
     }
 
-    const authCookie = parsed.value.find((c) => c.name === 'auth')
+    if (!Array.isArray(parsed?.value)) return undefined
+    const authCookie = parsed.value.find(
+      (c) => c?.name === 'auth' && typeof c.value === 'string'
+    )
     if (!authCookie) {
       logger.warn('Auth cookie not found')
       return undefined
     }
 
-    return authCookie.value
+    return typeof authCookie.value === 'string' ? authCookie.value : undefined
   }
 }
 
@@ -151,9 +314,10 @@ export class VRChatSession {
  */
 export async function isFriend(
   vrchat: VRChat,
-  userId: string
+  userId: string,
+  signal?: AbortSignal
 ): Promise<boolean> {
-  const result = await vrchat.getFriendStatus({ path: { userId } })
+  const result = await vrchat.getFriendStatus({ path: { userId }, signal })
   if (result.error) {
     throw new Error(
       `Failed to get friend status for ${userId}: ${result.error.message}`
@@ -201,7 +365,8 @@ export interface FriendSnapshot {
  * @returns ユーザー ID から表示名・Location・ステータスへの Map
  */
 export async function getFriendsSnapshot(
-  vrchat: VRChat
+  vrchat: VRChat,
+  signal?: AbortSignal
 ): Promise<Map<string, FriendSnapshot>> {
   const snapshot = new Map<string, FriendSnapshot>()
 
@@ -211,6 +376,7 @@ export async function getFriendsSnapshot(
     while (true) {
       const result = await vrchat.getFriends({
         query: { n: PAGE_SIZE, offset, offline },
+        signal,
       })
       if (result.error) {
         throwApiError(
@@ -253,14 +419,15 @@ export async function getFriendsSnapshot(
  */
 export async function getWorldInfo(
   vrchat: VRChat,
-  worldId: string
+  worldId: string,
+  signal?: AbortSignal
 ): Promise<{
   id: string
   name: string
   capacity: number
   thumbnailImageUrl?: string
 }> {
-  const result = await vrchat.getWorld({ path: { worldId } })
+  const result = await vrchat.getWorld({ path: { worldId }, signal })
   if (result.error) {
     throwApiError(`Failed to get world ${worldId}`, result.error.message)
   }
@@ -281,10 +448,11 @@ export async function getWorldInfo(
  */
 export async function getInstanceOwnerInfo(
   vrchat: VRChat,
-  ownerId: string
+  ownerId: string,
+  signal?: AbortSignal
 ): Promise<{ id: string; name: string }> {
   if (ownerId.startsWith('grp_')) {
-    const result = await vrchat.getGroup({ path: { groupId: ownerId } })
+    const result = await vrchat.getGroup({ path: { groupId: ownerId }, signal })
     if (result.error) {
       throwApiError(`Failed to get group ${ownerId}`, result.error.message)
     }
@@ -293,7 +461,7 @@ export async function getInstanceOwnerInfo(
     }
     return { id: ownerId, name: result.data.name }
   }
-  const result = await vrchat.getUser({ path: { userId: ownerId } })
+  const result = await vrchat.getUser({ path: { userId: ownerId }, signal })
   if (result.error) {
     throwApiError(`Failed to get user ${ownerId}`, result.error.message)
   }
@@ -309,7 +477,8 @@ export async function getInstanceOwnerInfo(
  * @returns ユーザー ID からお気に入りグループ名の配列への Map
  */
 export async function getFriendFavoriteGroups(
-  vrchat: VRChat
+  vrchat: VRChat,
+  signal?: AbortSignal
 ): Promise<Map<string, string[]>> {
   const groups = new Map<string, string[]>()
   let offset = 0
@@ -317,6 +486,7 @@ export async function getFriendFavoriteGroups(
   while (true) {
     const result = await vrchat.getFavorites({
       query: { n: PAGE_SIZE, offset, type: 'friend' },
+      signal,
     })
     if (result.error) {
       throwApiError(

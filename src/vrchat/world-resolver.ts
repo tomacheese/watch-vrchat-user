@@ -40,7 +40,10 @@ export interface WorldResolveResult {
 /** WorldResolver の生成オプション */
 export interface WorldResolverOptions {
   /** ワールド情報の取得関数 */
-  fetcher: (worldId: string) => Promise<{
+  fetcher: (
+    worldId: string,
+    signal?: AbortSignal
+  ) => Promise<{
     id: string
     name: string
     capacity?: number
@@ -53,6 +56,8 @@ export interface WorldResolverOptions {
   label?: string
   /** 最大人数がないキャッシュを再取得する */
   requireCapacity?: boolean
+  /** 保持するキャッシュの最大件数 */
+  maxEntries?: number
 }
 
 /**
@@ -68,6 +73,13 @@ export class WorldResolver {
   private readonly label: string
   private readonly requireCapacity: boolean
   private cache: Map<string, CacheEntry> | undefined
+  private cacheLoading: Promise<Map<string, CacheEntry>> | undefined
+  private readonly maxEntries: number
+  private readonly controllers = new Set<AbortController>()
+  private stopped = false
+  private persistPending: Promise<void> | undefined
+  private persistRevision = 0
+  private persistTrigger: (() => void) | undefined
   private readonly inFlight = new Map<string, Promise<WorldResolveResult>>()
   private persistQueue: Promise<void> = Promise.resolve()
 
@@ -82,6 +94,9 @@ export class WorldResolver {
     this.filePath = options.filePath ?? WORLD_CACHE_FILE_PATH
     this.label = options.label ?? 'world'
     this.requireCapacity = options.requireCapacity ?? false
+    this.maxEntries = options.maxEntries ?? 10_000
+    if (!Number.isSafeInteger(this.maxEntries) || this.maxEntries < 1)
+      throw new Error('Invalid cache entry limit')
   }
 
   /**
@@ -91,6 +106,7 @@ export class WorldResolver {
    * @returns 解決結果
    */
   async resolve(worldId: string): Promise<WorldResolveResult> {
+    if (this.stopped) return { stale: true }
     const cache = await this.loadCache()
     const entry = cache.get(worldId)
     const now = this.now()
@@ -145,6 +161,7 @@ export class WorldResolver {
       }
       const cache = await this.loadCache()
       cache.set(worldId, entry)
+      this.trimCache(cache)
       await this.persist(cache)
       return {
         name: entry.name,
@@ -186,17 +203,44 @@ export class WorldResolver {
   private async fetchWithTimeout(
     worldId: string
   ): Promise<{ id: string; name: string; capacity?: number }> {
-    let timer: NodeJS.Timeout | undefined
-    const timeout = new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(() => {
-        reject(new Error(`Fetch timed out: ${worldId}`))
-      }, FETCH_TIMEOUT_MS)
-    })
+    const controller = new AbortController()
+    this.controllers.add(controller)
+    const timer = setTimeout(() => {
+      controller.abort(new Error(`Fetch timed out: ${worldId}`))
+    }, FETCH_TIMEOUT_MS)
     try {
-      return await Promise.race([this.fetcher(worldId), timeout])
+      if (this.stopped) controller.abort(new Error('World resolver stopped'))
+      controller.signal.throwIfAborted()
+      return await Promise.race([
+        this.fetcher(worldId, controller.signal),
+        new Promise<never>((_resolve, reject) => {
+          controller.signal.addEventListener(
+            'abort',
+            () => {
+              reject(toError(controller.signal.reason))
+            },
+            { once: true }
+          )
+        }),
+      ])
     } finally {
       clearTimeout(timer)
+      this.controllers.delete(controller)
     }
+  }
+
+  /** 進行中の取得を停止する。 */
+  stop(): void {
+    this.stopped = true
+    for (const controller of this.controllers)
+      controller.abort(new Error('World resolver stopped'))
+  }
+
+  /** キャッシュの保存完了を待つ。 */
+  async flush(): Promise<void> {
+    this.persistTrigger?.()
+    await this.persistPending
+    await this.persistQueue
   }
 
   /**
@@ -204,15 +248,23 @@ export class WorldResolver {
    *
    * @returns メモリ上のキャッシュ
    */
-  private async loadCache(): Promise<Map<string, CacheEntry>> {
-    if (this.cache) return this.cache
+  private loadCache(): Promise<Map<string, CacheEntry>> {
+    if (this.cache) return Promise.resolve(this.cache)
+    this.cacheLoading ??= this.readCache()
+    return this.cacheLoading
+  }
+
+  /** 初期キャッシュの読み込みを共有する。 */
+  private async readCache(): Promise<Map<string, CacheEntry>> {
     const cache = new Map<string, CacheEntry>()
     try {
       const parsed = JSON.parse(
         await fsPromises.readFile(this.filePath, 'utf8')
-      ) as Record<string, Partial<CacheEntry>>
+      ) as Record<string, Partial<CacheEntry> | null>
       for (const [id, entry] of Object.entries(parsed)) {
         if (
+          entry !== null &&
+          typeof entry === 'object' &&
           typeof entry.name === 'string' &&
           (entry.capacity === undefined ||
             (typeof entry.capacity === 'number' &&
@@ -240,6 +292,7 @@ export class WorldResolver {
         )
       }
     }
+    this.trimCache(cache)
     this.cache = cache
     return cache
   }
@@ -249,23 +302,57 @@ export class WorldResolver {
    *
    * @param cache 永続化するキャッシュ
    */
-  private async persist(cache: Map<string, CacheEntry>): Promise<void> {
-    this.persistQueue = this.persistQueue.then(async () => {
-      const tmpPath = `${this.filePath}.tmp`
-      try {
-        await fsPromises.mkdir(path.dirname(this.filePath), { recursive: true })
-        await fsPromises.writeFile(
-          tmpPath,
-          JSON.stringify(Object.fromEntries(cache)),
-          'utf8'
-        )
-        await fsPromises.rename(tmpPath, this.filePath)
-      } catch (error) {
-        logger.warn(
-          `Failed to persist cache ${this.filePath}: ${toError(error).message}`
-        )
+  private persist(cache: Map<string, CacheEntry>): Promise<void> {
+    this.persistRevision++
+    if (this.persistPending) return this.persistPending
+    this.persistPending = new Promise<void>((resolve) => {
+      const timeout: { timer?: NodeJS.Timeout } = {}
+      const run = (): void => {
+        if (!this.persistTrigger) return
+        this.persistTrigger = undefined
+        clearTimeout(timeout.timer)
+        this.persistQueue = this.persistQueue.then(async () => {
+          let revision: number
+          do {
+            revision = this.persistRevision
+            const tmpPath = `${this.filePath}.tmp`
+            try {
+              await fsPromises.mkdir(path.dirname(this.filePath), {
+                recursive: true,
+              })
+              await fsPromises.writeFile(
+                tmpPath,
+                JSON.stringify(Object.fromEntries(cache)),
+                'utf8'
+              )
+              await fsPromises.rename(tmpPath, this.filePath)
+            } catch (error) {
+              logger.warn(
+                `Failed to persist cache ${this.filePath}: ${toError(error).message}`
+              )
+            }
+          } while (revision !== this.persistRevision)
+        })
+        this.persistQueue
+          .finally(() => {
+            this.persistPending = undefined
+            resolve()
+          })
+          .catch(() => undefined)
       }
+      timeout.timer = setTimeout(run, 25)
+      this.persistTrigger = run
     })
-    await this.persistQueue
+    return this.persistPending
+  }
+
+  /** 古いエントリから件数上限を適用する。 */
+  private trimCache(cache: Map<string, CacheEntry>): void {
+    if (cache.size <= this.maxEntries) return
+    const oldest = [...cache].toSorted(
+      (a, b) => Date.parse(a[1].fetchedAt) - Date.parse(b[1].fetchedAt)
+    )
+    const evicted = oldest.slice(0, cache.size - this.maxEntries)
+    for (const [id] of evicted) cache.delete(id)
   }
 }

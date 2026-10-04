@@ -1,7 +1,12 @@
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import path from 'node:path'
-import { UserStateRepository } from './user-state-repository'
+import {
+  getUserStateDatabasePath,
+  UserStateRepository,
+} from './user-state-repository'
 
 function tempFilePath(): string {
   return path.join(
@@ -20,6 +25,19 @@ function aliceState(location = 'wrld_a') {
   }
 }
 
+function readStore(filePath: string) {
+  const repository = new UserStateRepository(filePath)
+  repository.load()
+  const data = {
+    schemaVersion: 3,
+    baselineCompleted: repository.isBaselineCompleted(),
+    users: { ...repository.getAll() },
+    outbox: [...repository.getPendingEffects()],
+  }
+  repository.close()
+  return data
+}
+
 describe('UserStateRepository', () => {
   it('ファイルが存在しない場合は空データで初期化される', () => {
     const repo = new UserStateRepository(tempFilePath())
@@ -28,7 +46,7 @@ describe('UserStateRepository', () => {
     expect(repo.isBaselineCompleted()).toBe(false)
   })
 
-  it('schemaVersion 2 と legacy 形式のファイルは空データとして扱う', () => {
+  it('schemaVersion 2 と legacy 形式は元のファイルを保持して起動を拒否する', () => {
     for (const content of [
       { schemaVersion: 2, users: { u1: aliceState() } },
       { users: { u1: { userId: 'u1', location: 'wrld_a' } } },
@@ -36,18 +54,21 @@ describe('UserStateRepository', () => {
       const filePath = tempFilePath()
       fs.writeFileSync(filePath, JSON.stringify(content))
       const repo = new UserStateRepository(filePath)
-      repo.load()
-      expect(repo.getAll()).toEqual({})
-      expect(repo.isBaselineCompleted()).toBe(false)
+      expect(() => {
+        repo.load()
+      }).toThrow()
+      expect(fs.readFileSync(filePath, 'utf8')).toBe(JSON.stringify(content))
     }
   })
 
-  it('壊れた JSON は空データとして扱う', () => {
+  it('壊れた JSON は元のファイルを保持して起動を拒否する', () => {
     const filePath = tempFilePath()
     fs.writeFileSync(filePath, '{not json')
     const repo = new UserStateRepository(filePath)
-    repo.load()
-    expect(repo.getAll()).toEqual({})
+    expect(() => {
+      repo.load()
+    }).toThrow()
+    expect(fs.readFileSync(filePath, 'utf8')).toBe('{not json')
   })
 
   it('環境変数 STATE_FILE_PATH をパスに使う', () => {
@@ -71,15 +92,20 @@ describe('UserStateRepository', () => {
     }
   })
 
-  it('commitUserState はファイルへ atomic に書き込む', async () => {
+  it('commitUserState は SQLite の transaction で state を永続化する', async () => {
     const filePath = tempFilePath()
     const repo = new UserStateRepository(filePath)
     repo.load()
 
     await repo.commitUserState('u1', aliceState())
 
-    const written: unknown = JSON.parse(fs.readFileSync(filePath, 'utf8'))
-    expect(written).toMatchObject({
+    expect(
+      fs
+        .readFileSync(getUserStateDatabasePath(filePath))
+        .subarray(0, 16)
+        .toString()
+    ).toBe('SQLite format 3\u0000')
+    expect(readStore(filePath)).toMatchObject({
       schemaVersion: 3,
       baselineCompleted: false,
       users: { u1: { location: 'wrld_a' } },
@@ -128,32 +154,114 @@ describe('UserStateRepository', () => {
       repo.setBaselineCompleted(),
     ])
 
-    const written = JSON.parse(fs.readFileSync(filePath, 'utf8')) as {
-      baselineCompleted: boolean
-      users: Record<string, unknown>
-    }
+    const written = readStore(filePath)
     expect(
       Object.keys(written.users).toSorted((a, b) => a.localeCompare(b))
     ).toEqual(['u1', 'u2'])
     expect(written.baselineCompleted).toBe(true)
   })
 
-  it('write 失敗時は in-memory state を変更せず、retry で正しく反映できる', async () => {
+  it('同じ turn の複数更新を 1 つの SQLite transaction にまとめる', async () => {
     const filePath = tempFilePath()
     const repo = new UserStateRepository(filePath)
     repo.load()
+    await Promise.all([
+      repo.commitUserState('u1', aliceState()),
+      repo.commitUserState('u2', { ...aliceState(), userId: 'u2' }),
+      repo.setBaselineCompleted(),
+    ])
+    const restored = new UserStateRepository(filePath)
+    restored.load()
+    expect(
+      Object.keys(restored.getAll()).toSorted((a, b) => a.localeCompare(b))
+    ).toEqual(['u1', 'u2'])
+    expect(restored.isBaselineCompleted()).toBe(true)
+  })
 
-    // tmp 書き込み先をディレクトリにしておくことで writeFile を確実に失敗させる
-    fs.mkdirSync(`${filePath}.tmp`)
+  it('live writer の lock は復旧 CLI と別プロセスの書き込みを拒否する', () => {
+    const filePath = tempFilePath()
+    const live = new UserStateRepository(filePath, { exclusive: true })
+    live.load()
+    const recovery = new UserStateRepository(filePath, { exclusive: true })
+    try {
+      expect(() => {
+        recovery.load()
+      }).toThrow(/in use/)
+      live.close()
+      recovery.load()
+      expect(
+        fs.existsSync(
+          `${getUserStateDatabasePath(filePath)}.writer-lock.sqlite`
+        )
+      ).toBe(true)
+    } finally {
+      live.close()
+      recovery.close()
+    }
+    expect(
+      fs.existsSync(`${getUserStateDatabasePath(filePath)}.writer-lock.sqlite`)
+    ).toBe(true)
+  })
 
-    await expect(repo.commitUserState('u1', aliceState())).rejects.toThrow()
-    // 書き込みが失敗した場合、in-memory state は変更されていないこと
-    expect(repo.get('u1')).toBeUndefined()
-    await expect(repo.setBaselineCompleted()).rejects.toThrow()
-    expect(repo.isBaselineCompleted()).toBe(false)
+  it('プロセス終了時に OS が writer lock を解放する', () => {
+    const filePath = tempFilePath()
+    const live = new UserStateRepository(filePath, { exclusive: true })
+    live.load()
+    live.close()
+    const recovery = new UserStateRepository(filePath, { exclusive: true })
+    expect(() => {
+      recovery.load()
+    }).not.toThrow()
+    recovery.close()
+  })
 
-    fs.rmdirSync(`${filePath}.tmp`)
+  it('writer process が kill されても SQLite が lock を解放する', async () => {
+    const filePath = tempFilePath()
+    const lockPath = `${getUserStateDatabasePath(filePath)}.writer-lock.sqlite`
+    const child = spawn(
+      process.execPath,
+      [
+        '-e',
+        String.raw`const { DatabaseSync } = require('node:sqlite')
+const db = new DatabaseSync(process.argv[1], { timeout: 0 })
+db.exec('CREATE TABLE IF NOT EXISTS writer_lock (id INTEGER PRIMARY KEY)')
+db.exec('BEGIN EXCLUSIVE')
+db.prepare('INSERT OR REPLACE INTO writer_lock (id) VALUES (1)').run()
+process.stdout.write('ready\\n')
+setInterval(() => {}, 1000)`,
+        lockPath,
+      ],
+      { stdio: ['ignore', 'pipe', 'pipe'] }
+    )
+    await once(child.stdout, 'data')
+    child.kill('SIGKILL')
+    await once(child, 'exit')
+
+    const repository = new UserStateRepository(filePath, { exclusive: true })
+    expect(() => {
+      repository.load()
+    }).not.toThrow()
+    repository.close()
+  })
+
+  it('既存 JSON を移行し、失敗した transaction は in-memory state に反映しない', async () => {
+    const filePath = tempFilePath()
+    fs.writeFileSync(
+      filePath,
+      JSON.stringify({
+        schemaVersion: 3,
+        baselineCompleted: false,
+        users: {},
+      })
+    )
+    const repo = new UserStateRepository(filePath)
+    repo.load()
     await repo.commitUserState('u1', aliceState())
     expect(repo.get('u1')).toMatchObject({ location: 'wrld_a' })
+    expect(readStore(filePath).users.u1).toMatchObject({ location: 'wrld_a' })
+    expect(JSON.parse(fs.readFileSync(filePath, 'utf8'))).toMatchObject({
+      schemaVersion: 3,
+      users: {},
+    })
   })
 })

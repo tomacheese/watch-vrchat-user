@@ -60,6 +60,9 @@ function differsFromState(
 export class Reconciler {
   private lastRunAt: Date | null = null
   private cooldownUntil: Date | null = null
+  private inFlight: Promise<number | null> | undefined
+  private stopped = false
+  private lastError: string | null = null
 
   /**
    * Reconciler を初期化する
@@ -92,21 +95,50 @@ export class Reconciler {
    * 未接続・cooldown 中・429・取得失敗など、同期を確認できなかった場合は null
    */
   async reconcileAll(): Promise<number | null> {
+    if (this.stopped) return null
+    this.inFlight ??= this.runReconciliation().finally(() => {
+      this.inFlight = undefined
+    })
+    return this.inFlight
+  }
+
+  /** 非同期 REST 待機中の停止も検知する */
+  private isStopped(): boolean {
+    return this.stopped
+  }
+
+  /** 新しい同期を止める。進行中の REST は Session が中断する */
+  stop(): void {
+    this.stopped = true
+  }
+
+  /** @returns 直近の同期失敗。外部レスポンスは公開しない */
+  getLastError(): string | null {
+    return this.lastError
+  }
+
+  /** 同期を 1 回実行する */
+  private async runReconciliation(): Promise<number | null> {
     const vrchat = this.getVrchat()
     if (!vrchat) {
+      this.lastError = 'VRChat client is unavailable'
       logger.warn('VRChat client is not initialized, skipping reconciliation')
       return null
     }
 
     if (this.cooldownUntil && new Date() < this.cooldownUntil) {
+      this.lastError = 'Reconciliation is waiting for rate limit cooldown'
       logger.info('Skipping reconciliation due to rate limit cooldown')
       return null
     }
     this.cooldownUntil = null
 
     try {
-      return await this.reconcile(vrchat)
+      const drift = await this.reconcile(vrchat)
+      this.lastError = null
+      return drift
     } catch (error) {
+      this.lastError = 'Friends reconciliation failed'
       if (error instanceof Error && error.message.includes('429')) {
         this.cooldownUntil = new Date(Date.now() + RATE_LIMIT_COOLDOWN_MS)
         logger.warn(
@@ -131,6 +163,7 @@ export class Reconciler {
     const expectedSeqs = this.coordinator.captureAllSeqs()
 
     const snapshot = await getFriendsSnapshot(vrchat)
+    if (this.stopped) throw new Error('Reconciliation stopped')
     this.lastRunAt = new Date()
 
     const touchedUserIds: string[] = []
@@ -155,6 +188,7 @@ export class Reconciler {
     for (const user of knownUsers) {
       if (snapshot.has(user.userId)) continue
       if (!(await this.isConfirmedDeleted(vrchat, user.userId))) continue
+      if (this.isStopped()) throw new Error('Reconciliation stopped')
       touchedUserIds.push(user.userId)
       this.appendOrDrop(
         user.userId,
@@ -241,7 +275,7 @@ export class Reconciler {
       logger.warn(
         'Baseline was not completed because some users are unhealthy, will retry on next reconciliation'
       )
-      return
+      throw new Error('Baseline could not be completed')
     }
     await this.repository.setBaselineCompleted()
     logger.info('Baseline completed')

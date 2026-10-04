@@ -424,3 +424,34 @@ describe('reduce (ステータス / ステータスメッセージ)', () => {
     expect(result.nextState).toMatchObject(join)
   })
 })
+
+describe('combined profile effects', () => {
+  it('online と followUp は同時に観測した profile を含む', () => {
+    const result = run(
+      state({ status: 'active', statusDescription: 'before' }),
+      {
+        type: 'online',
+        location: A,
+        profile: { status: 'join me', statusDescription: 'after' },
+      }
+    )
+    expect(result.effect).toMatchObject({
+      current: { status: 'join me', statusDescription: 'after' },
+      previous: { status: 'active', statusDescription: 'before' },
+    })
+    expect(result.followUp).toMatchObject({
+      current: { status: 'join me', statusDescription: 'after' },
+    })
+  })
+
+  it('未知ユーザーの friend-add も初回 profile を含む', () => {
+    const result = run(undefined, {
+      type: 'online',
+      profile: { status: 'busy', statusDescription: 'working' },
+    })
+    expect(result.effect).toMatchObject({
+      type: 'friend-add',
+      current: { status: 'busy', statusDescription: 'working' },
+    })
+  })
+})

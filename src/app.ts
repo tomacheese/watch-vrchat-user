@@ -5,6 +5,11 @@ import { ConfigManager } from './config/config-manager'
 import { HealthService, type HealthSnapshot } from './health/health-service'
 import { DiscordNotifier } from './notifications/discord-notifier'
 import { NotificationDispatcher } from './notifications/notification-dispatcher'
+import {
+  NotificationOutbox,
+  prepareEffects,
+} from './notifications/notification-outbox'
+import { RuleEvaluator } from './rules/rule-evaluator'
 import { RuleErrorLog } from './rules/rule-engine'
 import { Reconciler } from './state/reconciler'
 import { UserStateCoordinator } from './state/user-state-coordinator'
@@ -41,6 +46,13 @@ export class App {
   private readonly errorLog = new RuleErrorLog()
   private session: VRChatSession | null = null
   private reconcileTimer: NodeJS.Timeout | null = null
+  private outbox: NotificationOutbox | null = null
+  private evaluator: RuleEvaluator | null = null
+  private router: PipelineEventRouter | null = null
+  private readonly resolvers: WorldResolver[] = []
+  private readonly abortController = new AbortController()
+  private stopping = false
+  private stopPromise: Promise<void> | undefined
 
   /**
    * App を初期化する
@@ -58,6 +70,16 @@ export class App {
    * ready、の順で初期化する。
    */
   async start(): Promise<void> {
+    try {
+      await this.startServices()
+    } catch (error) {
+      await this.stop()
+      throw error
+    }
+  }
+
+  /** 各サービスを順に起動する */
+  private async startServices(): Promise<void> {
     logger.info('Starting watch-vrchat-user...')
 
     const configManager = new ConfigManager({
@@ -67,42 +89,66 @@ export class App {
     configManager.load()
     this.configManager = configManager
 
-    this.repository = new UserStateRepository()
+    this.repository = new UserStateRepository(undefined, { exclusive: true })
     this.repository.load()
 
-    this.session = await VRChatSession.create(this.config)
+    this.session = await VRChatSession.create(
+      this.config,
+      this.abortController.signal
+    )
     const session = this.session
+    this.assertRunning()
 
     const favorites = new FavoritesService({
-      fetcher: () => getFriendFavoriteGroups(session.client),
+      fetcher: (signal) => getFriendFavoriteGroups(session.client, signal),
     })
     this.favorites = favorites
     // 失敗は FavoritesService の status に記録される非致命エラー
     await favorites.refresh()
+    this.assertRunning()
 
-    const dispatcher = new NotificationDispatcher({
-      worldResolver: new WorldResolver({
-        fetcher: (worldId) => getWorldInfo(session.client, worldId),
-        filePath: process.env.WORLD_CACHE_FILE_PATH,
-        requireCapacity: true,
-      }),
-      ownerResolver: new WorldResolver({
-        fetcher: (ownerId) => getInstanceOwnerInfo(session.client, ownerId),
-        filePath: process.env.OWNER_CACHE_FILE_PATH ?? 'data/owner-cache.json',
-        label: 'instance owner',
-      }),
-      favorites,
-      notifier: new DiscordNotifier(),
-      errorLog: this.errorLog,
+    const worldResolver = new WorldResolver({
+      fetcher: (worldId, signal) =>
+        getWorldInfo(session.client, worldId, signal),
+      filePath: process.env.WORLD_CACHE_FILE_PATH,
+      requireCapacity: true,
     })
+    const ownerResolver = new WorldResolver({
+      fetcher: (ownerId, signal) =>
+        getInstanceOwnerInfo(session.client, ownerId, signal),
+      filePath: process.env.OWNER_CACHE_FILE_PATH ?? 'data/owner-cache.json',
+      label: 'instance owner',
+    })
+    this.resolvers.push(worldResolver, ownerResolver)
+    const notifier = new DiscordNotifier()
+    const evaluator = new RuleEvaluator()
+    this.evaluator = evaluator
+    const dispatcher = new NotificationDispatcher({
+      worldResolver,
+      ownerResolver,
+      favorites,
+      notifier,
+      errorLog: this.errorLog,
+      evaluateRules: (rules, context) => evaluator.evaluate(rules, context),
+    })
+    const outbox = new NotificationOutbox(this.repository, dispatcher, notifier)
+    this.outbox = outbox
+    await outbox.start()
+    this.assertRunning()
     this.coordinator = new UserStateCoordinator(
       this.repository,
-      (userId, displayName, effect, snapshot) =>
-        dispatcher.handleEffect(userId, displayName, effect, snapshot),
-      () => configManager.getSnapshot()
+      () => Promise.resolve(),
+      () => configManager.getSnapshot(),
+      {
+        prepareEffects,
+        onCommitted: () => {
+          outbox.wake()
+        },
+      }
     )
 
     const router = new PipelineEventRouter(this.coordinator)
+    this.router = router
     router.attach(this.session.client.pipeline)
 
     const reconciler = new Reconciler(
@@ -117,24 +163,16 @@ export class App {
       this.session.client,
       transport,
       async () => {
-        await reconciler.reconcileAll()
+        const result = await reconciler.reconcileAll()
+        if (result === null || !this.repository?.isBaselineCompleted()) {
+          throw new Error('Initial friends synchronization did not complete')
+        }
       },
       { probeDrift: () => reconciler.reconcileAll() }
     )
 
-    const getAuthCookie = async (): Promise<string> => {
-      const authCookie = await session.getAuthCookie()
-      if (!authCookie) {
-        throw new Error(
-          'Failed to obtain auth cookie for Pipeline authentication'
-        )
-      }
-      return authCookie
-    }
-    // 起動時点で cookie が取得できることを早期に確認しておく
-    // (以後 reconnect のたびに provider が再取得することで、期限切れ/rotate にも追従する)
-    await getAuthCookie()
-    await this.supervisor.start(getAuthCookie)
+    await this.supervisor.start(() => session.getAuthenticatedCookie())
+    this.assertRunning()
 
     this.reconcileTimer = setInterval(() => {
       this.reconciler?.reconcileAll().catch((error: unknown) => {
@@ -176,31 +214,49 @@ export class App {
    * 同期的な例外が発生してもここで飲み込み、reject させない。
    */
   stop(): Promise<void> {
-    if (this.reconcileTimer) {
-      clearInterval(this.reconcileTimer)
-      this.reconcileTimer = null
-    }
-    try {
-      this.configManager?.stop()
-    } catch (error) {
-      logger.error('Error while stopping config manager', toError(error))
-    }
-    try {
-      this.favorites?.stop()
-    } catch (error) {
-      logger.error('Error while stopping favorites service', toError(error))
-    }
+    this.stopPromise ??= this.stopServices()
+    return this.stopPromise
+  }
+
+  /** 受付停止後、state と進行中の配信結果を期限内で保存する */
+  private async stopServices(): Promise<void> {
+    this.stopping = true
+    this.abortController.abort(new Error('Application stopped'))
+    if (this.reconcileTimer) clearInterval(this.reconcileTimer)
+    this.reconcileTimer = null
+    this.configManager?.stop()
+    this.coordinator?.stopAccepting()
+    this.router?.detach()
+    this.reconciler?.stop()
+    this.favorites?.stop()
+    this.session?.stop()
+    for (const resolver of this.resolvers) resolver.stop()
     try {
       this.supervisor?.stop()
     } catch (error) {
       logger.error('Error while stopping supervisor', toError(error))
     }
-    try {
-      this.healthService?.stop()
-    } catch (error) {
-      logger.error('Error while stopping health service', toError(error))
-    }
-    return Promise.resolve()
+    const [drained, deliverySaved] = await Promise.all([
+      this.coordinator?.stop(5000) ?? Promise.resolve(true),
+      this.outbox?.stop(5000) ?? Promise.resolve(true),
+    ])
+    await this.evaluator?.stop()
+    await Promise.all([
+      this.repository?.flush(),
+      this.session?.flush(),
+      ...this.resolvers.map(async (resolver) => resolver.flush()),
+    ])
+    this.repository?.close()
+    this.healthService?.stop()
+    if (!drained || !deliverySaved)
+      logger.error(
+        'Shutdown did not drain all observations; persisted notifications remain available'
+      )
+  }
+
+  /** 停止中の非同期起動がサービスを再開しないようにする */
+  private assertRunning(): void {
+    if (this.stopping) throw new Error('Application startup was interrupted')
   }
 
   /**
@@ -217,6 +273,9 @@ export class App {
 
     return {
       supervisorState: this.supervisor?.getState() ?? 'stopped',
+      baselineCompleted: this.repository?.isBaselineCompleted() ?? false,
+      lastReconciliationError: this.reconciler?.getLastError() ?? null,
+      delivery: this.outbox?.getStatus(),
       rawReadyState: this.session
         ? new PipelineTransportAdapter().getReadyState(this.session.client)
         : 0,

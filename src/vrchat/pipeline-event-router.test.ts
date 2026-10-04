@@ -293,3 +293,51 @@ describe('PipelineEventRouter', () => {
     })
   })
 })
+
+describe('router lifecycle', () => {
+  it('detach は他の利用者の listener を維持して自身の listener を解除する', () => {
+    const repository = new UserStateRepository(tempFilePath())
+    const coordinator = new UserStateCoordinator(
+      repository,
+      () => Promise.resolve(),
+      () => snapshot
+    )
+    const enqueue = jest
+      .spyOn(coordinator, 'enqueue')
+      .mockImplementation(() => undefined)
+    const pipeline = fakePipeline()
+    const otherListener = jest.fn()
+    pipeline.on('friend-delete', otherListener)
+    const router = new PipelineEventRouter(coordinator)
+    router.attach(pipeline)
+    router.attach(pipeline)
+    router.detach()
+    pipeline.emit('friend-delete', { userId: 'usr_1' })
+    expect(enqueue).not.toHaveBeenCalled()
+    expect(otherListener).toHaveBeenCalledTimes(1)
+  })
+
+  it('別 pipeline への attach は古い pipeline の listener を解除する', () => {
+    const repository = new UserStateRepository(tempFilePath())
+    const coordinator = new UserStateCoordinator(
+      repository,
+      () => Promise.resolve(),
+      () => snapshot
+    )
+    const enqueue = jest
+      .spyOn(coordinator, 'enqueue')
+      .mockImplementation(() => undefined)
+    const first = fakePipeline()
+    const second = fakePipeline()
+    const router = new PipelineEventRouter(coordinator)
+    router.attach(first)
+    router.attach(second)
+    first.emit('friend-delete', { userId: 'usr_1' })
+    second.emit('friend-delete', { userId: 'usr_2' })
+    expect(enqueue).toHaveBeenCalledTimes(1)
+    expect(enqueue).toHaveBeenCalledWith('usr_2', 'usr_2', {
+      type: 'friend-delete',
+    })
+    router.detach()
+  })
+})

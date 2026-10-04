@@ -9,6 +9,7 @@ import { VRChatSession } from './vrchat/session'
 import { PipelineTransportAdapter } from './vrchat/pipeline-transport'
 import type { Config } from './config'
 import type { PipelineTransportCallbacks } from './vrchat/pipeline-transport'
+import { UserStateRepository } from './state/user-state-repository'
 
 jest.mock('./vrchat/session')
 jest.mock('./vrchat/pipeline-transport')
@@ -21,33 +22,19 @@ interface SentMessage {
 
 const mockSent: SentMessage[] = []
 
-// Discord への実 HTTP 呼び出しを避け、送信内容を記録する
-jest.mock('@book000/node-utils', () => {
-  const actual: object = jest.requireActual('@book000/node-utils')
-  return {
-    ...actual,
-    Discord: jest
-      .fn()
-      .mockImplementation((options: { webhookUrl: string }) => ({
-        sendMessage: jest
-          .fn()
-          .mockImplementation(
-            (message: {
-              embeds: { title: string; footer: { text: string } }[]
-            }) => {
-              for (const embed of message.embeds) {
-                mockSent.push({
-                  url: options.webhookUrl,
-                  title: embed.title,
-                  footer: embed.footer.text,
-                })
-              }
-              return Promise.resolve()
-            }
-          ),
-      })),
+function readStateStore(filePath: string) {
+  const repository = new UserStateRepository(filePath)
+  repository.load()
+  try {
+    return {
+      baselineCompleted: repository.isBaselineCompleted(),
+      users: { ...repository.getAll() },
+      outbox: [...repository.getPendingEffects()],
+    }
+  } finally {
+    repository.close()
   }
-})
+}
 
 const MAIN_URL = 'https://discord.com/api/webhooks/1/main'
 const DANCE_URL = 'https://discord.com/api/webhooks/2/dance'
@@ -140,6 +127,8 @@ function user(id: string): {
 describe('App integration', () => {
   let pipeline: EventEmitter & { removeAllListeners: (event: string) => void }
   let capturedCallbacks: PipelineTransportCallbacks[]
+  let fetchMock: jest.SpyInstance
+  const apps: App[] = []
 
   beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'app-integration-'))
@@ -149,6 +138,23 @@ describe('App integration', () => {
     process.env.WORLD_CACHE_FILE_PATH = path.join(dir, 'world-cache.json')
     process.env.OWNER_CACHE_FILE_PATH = path.join(dir, 'owner-cache.json')
     mockSent.length = 0
+    fetchMock = jest
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation((input, init) => {
+        const target = input instanceof Request ? input.url : String(input)
+        const url = new URL(target)
+        url.searchParams.delete('wait')
+        const body = JSON.parse(
+          typeof init?.body === 'string' ? init.body : '{}'
+        ) as { embeds: { title: string; footer: { text: string } }[] }
+        for (const embed of body.embeds)
+          mockSent.push({
+            url: url.href,
+            title: embed.title,
+            footer: embed.footer.text,
+          })
+        return Promise.resolve(new Response(null, { status: 204 }))
+      })
     // VRChat SDK の pipeline は Node 流の EventEmitter API を持つため、
     // fake もそれに合わせる（EventTarget では on()/emit() の形が一致しない）。
     // eslint-disable-next-line unicorn/prefer-event-target
@@ -163,7 +169,9 @@ describe('App integration', () => {
 
     ;(VRChatSession.create as jest.Mock).mockResolvedValue({
       client: { pipeline },
-      getAuthCookie: jest.fn().mockResolvedValue('cookie'),
+      getAuthenticatedCookie: jest.fn().mockResolvedValue('cookie'),
+      stop: jest.fn(),
+      flush: jest.fn().mockResolvedValue(undefined),
     })
     ;(session.getFriendsSnapshot as jest.Mock).mockResolvedValue(
       new Map([
@@ -212,8 +220,10 @@ describe('App integration', () => {
   })
 
   afterEach(async () => {
+    await Promise.all(apps.splice(0).map(async (app) => app.stop()))
     // 進行中の state 永続化が終わってから一時ディレクトリを消す
     await new Promise((resolve) => setTimeout(resolve, 100))
+    fetchMock.mockRestore()
     delete process.env.HEALTH_PORT
     delete process.env.STATE_FILE_PATH
     delete process.env.WORLD_CACHE_FILE_PATH
@@ -225,9 +235,7 @@ describe('App integration', () => {
   async function waitForBaseline(): Promise<void> {
     await waitFor(() => {
       try {
-        const data = JSON.parse(
-          fs.readFileSync(process.env.STATE_FILE_PATH ?? '', 'utf8')
-        ) as { baselineCompleted: boolean }
+        const data = readStateStore(process.env.STATE_FILE_PATH ?? '')
         return data.baselineCompleted
       } catch {
         return false
@@ -237,6 +245,7 @@ describe('App integration', () => {
 
   it('AC-1〜AC-4: WebSocket event が rule に従って destination へ振り分けられる', async () => {
     const app = new App(config())
+    apps.push(app)
     await app.start()
     await waitForBaseline()
     // baseline 中の通知は抑止される
@@ -294,6 +303,7 @@ describe('App integration', () => {
       new Error('Rate limit error (429)')
     )
     const app = new App(config())
+    apps.push(app)
     await expect(app.start()).resolves.toBeUndefined()
 
     const { status, body } = await fetchHealth(await healthPort(app))
@@ -310,6 +320,7 @@ describe('App integration', () => {
 
   it('Favorites 取得に成功していれば health は healthy (200) になる', async () => {
     const app = new App(config())
+    apps.push(app)
     await app.start()
 
     const { status, body } = await fetchHealth(await healthPort(app))
@@ -322,6 +333,7 @@ describe('App integration', () => {
   it('設定ファイルが不正な場合は start() が reject する', async () => {
     fs.writeFileSync(path.join(dir, 'config.yaml'), 'version: 1\nrules: 1\n')
     const app = new App(config())
+    apps.push(app)
 
     await expect(app.start()).rejects.toThrow()
 
@@ -330,6 +342,7 @@ describe('App integration', () => {
 
   it('raw close で reconnect し、reconnect 後も queue の内容を保持する', async () => {
     const app = new App(config())
+    apps.push(app)
     await app.start()
 
     await waitForBaseline()
@@ -344,5 +357,49 @@ describe('App integration', () => {
     expect(capturedCallbacks.length).toBeGreaterThan(1)
 
     await app.stop()
+  })
+  it('初回同期失敗では起動完了にせず、保存前の baseline を維持する', async () => {
+    ;(session.getFriendsSnapshot as jest.Mock).mockRejectedValue(
+      new Error('REST unavailable')
+    )
+    const app = new App(config())
+    apps.push(app)
+    await expect(app.start()).rejects.toThrow(
+      'synchronization did not complete'
+    )
+    expect(app.getHealthPort()).toBe(0)
+    expect(
+      fs.existsSync(
+        `${process.env.STATE_FILE_PATH?.replace(/\.json$/i, '.sqlite')}.writer-lock.sqlite`
+      )
+    ).toBe(true)
+    expect(mockSent).toEqual([])
+  })
+
+  it('Discord 障害中でも次の state を保存し、停止後も通知予定を保持する', async () => {
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(new Response(null, { status: 503 }))
+    )
+    const app = new App(config())
+    apps.push(app)
+    await app.start()
+    await waitForBaseline()
+    pipeline.emit('friend-offline', user('usr_a'))
+    pipeline.emit('friend-location', {
+      ...user('usr_a'),
+      location: 'wrld_dance:8',
+    })
+    await waitFor(() => app.getUserState('usr_a')?.location === 'wrld_dance:8')
+    await waitFor(() => {
+      const store = readStateStore(process.env.STATE_FILE_PATH ?? '')
+      return store.outbox.some((entry) =>
+        entry.deliveries?.some((delivery) => delivery.lastError)
+      )
+    })
+    const { body } = await fetchHealth(await healthPort(app))
+    expect((body as { status: string }).status).toBe('degraded')
+    await app.stop()
+    const store = readStateStore(process.env.STATE_FILE_PATH ?? '')
+    expect(store.outbox.length).toBeGreaterThan(0)
   })
 })

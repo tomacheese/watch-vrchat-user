@@ -52,7 +52,7 @@ export const TRAVELING_LOCATION = 'traveling'
  * @param value 検証する値
  * @returns 有効な場合は true
  */
-function isValidUserState(value: unknown): value is UserState {
+export function isValidUserState(value: unknown): value is UserState {
   if (typeof value !== 'object' || value === null) {
     return false
   }
@@ -91,6 +91,7 @@ export function isUserStateStoreData(raw: unknown): raw is UserStateStoreData {
     typeof obj.baselineCompleted === 'boolean' &&
     typeof obj.users === 'object' &&
     obj.users !== null &&
+    !Array.isArray(obj.users) &&
     Object.values(obj.users).every((user) => isValidUserState(user))
   )
 }

@@ -5,6 +5,7 @@ import { App } from './app'
 import { VRChatSession } from './vrchat/session'
 import { PipelineSupervisor } from './vrchat/pipeline-supervisor'
 import { Reconciler } from './state/reconciler'
+import { getUserStateDatabasePath } from './state/user-state-repository'
 import type { Config } from './config'
 
 jest.mock('./vrchat/session')
@@ -37,6 +38,10 @@ describe('App.start', () => {
     fs.writeFileSync(path.join(dir, 'config.yaml'), VALID_CONFIG)
     process.env.HEALTH_PORT = '0'
     process.env.STATE_FILE_PATH = path.join(dir, 'friend-states.json')
+    fs.writeFileSync(
+      process.env.STATE_FILE_PATH,
+      JSON.stringify({ schemaVersion: 3, baselineCompleted: true, users: {} })
+    )
     process.env.WORLD_CACHE_FILE_PATH = path.join(dir, 'world-cache.json')
     process.env.OWNER_CACHE_FILE_PATH = path.join(dir, 'owner-cache.json')
     ;(VRChatSession.create as jest.Mock).mockReset()
@@ -47,22 +52,29 @@ describe('App.start', () => {
           .fn()
           .mockResolvedValue({ data: [], error: undefined }),
       },
-      getAuthCookie: jest.fn().mockResolvedValue('cookie'),
+      getAuthenticatedCookie: jest.fn().mockResolvedValue('cookie'),
+      stop: jest.fn(),
+      flush: jest.fn().mockResolvedValue(undefined),
     })
     ;(PipelineSupervisor as unknown as jest.Mock).mockImplementation(function (
-      this: { start: jest.Mock },
+      this: { start: jest.Mock; stop: jest.Mock },
       _vrchat: unknown,
       _transport: unknown,
       onSynchronize: () => Promise<void>
     ) {
+      this.stop = jest.fn()
       this.start = jest.fn().mockImplementation(async () => {
         await onSynchronize()
       })
     })
     ;(Reconciler as unknown as jest.Mock).mockImplementation(function (this: {
       reconcileAll: jest.Mock
+      stop: jest.Mock
+      getLastError: jest.Mock
     }) {
-      this.reconcileAll = jest.fn().mockResolvedValue(undefined)
+      this.reconcileAll = jest.fn().mockResolvedValue(0)
+      this.stop = jest.fn()
+      this.getLastError = jest.fn().mockReturnValue(null)
     })
   })
 
@@ -120,5 +132,24 @@ describe('App.start', () => {
     })
 
     await expect(app.stop()).resolves.toBeUndefined()
+  })
+  it('初回 REST 同期が失敗した場合は起動を拒否し writer lock を解放する', async () => {
+    ;(Reconciler as unknown as jest.Mock).mockImplementation(function (this: {
+      reconcileAll: jest.Mock
+      stop: jest.Mock
+    }) {
+      this.reconcileAll = jest.fn().mockResolvedValue(null)
+      this.stop = jest.fn()
+    })
+    const app = new App(config())
+    await expect(app.start()).rejects.toThrow(
+      'synchronization did not complete'
+    )
+    expect(
+      fs.existsSync(
+        `${getUserStateDatabasePath(process.env.STATE_FILE_PATH ?? '')}.writer-lock.sqlite`
+      )
+    ).toBe(true)
+    expect(app.getHealthPort()).toBe(0)
   })
 })

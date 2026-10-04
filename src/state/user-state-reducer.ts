@@ -343,5 +343,17 @@ export function reduce(
   )
   return applied.state === result.nextState
     ? result
-    : { ...result, nextState: applied.state, statusEffect: applied.effect }
+    : {
+        ...result,
+        nextState: applied.state,
+        effect:
+          result.effect.type === 'no-op'
+            ? result.effect
+            : { ...result.effect, current: applied.state },
+        followUp:
+          result.followUp && result.followUp.type !== 'no-op'
+            ? { ...result.followUp, current: applied.state }
+            : result.followUp,
+        statusEffect: applied.effect,
+      }
 }

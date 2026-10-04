@@ -433,6 +433,13 @@ describe('RuleErrorLog', () => {
     expect(log.getRecent(t0 + 3000 + 60 * 60 * 1000 + 1)).toEqual([])
   })
 
+  it('窓内の新しいエラーに過去の累計を加えない', () => {
+    const log = new RuleErrorLog()
+    log.record('a', 'evaluation', 'old', 1000)
+    log.record('a', 'evaluation', 'new', 1000 + 2 * 60 * 60 * 1000)
+    expect(log.getRecent(1000 + 2 * 60 * 60 * 1000)[0].count).toBe(1)
+  })
+
   it('warning は (ルール, 種別) ごとに 1 分に 1 回に抑制される', () => {
     warn.mockClear()
     const log = new RuleErrorLog()

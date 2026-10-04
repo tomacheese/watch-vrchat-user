@@ -3,6 +3,7 @@ import * as os from 'node:os'
 import path from 'node:path'
 import { UserStateCoordinator } from './user-state-coordinator'
 import { UserStateRepository } from './user-state-repository'
+import { getPersistedConfigId } from '../notifications/outbox-types'
 import type { ReducerEffect } from './user-state-reducer'
 import type { ConfigSnapshot } from '../config/config-snapshot'
 
@@ -471,5 +472,183 @@ describe('UserStateCoordinator', () => {
 
       await expect(coordinator.drain(['u1'])).resolves.toBe(false)
     })
+  })
+})
+
+describe('coordinator recovery and shutdown', () => {
+  it('persist-failure 後の overflow は復旧後も記録する', async () => {
+    const repository = await completedRepository('offline')
+    jest
+      .spyOn(repository, 'commitUserState')
+      .mockRejectedValueOnce(new Error('disk full'))
+    const coordinator = new UserStateCoordinator(
+      repository,
+      () => Promise.resolve(),
+      getSnapshot,
+      {
+        maxQueueSize: 1,
+        initialBackoffMs: 30,
+        maxBackoffMs: 30,
+      }
+    )
+    coordinator.enqueue('u1', 'Alice', { type: 'online' })
+    await waitFor(
+      () => coordinator.getUnhealthy('u1')?.cause === 'persist-failure'
+    )
+    coordinator.enqueue('u1', 'Alice', { type: 'offline' })
+    await waitFor(() => repository.get('u1')?.presence === 'online')
+    expect(coordinator.getUnhealthy('u1')?.cause).toBe('queue-overflow')
+    await expect(coordinator.stop()).resolves.toBe(false)
+  })
+
+  it('offline の表示名は先行 observation の commit 後に補完する', async () => {
+    const repository = await completedRepository('offline')
+    const coordinator = new UserStateCoordinator(
+      repository,
+      () => Promise.resolve(),
+      getSnapshot
+    )
+    coordinator.enqueue('u1', 'Alicia', { type: 'online' })
+    coordinator.enqueue('u1', 'u1', { type: 'offline' })
+    await coordinator.drain(['u1'])
+    expect(repository.get('u1')).toMatchObject({
+      displayName: 'Alicia',
+      presence: 'offline',
+    })
+  })
+
+  it('stop は受付を終了して正常な queue の永続化を待つ', async () => {
+    const repository = await completedRepository('offline')
+    const coordinator = new UserStateCoordinator(
+      repository,
+      () => Promise.resolve(),
+      getSnapshot
+    )
+    coordinator.enqueue('u1', 'Alice', { type: 'online' })
+    coordinator.enqueue('u1', 'Alice', { type: 'offline' })
+    const stopped = coordinator.stop()
+    coordinator.enqueue('u1', 'Alice', { type: 'online' })
+    await expect(stopped).resolves.toBe(true)
+    expect(repository.get('u1')?.presence).toBe('offline')
+  })
+
+  it('stop は失敗中の retry 待機を起こして終了する', async () => {
+    const repository = await completedRepository('offline')
+    const commit = jest
+      .spyOn(repository, 'commitUserState')
+      .mockRejectedValue(new Error('disk full'))
+    const coordinator = new UserStateCoordinator(
+      repository,
+      () => Promise.resolve(),
+      getSnapshot,
+      {
+        initialBackoffMs: 60_000,
+      }
+    )
+    coordinator.enqueue('u1', 'Alice', { type: 'online' })
+    await waitFor(() => coordinator.getUnhealthy('u1') !== undefined)
+    await expect(coordinator.stop(500)).resolves.toBe(false)
+    expect(commit).toHaveBeenCalledTimes(2)
+  })
+
+  it('stop は完了しない dispatch を期限で打ち切る', async () => {
+    const repository = await completedRepository('offline')
+    const { promise: pending, resolve: release } =
+      // eslint-disable-next-line @typescript-eslint/no-invalid-void-type
+      Promise.withResolvers<void>()
+    const coordinator = new UserStateCoordinator(
+      repository,
+      () => pending,
+      getSnapshot
+    )
+    coordinator.enqueue('u1', 'Alice', { type: 'online' })
+    await expect(coordinator.stop(10)).resolves.toBe(false)
+    release()
+    await waitFor(() => repository.get('u1')?.presence === 'online')
+  })
+
+  it('永続 outbox モードは network dispatch を待たず state を処理する', async () => {
+    const repository = await completedRepository('offline')
+    const legacyDispatch = jest.fn(() => new Promise<void>(() => undefined))
+    const onCommitted = jest.fn()
+    const coordinator = new UserStateCoordinator(
+      repository,
+      legacyDispatch,
+      getSnapshot,
+      {
+        prepareEffects: (userId, displayName, effects, config) => {
+          const persistedConfig = {
+            destinations: config.destinations,
+            rules: [],
+            loadedAt: config.loadedAt,
+          }
+          return effects.map((effect, index) => ({
+            id: `${effect.type}-${index}`,
+            userId,
+            displayName,
+            effect,
+            configId: getPersistedConfigId(persistedConfig),
+            config: persistedConfig,
+            createdAt: '2026-01-01T00:00:00.000Z',
+          }))
+        },
+        onCommitted,
+      }
+    )
+    const commit = jest.spyOn(repository, 'commitUserState')
+    coordinator.enqueue('u1', 'Alice', { type: 'online' })
+    coordinator.enqueue('u1', 'Alice', { type: 'offline' })
+    await expect(coordinator.stop()).resolves.toBe(true)
+    expect(commit.mock.calls[0][2]).toEqual([
+      expect.objectContaining({
+        effect: expect.objectContaining({ type: 'online' }),
+      }),
+    ])
+    expect(commit.mock.calls[1][2]).toEqual([
+      expect.objectContaining({
+        effect: expect.objectContaining({ type: 'offline' }),
+      }),
+    ])
+    expect(legacyDispatch).not.toHaveBeenCalled()
+    expect(onCommitted).toHaveBeenCalledTimes(2)
+    expect(repository.get('u1')?.presence).toBe('offline')
+  })
+})
+
+describe('durable event clock', () => {
+  it('永続化を再試行しても受信時刻を固定する', async () => {
+    const repository = await completedRepository('offline')
+    jest
+      .spyOn(repository, 'commitUserState')
+      .mockRejectedValueOnce(new Error('disk full'))
+    const observedTimes: (string | undefined)[] = []
+    const coordinator = new UserStateCoordinator(
+      repository,
+      () => Promise.resolve(),
+      getSnapshot,
+      {
+        initialBackoffMs: 30,
+        prepareEffects: (
+          _userId,
+          _displayName,
+          _effects,
+          _snapshot,
+          receivedAt
+        ) => {
+          observedTimes.push(receivedAt)
+          return []
+        },
+      }
+    )
+    const before = Date.now()
+    coordinator.enqueue('u1', 'Alice', { type: 'online' })
+    const after = Date.now()
+    await waitFor(() => observedTimes.length === 2)
+    await expect(coordinator.stop()).resolves.toBe(true)
+    expect(observedTimes[0]).toBeDefined()
+    expect(observedTimes[1]).toBe(observedTimes[0])
+    const receivedMs = Date.parse(observedTimes[0] ?? '')
+    expect(receivedMs).toBeGreaterThanOrEqual(before)
+    expect(receivedMs).toBeLessThanOrEqual(after)
   })
 })

@@ -254,7 +254,12 @@ export async function getFriendsSnapshot(
 export async function getWorldInfo(
   vrchat: VRChat,
   worldId: string
-): Promise<{ id: string; name: string; thumbnailImageUrl?: string }> {
+): Promise<{
+  id: string
+  name: string
+  capacity: number
+  thumbnailImageUrl?: string
+}> {
   const result = await vrchat.getWorld({ path: { worldId } })
   if (result.error) {
     throwApiError(`Failed to get world ${worldId}`, result.error.message)
@@ -262,6 +267,7 @@ export async function getWorldInfo(
   return {
     id: result.data.id,
     name: result.data.name,
+    capacity: result.data.capacity,
     thumbnailImageUrl: result.data.thumbnailImageUrl,
   }
 }

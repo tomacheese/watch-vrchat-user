@@ -75,6 +75,12 @@ rules:
       current.location.visible &&
       current.location.world.name.contains("ダンス")
     destinations: [dance]
+  - name: world-capacity
+    when: |
+      event.type == "location-change" &&
+      user.id == "usr_b" &&
+      current.location.world.capacity == 32
+    destinations: [main]
   - name: favorite-group-0-presence
     when: |
       (event.type == "online" || event.type == "offline") &&
@@ -174,6 +180,7 @@ describe('App integration', () => {
         Promise.resolve({
           id: worldId,
           name: worldId === 'wrld_dance' ? 'ダンスワールド' : 'Other World',
+          capacity: 32,
         })
     )
     ;(session.isFriend as jest.Mock).mockResolvedValue(true)
@@ -250,7 +257,7 @@ describe('App integration', () => {
     })
     pipeline.emit('friend-online', user('usr_c'))
 
-    await waitFor(() => mockSent.length >= 6)
+    await waitFor(() => mockSent.length >= 7)
     // 余分な通知が無いことを確認するため少し待つ
     await new Promise((resolve) => setTimeout(resolve, 100))
 
@@ -266,6 +273,7 @@ describe('App integration', () => {
       '検知ルール: specific-user-location',
       '検知ルール: specific-user-location',
       '検知ルール: specific-user-presence',
+      '検知ルール: world-capacity',
     ])
     // AC-3: 「ダンス」を含む World への移動は dance（usr_a と usr_b の 2 件）
     expect(rulesFor(DANCE_URL)).toEqual([

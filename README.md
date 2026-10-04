@@ -133,6 +133,7 @@ rules:
   - `location.visible`: `true`
   - `location.world.id`: World ID
   - `location.world.name`: World 名 (World 情報が有効な場合のみ存在。取得できない場合、参照したルールは評価エラーとなり、そのルールだけが不一致扱いになる)
+  - `location.world.capacity`: World の最大人数 (World 情報が有効な場合のみ存在。取得できない場合、参照したルールは評価エラーとなり、そのルールだけが不一致扱いになる)
   - `location.instance.name` / `type` / `ownerId` / `region` / `ageGate`
 
 `location.instance.type` は次の 8 種です。

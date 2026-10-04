@@ -20,24 +20,99 @@ describe('WorldResolver', () => {
     fs.rmSync(dir, { recursive: true, force: true })
   })
 
-  function create(fetcher: jest.Mock): WorldResolver {
-    return new WorldResolver({ fetcher, now: () => now, filePath: file })
+  function create(fetcher: jest.Mock, requireCapacity = false): WorldResolver {
+    return new WorldResolver({
+      fetcher,
+      now: () => now,
+      filePath: file,
+      requireCapacity,
+    })
   }
 
   it('初回は取得して name を返す', async () => {
-    const fetcher = jest.fn().mockResolvedValue({ id: 'wrld_a', name: 'W' })
+    const fetcher = jest
+      .fn()
+      .mockResolvedValue({ id: 'wrld_a', name: 'W', capacity: 32 })
     const result = await create(fetcher).resolve('wrld_a')
     expect(result.name).toBe('W')
+    expect(result.capacity).toBe(32)
     expect(result.stale).toBeFalsy()
   })
 
+  it('古いキャッシュに capacity がなければ再取得する', async () => {
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        wrld_a: { name: 'W', fetchedAt: new Date(now).toISOString() },
+      })
+    )
+    const fetcher = jest
+      .fn()
+      .mockResolvedValue({ id: 'wrld_a', name: 'W', capacity: 24 })
+
+    await expect(
+      create(fetcher, true).resolve('wrld_a')
+    ).resolves.toMatchObject({
+      name: 'W',
+      capacity: 24,
+    })
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+
+  it('capacity の再取得に失敗しても fresh な name を返し、再試行を遅らせる', async () => {
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        wrld_a: { name: 'W', fetchedAt: new Date(now).toISOString() },
+      })
+    )
+    const fetcher = jest.fn().mockRejectedValue(new Error('unavailable'))
+    const resolver = create(fetcher, true)
+
+    const first = await resolver.resolve('wrld_a')
+    expect(first.name).toBe('W')
+    expect(first.capacity).toBeUndefined()
+    expect(first.stale).toBeUndefined()
+    await expect(resolver.resolve('wrld_a')).resolves.toMatchObject({
+      name: 'W',
+    })
+    expect(fetcher).toHaveBeenCalledTimes(1)
+
+    const fetcherAfterRestart = jest
+      .fn()
+      .mockRejectedValue(new Error('unavailable'))
+    const resolverAfterRestart = create(fetcherAfterRestart, true)
+    await expect(resolverAfterRestart.resolve('wrld_a')).resolves.toMatchObject(
+      { name: 'W' }
+    )
+    expect(fetcherAfterRestart).not.toHaveBeenCalled()
+
+    now += 5 * 60 * 1000
+    await resolverAfterRestart.resolve('wrld_a')
+    expect(fetcherAfterRestart).toHaveBeenCalledTimes(1)
+  })
+
+  it('最大人数を要求しない名前キャッシュは再取得しない', async () => {
+    const fetcher = jest.fn().mockResolvedValue({ id: 'usr_a', name: 'Owner' })
+    const resolver = create(fetcher)
+    await resolver.resolve('usr_a')
+
+    await expect(resolver.resolve('usr_a')).resolves.toMatchObject({
+      name: 'Owner',
+    })
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+
   it('TTL 内は API を呼ばない', async () => {
-    const fetcher = jest.fn().mockResolvedValue({ id: 'wrld_a', name: 'W' })
+    const fetcher = jest
+      .fn()
+      .mockResolvedValue({ id: 'wrld_a', name: 'W', capacity: 32 })
     const resolver = create(fetcher)
     await resolver.resolve('wrld_a')
     now += TTL - 1
     const result = await resolver.resolve('wrld_a')
     expect(result.name).toBe('W')
+    expect(result.capacity).toBe(32)
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
 
@@ -76,11 +151,14 @@ describe('WorldResolver', () => {
   })
 
   it('再起動後もキャッシュが復元され API を呼ばない', async () => {
-    const fetcher = jest.fn().mockResolvedValue({ id: 'wrld_a', name: 'W' })
+    const fetcher = jest
+      .fn()
+      .mockResolvedValue({ id: 'wrld_a', name: 'W', capacity: 32 })
     await create(fetcher).resolve('wrld_a')
     const fetcher2 = jest.fn()
     const result = await create(fetcher2).resolve('wrld_a')
     expect(result.name).toBe('W')
+    expect(result.capacity).toBe(32)
     expect(fetcher2).not.toHaveBeenCalled()
   })
 

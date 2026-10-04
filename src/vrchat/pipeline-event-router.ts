@@ -9,6 +9,7 @@ const logger = Logger.configure('PIPELINE-EVENT-ROUTER')
 export interface PipelineEventEmitterLike {
   on: (event: string, listener: (data: unknown) => void) => void
   removeAllListeners: (event: string) => void
+  removeListener?: (event: string, listener: (data: unknown) => void) => void
 }
 
 /** Pipeline の `friend-location` イベントのペイロード */
@@ -141,6 +142,8 @@ function isFriendDeleteEvent(data: unknown): data is FriendDeleteEvent {
  * liveness 判定は担当しない（raw message 全体は PipelineTransportAdapter が扱う）。
  */
 export class PipelineEventRouter {
+  private pipeline: PipelineEventEmitterLike | undefined
+  private readonly listeners = new Map<string, (data: unknown) => void>()
   /**
    * PipelineEventRouter を初期化する
    *
@@ -154,17 +157,12 @@ export class PipelineEventRouter {
    * @param pipeline VRChat SDK の pipeline EventEmitter
    */
   attach(pipeline: PipelineEventEmitterLike): void {
-    pipeline.removeAllListeners('friend-location')
-    pipeline.removeAllListeners('friend-online')
-    pipeline.removeAllListeners('friend-offline')
-    pipeline.removeAllListeners('friend-add')
-    pipeline.removeAllListeners('friend-delete')
-    pipeline.removeAllListeners('friend-update')
+    this.detach()
+    this.pipeline = pipeline
 
-    pipeline.on('friend-location', (data: unknown) => {
+    this.listen('friend-location', (data: unknown) => {
       if (!isFriendLocationEvent(data)) {
         logger.error('Invalid friend-location event data')
-        logger.debug('Invalid friend-location event data (raw)', { data })
         return
       }
       this.coordinator.enqueue(data.userId, data.user.displayName, {
@@ -174,10 +172,9 @@ export class PipelineEventRouter {
       })
     })
 
-    pipeline.on('friend-online', (data: unknown) => {
+    this.listen('friend-online', (data: unknown) => {
       if (!isFriendOnlineEvent(data)) {
         logger.error('Invalid friend-online event data')
-        logger.debug('Invalid friend-online event data (raw)', { data })
         return
       }
       this.coordinator.enqueue(
@@ -193,20 +190,18 @@ export class PipelineEventRouter {
       )
     })
 
-    pipeline.on('friend-offline', (data: unknown) => {
+    this.listen('friend-offline', (data: unknown) => {
       if (!isFriendOfflineEvent(data)) {
         logger.error('Invalid friend-offline event data')
-        logger.debug('Invalid friend-offline event data (raw)', { data })
         return
       }
       // displayName は Coordinator.enqueue 側で Repository の既存値から補完する
       this.coordinator.enqueue(data.userId, data.userId, { type: 'offline' })
     })
 
-    pipeline.on('friend-add', (data: unknown) => {
+    this.listen('friend-add', (data: unknown) => {
       if (!isFriendAddEvent(data)) {
         logger.error('Invalid friend-add event data')
-        logger.debug('Invalid friend-add event data (raw)', { data })
         return
       }
       this.coordinator.enqueue(data.userId, data.user.displayName, {
@@ -214,10 +209,9 @@ export class PipelineEventRouter {
       })
     })
 
-    pipeline.on('friend-delete', (data: unknown) => {
+    this.listen('friend-delete', (data: unknown) => {
       if (!isFriendDeleteEvent(data)) {
         logger.error('Invalid friend-delete event data')
-        logger.debug('Invalid friend-delete event data (raw)', { data })
         return
       }
       // displayName は Coordinator.enqueue 側で Repository の既存値から補完する
@@ -227,12 +221,12 @@ export class PipelineEventRouter {
     })
 
     // friend-update は profile 全般の更新で届く（status / statusDescription を含むペイロードは実機で確認済み）
-    pipeline.on('friend-update', (data: unknown) => {
+    this.listen('friend-update', (data: unknown) => {
       const profile = isFriendOnlineEvent(data)
         ? extractProfile(data.user)
         : undefined
       if (profile === undefined || !isFriendOnlineEvent(data)) {
-        logger.debug('Ignored friend-update event without status', { data })
+        logger.debug('Ignored friend-update event without status')
         return
       }
       this.coordinator.enqueue(data.userId, data.user.displayName, {
@@ -240,5 +234,28 @@ export class PipelineEventRouter {
         profile,
       })
     })
+  }
+
+  /** 登録した business event listener を解除する */
+  detach(): void {
+    const pipeline = this.pipeline
+    if (!pipeline) return
+    for (const [event, listener] of this.listeners) {
+      if (pipeline.removeListener) pipeline.removeListener(event, listener)
+      else pipeline.removeAllListeners(event)
+    }
+    this.listeners.clear()
+    this.pipeline = undefined
+  }
+
+  /**
+   * Router が所有する listener を記録して登録する
+   *
+   * @param event business event 名
+   * @param listener payload の正規化処理
+   */
+  private listen(event: string, listener: (data: unknown) => void): void {
+    this.listeners.set(event, listener)
+    this.pipeline?.on(event, listener)
   }
 }

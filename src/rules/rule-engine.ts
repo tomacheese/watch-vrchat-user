@@ -35,7 +35,7 @@ export interface RuleErrorSummary {
 
 /** エラー種別ごとの集計エントリ */
 interface ErrorEntry {
-  count: number
+  occurrences: number[]
   lastAtMs: number
   lastError: string
   lastWarnMs: number
@@ -60,7 +60,7 @@ export class RuleErrorLog {
     const entry = this.entries.get(key)
     if (entry === undefined) {
       this.entries.set(key, {
-        count: 1,
+        occurrences: [now],
         lastAtMs: now,
         lastError: message,
         lastWarnMs: now,
@@ -68,7 +68,10 @@ export class RuleErrorLog {
       this.warn(ruleName, kind, message)
       return
     }
-    entry.count++
+    entry.occurrences = entry.occurrences.filter(
+      (at) => now - at <= RECENT_WINDOW_MS
+    )
+    entry.occurrences.push(now)
     entry.lastAtMs = now
     entry.lastError = message
     if (now - entry.lastWarnMs < WARN_INTERVAL_MS) return
@@ -85,19 +88,25 @@ export class RuleErrorLog {
   getRecent(now: number): RuleErrorSummary[] {
     const byRule = new Map<string, RuleErrorSummary & { atMs: number }>()
     for (const [key, entry] of this.entries) {
-      if (now - entry.lastAtMs > RECENT_WINDOW_MS) continue
+      entry.occurrences = entry.occurrences.filter(
+        (at) => now - at <= RECENT_WINDOW_MS
+      )
+      if (entry.occurrences.length === 0) {
+        this.entries.delete(key)
+        continue
+      }
       const [rule] = JSON.parse(key) as [string, string]
       const existing = byRule.get(rule)
       if (existing === undefined) {
         byRule.set(rule, {
           rule,
-          count: entry.count,
+          count: entry.occurrences.length,
           lastAt: new Date(entry.lastAtMs).toISOString(),
           lastError: entry.lastError,
           atMs: entry.lastAtMs,
         })
       } else {
-        existing.count += entry.count
+        existing.count += entry.occurrences.length
         if (entry.lastAtMs >= existing.atMs) {
           existing.atMs = entry.lastAtMs
           existing.lastAt = new Date(entry.lastAtMs).toISOString()
@@ -129,7 +138,7 @@ export class RuleErrorLog {
 }
 
 /** ルール式の構造上限 */
-const CEL_LIMITS = {
+export const CEL_LIMITS = {
   maxAstNodes: 500,
   maxDepth: 32,
   maxListElements: 100,
@@ -179,6 +188,7 @@ export function compileRules(raw: RawRule[]): CompiledRule[] {
     const program = env.parse(rule.when)
     return {
       name: rule.name,
+      when: rule.when,
       enabled: rule.enabled,
       destinations: [...rule.destinations],
       program: (context: Record<string, unknown>): unknown => program(context),

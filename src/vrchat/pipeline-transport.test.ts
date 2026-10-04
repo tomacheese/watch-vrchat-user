@@ -128,6 +128,39 @@ describe('PipelineTransportAdapter.connect', () => {
   })
 })
 
+describe('PipelineTransportAdapter lifecycle recovery', () => {
+  it('OPEN 前の close を即座に失敗とし、待機 listener を除去する', async () => {
+    const raw = new FakeRawWebSocket()
+    const adapter = new PipelineTransportAdapter()
+    const pending = adapter.connect(
+      fakeVRChat(raw, jest.fn().mockResolvedValue(undefined)),
+      'cookie',
+      {
+        onOpen: jest.fn(),
+        onClose: jest.fn(),
+        onError: jest.fn(),
+        onMessage: jest.fn(),
+        onPong: jest.fn(),
+      },
+      100_000
+    )
+    raw.emit('close')
+    await expect(pending).rejects.toThrow('closed before opening')
+    expect(raw.listenerCount('open')).toBe(1)
+    expect(raw.listenerCount('close')).toBe(1)
+  })
+
+  it('close は旧 socket の SDK message 転送を停止する', () => {
+    const raw = new FakeRawWebSocket()
+    const sdkMessage = jest.fn()
+    raw.on('message', sdkMessage)
+    const adapter = new PipelineTransportAdapter()
+    adapter.close(fakeVRChat(raw, jest.fn()))
+    raw.emit('message', Buffer.from('{}'))
+    expect(sdkMessage).not.toHaveBeenCalled()
+  })
+})
+
 describe('PipelineTransportAdapter.getReadyState / ping / close', () => {
   it('raw socket の readyState を返す', () => {
     const rawWs = new FakeRawWebSocket()

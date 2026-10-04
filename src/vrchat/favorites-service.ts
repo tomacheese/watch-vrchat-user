@@ -9,7 +9,9 @@ const REFRESH_INTERVAL_MS = 60 * 60 * 1000
 /** FavoritesService の生成オプション */
 export interface FavoritesServiceOptions {
   /** お気に入りグループの取得関数 */
-  fetcher: () => Promise<Map<string, string[]>>
+  fetcher: (signal?: AbortSignal) => Promise<Map<string, string[]>>
+  /** 更新のタイムアウト（ミリ秒） */
+  timeoutMs?: number
   /** 現在時刻 (epoch ms) を返す関数 */
   now?: () => number
 }
@@ -26,6 +28,9 @@ export class FavoritesService {
   private lastUpdatedAt: string | null = null
   private lastError: string | null = null
   private timer: NodeJS.Timeout | undefined
+  private refreshPromise: Promise<void> | undefined
+  private controller: AbortController | undefined
+  private readonly timeoutMs: number
 
   /**
    * FavoritesService を初期化する
@@ -35,17 +40,47 @@ export class FavoritesService {
   constructor(options: FavoritesServiceOptions) {
     this.fetcher = options.fetcher
     this.now = options.now ?? (() => Date.now())
+    this.timeoutMs = options.timeoutMs ?? 30_000
   }
 
   /** お気に入りグループを再取得する。失敗時は last-known を維持する */
-  async refresh(): Promise<void> {
+  refresh(): Promise<void> {
+    this.refreshPromise ??= this.fetchGroups().finally(() => {
+      this.refreshPromise = undefined
+    })
+    return this.refreshPromise
+  }
+
+  /** 中断可能な更新を実行する。 */
+  private async fetchGroups(): Promise<void> {
+    const controller = new AbortController()
+    this.controller = controller
+    const timer = setTimeout(() => {
+      controller.abort(new Error('Favorites refresh timed out'))
+    }, this.timeoutMs)
     try {
-      this.groups = await this.fetcher()
+      const groups = await Promise.race([
+        this.fetcher(controller.signal),
+        new Promise<never>((_resolve, reject) => {
+          controller.signal.addEventListener(
+            'abort',
+            () => {
+              reject(toError(controller.signal.reason))
+            },
+            { once: true }
+          )
+        }),
+      ])
+      if (controller.signal.aborted) return
+      this.groups = groups
       this.lastUpdatedAt = new Date(this.now()).toISOString()
       this.lastError = null
     } catch (error) {
       this.lastError = toError(error).message
       logger.warn(`Failed to refresh favorites: ${this.lastError}`)
+    } finally {
+      clearTimeout(timer)
+      this.controller = undefined
     }
   }
 
@@ -62,6 +97,7 @@ export class FavoritesService {
 
   /** 定期更新を停止する */
   stop(): void {
+    this.controller?.abort(new Error('Favorites service stopped'))
     if (!this.timer) {
       return
     }
@@ -77,7 +113,7 @@ export class FavoritesService {
    * @returns グループ名の配列（未所属は空配列）
    */
   getGroups(userId: string): string[] {
-    return this.groups.get(userId) ?? []
+    return [...(this.groups.get(userId) ?? [])]
   }
 
   /** 最終更新時刻と直近のエラーを返す */

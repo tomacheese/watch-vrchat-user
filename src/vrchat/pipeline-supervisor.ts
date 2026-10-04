@@ -128,6 +128,8 @@ export class PipelineSupervisor {
   private pingTimeoutTimer: NodeJS.Timeout | null = null
   private lastProbeAt: number | null = null
   private probing = false
+  private backoffTimer: NodeJS.Timeout | null = null
+  private releaseBackoff: (() => void) | null = null
 
   private readonly probeDrift: (() => Promise<number | null>) | undefined
   private readonly probeTimeoutMs: number
@@ -279,6 +281,7 @@ export class PipelineSupervisor {
         )
       }
       const authCookie = await this.authCookieProvider()
+      if (myGeneration !== this.generation) return
 
       const callbacks = this.buildCallbacks(myGeneration)
       await this.transport.connect(this.vrchat, authCookie, callbacks)
@@ -307,6 +310,7 @@ export class PipelineSupervisor {
         reason: myGeneration === 0 ? 'startup' : 'reconnect',
       })
     } catch (error) {
+      if (myGeneration !== this.generation) return
       this.recordDiagnostic('connect-failed', {
         reason: myGeneration === 0 ? 'startup' : 'reconnect',
         errorType: safeErrorType(error),
@@ -486,6 +490,7 @@ export class PipelineSupervisor {
     this.clearTimers()
     this.state = 'reconnecting'
     this.transport.close(this.vrchat)
+    const reconnectGeneration = this.generation
 
     const delay = Math.min(
       this.initialBackoffMs * 2 ** this.reconnectAttempts,
@@ -498,18 +503,29 @@ export class PipelineSupervisor {
       attempt,
       backoffMs: delay,
     })
-    await new Promise((resolve) => setTimeout(resolve, delay))
+    await new Promise<void>((resolve) => {
+      this.releaseBackoff = resolve
+      this.backoffTimer = setTimeout(() => {
+        this.backoffTimer = null
+        this.releaseBackoff = null
+        resolve()
+      }, delay)
+    })
 
     // backoff 待機中に stop() が呼ばれ state が変わっている可能性があるため、
     // 型上は常に 'reconnecting' に見えてもこのチェックは必要（false positive）
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    if (this.state !== 'reconnecting') {
+    if (
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      this.state !== 'reconnecting' ||
+      reconnectGeneration !== this.generation
+    ) {
       return
     }
 
     try {
       await this.connectOnce()
     } catch (error) {
+      if (reconnectGeneration !== this.generation) return
       logger.error(
         `Reconnect attempt failed (errorType=${safeErrorType(error)})`
       )
@@ -587,6 +603,12 @@ export class PipelineSupervisor {
    * すべての liveness/ping タイマーを解除する
    */
   private clearTimers(): void {
+    if (this.backoffTimer) {
+      clearTimeout(this.backoffTimer)
+      this.backoffTimer = null
+      this.releaseBackoff?.()
+      this.releaseBackoff = null
+    }
     if (this.staleCheckTimer) {
       clearInterval(this.staleCheckTimer)
       this.staleCheckTimer = null

@@ -22,6 +22,9 @@ export interface ParsedConfigFile {
 }
 
 const MAX_WHEN_LENGTH = 4096
+const MAX_CONFIG_FILE_BYTES = 1024 * 1024
+const MAX_DESTINATIONS = 64
+const MAX_RULES = 256
 const WEBHOOK_PREFIX = 'https://discord.com/api/webhooks/'
 
 /**
@@ -204,6 +207,11 @@ export function parseConfigFile(
   text: string,
   env: NodeJS.ProcessEnv
 ): ParsedConfigFile {
+  if (Buffer.byteLength(text, 'utf8') > MAX_CONFIG_FILE_BYTES) {
+    throw new Error(
+      `Config exceeds the ${MAX_CONFIG_FILE_BYTES} byte size limit`
+    )
+  }
   let doc: unknown
   try {
     // 警告は process.emitWarning 経由でソース行（URL を含み得る）を出力するため抑止する
@@ -223,6 +231,12 @@ export function parseConfigFile(
     throw new Error('"version" must be 1')
   }
   const destinations = parseDestinations(doc.destinations, env)
+  if (Object.keys(destinations).length > MAX_DESTINATIONS) {
+    throw new Error(`Config exceeds the ${MAX_DESTINATIONS} destination limit`)
+  }
   const rules = parseRules(doc.rules ?? [], destinations)
+  if (rules.length > MAX_RULES) {
+    throw new Error(`Config exceeds the ${MAX_RULES} rule limit`)
+  }
   return { destinations, rules }
 }

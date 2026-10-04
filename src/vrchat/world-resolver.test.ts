@@ -3,6 +3,9 @@ import * as os from 'node:os'
 import path from 'node:path'
 import { WorldResolver } from './world-resolver'
 
+const fsPromises =
+  jest.requireActual<typeof import('node:fs/promises')>('node:fs/promises')
+
 const TTL = 24 * 60 * 60 * 1000
 
 describe('WorldResolver', () => {
@@ -211,5 +214,64 @@ describe('WorldResolver', () => {
     const result = await resolver.resolve('usr_a')
     expect(result.stale).toBe(true)
     warn.mockRestore()
+  })
+  it('初回の並行取得では読み込みと保存を共有し、すべての ID を保持する', async () => {
+    const read = jest.spyOn(fsPromises, 'readFile')
+    const write = jest.spyOn(fsPromises, 'writeFile')
+    try {
+      const resolver = create(
+        jest
+          .fn()
+          .mockImplementation((id: string) => Promise.resolve({ id, name: id }))
+      )
+      await Promise.all([
+        resolver.resolve('wrld_a'),
+        resolver.resolve('wrld_b'),
+      ])
+      expect(read).toHaveBeenCalledTimes(1)
+      expect(write).toHaveBeenCalledTimes(1)
+      expect(Object.keys(JSON.parse(fs.readFileSync(file, 'utf8')))).toEqual([
+        'wrld_a',
+        'wrld_b',
+      ])
+    } finally {
+      read.mockRestore()
+      write.mockRestore()
+    }
+  })
+
+  it('キャッシュの件数上限を超えると古い取得結果から削除する', async () => {
+    const resolver = new WorldResolver({
+      filePath: file,
+      now: () => now,
+      maxEntries: 2,
+      fetcher: (id) => Promise.resolve({ id, name: id }),
+    })
+    await resolver.resolve('wrld_a')
+    now += 1000
+    await resolver.resolve('wrld_b')
+    now += 1000
+    await resolver.resolve('wrld_c')
+    await resolver.flush()
+    expect(Object.keys(JSON.parse(fs.readFileSync(file, 'utf8')))).toEqual([
+      'wrld_b',
+      'wrld_c',
+    ])
+  })
+
+  it('stop は未完了の取得を中断し、遅い結果を保存しない', async () => {
+    const pending = Promise.withResolvers<{ id: string; name: string }>()
+    const fetcher = jest.fn().mockReturnValue(pending.promise)
+    const resolver = create(fetcher)
+    const result = resolver.resolve('wrld_a')
+    while (fetcher.mock.calls.length === 0)
+      await new Promise((resolve) => setImmediate(resolve))
+    const signal = (fetcher.mock.calls[0] as [string, AbortSignal])[1]
+    resolver.stop()
+    expect(signal.aborted).toBe(true)
+    await expect(result).resolves.toEqual({ stale: true })
+    pending.resolve({ id: 'wrld_a', name: 'Late' })
+    await resolver.flush()
+    expect(fs.existsSync(file)).toBe(false)
   })
 })

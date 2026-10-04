@@ -26,6 +26,12 @@ export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy'
 export interface HealthSnapshot {
   /** Pipeline supervisor の状態 */
   supervisorState: SupervisorState
+  /** baseline が保存済みか */
+  baselineCompleted?: boolean
+  /** 直近の REST 同期障害 */
+  lastReconciliationError?: string | null
+  /** 通知予定と配信障害 */
+  delivery?: import('../notifications/notification-outbox').DeliveryStatus
   /** raw WebSocket の readyState */
   rawReadyState: number
   /** 現在の connection generation */
@@ -70,6 +76,7 @@ export interface HealthSnapshot {
 export function evaluateStatus(snapshot: HealthSnapshot): HealthStatus {
   if (
     snapshot.supervisorState !== 'ready' ||
+    snapshot.baselineCompleted === false ||
     snapshot.unhealthyUsers.length > 0
   ) {
     return 'unhealthy'
@@ -77,7 +84,15 @@ export function evaluateStatus(snapshot: HealthSnapshot): HealthStatus {
   const isDegraded =
     snapshot.config.lastReloadError !== null ||
     snapshot.ruleErrors.length > 0 ||
-    snapshot.favorites.lastError !== null
+    snapshot.favorites.lastError !== null ||
+    Boolean(snapshot.lastReconciliationError) ||
+    Boolean(snapshot.delivery?.lastError) ||
+    (snapshot.delivery?.blocked ?? 0) > 0 ||
+    (snapshot.delivery?.uncertain ?? 0) > 0 ||
+    Boolean(
+      snapshot.delivery?.oldestPendingAt &&
+      Date.now() - Date.parse(snapshot.delivery.oldestPendingAt) > 60_000
+    )
   return isDegraded ? 'degraded' : 'healthy'
 }
 

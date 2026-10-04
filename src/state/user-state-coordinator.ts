@@ -1,5 +1,6 @@
 import { Logger } from '@book000/node-utils'
 import type { ConfigSnapshot } from '../config/config-snapshot'
+import type { PersistedEffect } from '../notifications/outbox-types'
 import { toError } from '../logger-utils'
 import { parseLocation } from './location'
 import type { UserState } from './user-state'
@@ -28,11 +29,21 @@ export interface UserStateCoordinatorOptions {
   maxBackoffMs?: number
   /** 1 ユーザーあたりの queue 最大長 */
   maxQueueSize?: number
+  /** 通知予定を state と同時に永続化できる形式へ変換する */
+  prepareEffects?: (
+    userId: string,
+    displayName: string,
+    effects: Exclude<ReducerEffect, { type: 'no-op' }>[],
+    snapshot: ConfigSnapshot,
+    receivedAt?: string
+  ) => PersistedEffect[]
+  /** 永続化済み通知の処理を起こす */
+  onCommitted?: () => void
 }
 
 /** per-user queue に積まれる 1 件分の observation */
 interface QueueItem {
-  /** enqueue 時点で解決済みの表示名 */
+  /** 表示名（ユーザー ID と同じ場合は処理時に補完する） */
   displayName: string
   /** 観測値 */
   observation: UserObservation
@@ -40,6 +51,8 @@ interface QueueItem {
   snapshot: ConfigSnapshot
   /** enqueue 時点で baseline 構築中だったか（true の間は通知 effect を生成しない） */
   baseline: boolean
+  /** 受信時刻。永続化 retry や配信遅延でも変更しない */
+  receivedAt: string
 }
 
 /**
@@ -76,6 +89,9 @@ export class UserStateCoordinator {
   private readonly processing = new Set<string>()
   private readonly lastSeq = new Map<string, number>()
   private readonly unhealthy = new Map<string, UnhealthyInfo>()
+  private accepting = true
+  private stopping = false
+  private readonly retryWaiters = new Set<() => void>()
   private readonly drainWaiters = new Set<() => void>()
   private readonly initialBackoffMs: number
   private readonly maxBackoffMs: number
@@ -98,7 +114,7 @@ export class UserStateCoordinator {
       snapshot: ConfigSnapshot
     ) => Promise<void>,
     private readonly getSnapshot: () => ConfigSnapshot,
-    options: UserStateCoordinatorOptions = {}
+    private readonly options: UserStateCoordinatorOptions = {}
   ) {
     this.initialBackoffMs =
       options.initialBackoffMs ?? DEFAULT_INITIAL_BACKOFF_MS
@@ -110,7 +126,7 @@ export class UserStateCoordinator {
    * observation を queue に追加し、処理ループが停止していれば起動する
    *
    * `displayName` が `userId` と同一（呼び出し元が表示名を持たない場合の
-   * フォールバック）のときは Repository が保持する既存の表示名で補完する。
+   * フォールバック）のときは処理時点で Repository が保持する表示名で補完する。
    *
    * 設定スナップショットと baseline フラグは enqueue 時点で確定し item に添付する。
    *
@@ -127,10 +143,7 @@ export class UserStateCoordinator {
     displayName: string,
     observation: UserObservation
   ): void {
-    const resolvedDisplayName =
-      displayName === userId
-        ? (this.repository.get(userId)?.displayName ?? displayName)
-        : displayName
+    if (!this.accepting) return
 
     this.lastSeq.set(userId, (this.lastSeq.get(userId) ?? 0) + 1)
 
@@ -146,12 +159,59 @@ export class UserStateCoordinator {
     }
 
     queue.push({
-      displayName: resolvedDisplayName,
+      displayName,
       observation,
       snapshot: this.getSnapshot(),
       baseline: !this.repository.isBaselineCompleted(),
+      receivedAt: new Date().toISOString(),
     })
     this.startProcessingQueue(userId)
+  }
+
+  /** 新しい observation の受付を終了する */
+  stopAccepting(): void {
+    this.accepting = false
+  }
+
+  /**
+   * 残った queue を期限内に処理し、終了中の永続化失敗は再試行しない
+   *
+   * @param timeoutMs 終了処理の制限時間
+   * @returns 全 observation を処理できた場合は true
+   */
+  async stop(timeoutMs = 10_000): Promise<boolean> {
+    this.stopAccepting()
+    this.stopping = true
+    for (const wake of this.retryWaiters) wake()
+    let timer: NodeJS.Timeout | undefined
+    let timedOut = false
+    const finished = async (): Promise<boolean> => {
+      while (this.processing.size > 0) {
+        if (timedOut) return false
+        await new Promise<void>((resolve) => {
+          this.drainWaiters.add(resolve)
+        })
+      }
+      return (
+        !timedOut &&
+        this.queues.values().every((queue) => queue.length === 0) &&
+        this.unhealthy.values().every((info) => info.cause !== 'queue-overflow')
+      )
+    }
+    try {
+      return await Promise.race([
+        finished(),
+        new Promise<boolean>((resolve) => {
+          timer = setTimeout(() => {
+            timedOut = true
+            this.notifyDrainWaiters()
+            resolve(false)
+          }, timeoutMs)
+        }),
+      ])
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
   }
 
   /**
@@ -195,6 +255,13 @@ export class UserStateCoordinator {
     expectedSeq: number
   ): boolean {
     if ((this.lastSeq.get(userId) ?? 0) !== expectedSeq) {
+      return false
+    }
+    if (
+      !this.accepting ||
+      (this.queues.get(userId)?.length ?? 0) >= this.maxQueueSize
+    ) {
+      if (this.accepting) this.markUnhealthy(userId, 'queue-overflow')
       return false
     }
     this.enqueue(userId, displayName, observation)
@@ -289,27 +356,40 @@ export class UserStateCoordinator {
 
         const item = queue[0]
         const current = this.repository.get(userId)
+        const displayName =
+          item.displayName === userId
+            ? (current?.displayName ?? item.displayName)
+            : item.displayName
         const { nextState, deleteUser, effect, followUp, statusEffect } =
-          reduce(
-            userId,
-            current,
-            item.displayName,
-            item.observation,
-            item.baseline
-          )
+          reduce(userId, current, displayName, item.observation, item.baseline)
 
         try {
+          const effects = [effect, followUp, statusEffect].filter(
+            (value): value is Exclude<ReducerEffect, { type: 'no-op' }> =>
+              value !== undefined && value.type !== 'no-op'
+          )
+          const pending = this.options.prepareEffects?.(
+            userId,
+            displayName,
+            effects,
+            item.snapshot,
+            item.receivedAt
+          )
           if (deleteUser) {
-            await this.repository.deleteUser(userId)
+            await this.repository.deleteUser(userId, pending)
           } else if (nextState && nextState !== current) {
-            await this.repository.commitUserState(userId, {
-              ...nextState,
+            await this.repository.commitUserState(
               userId,
-            })
+              {
+                ...nextState,
+                userId,
+              },
+              pending
+            )
           }
           if (deleteUser || (nextState && nextState !== current)) {
             logger.info(
-              `State changed: user=${userId} (${item.displayName}) ${describeState(current)} -> ${describeState(nextState)} effects=${[effect, followUp, statusEffect].flatMap((e) => (e && e.type !== 'no-op' ? [e.type] : [])).join(',') || 'none'}${item.baseline ? ' baseline' : ''}`
+              `State changed: user=${userId} (${displayName}) ${describeState(current)} -> ${describeState(nextState)} effects=${[effect, followUp, statusEffect].flatMap((e) => (e && e.type !== 'no-op' ? [e.type] : [])).join(',') || 'none'}${item.baseline ? ' baseline' : ''}`
             )
           }
           queue.shift()
@@ -320,21 +400,26 @@ export class UserStateCoordinator {
             this.unhealthy.delete(userId)
           }
 
+          if (this.options.prepareEffects) {
+            try {
+              this.options.onCommitted?.()
+            } catch (error) {
+              logger.error('Failed to wake notification outbox', toError(error))
+            }
+            continue
+          }
           for (const e of [effect, followUp, statusEffect]) {
             if (e === undefined || e.type === 'no-op') continue
-            await this.onEffect(
-              userId,
-              item.displayName,
-              e,
-              item.snapshot
-            ).catch((error: unknown) => {
-              // 通知失敗はログのみ。persist 済みの state は既に確定しているため、
-              // 通知の再送は行わず次の observation の処理を継続する。
-              logger.error(
-                `Failed to dispatch effect for user ${userId}`,
-                toError(error)
-              )
-            })
+            await this.onEffect(userId, displayName, e, item.snapshot).catch(
+              (error: unknown) => {
+                // 通知失敗はログのみ。persist 済みの state は既に確定しているため、
+                // 通知の再送は行わず次の observation の処理を継続する。
+                logger.error(
+                  `Failed to dispatch effect for user ${userId}`,
+                  toError(error)
+                )
+              }
+            )
           }
         } catch (error) {
           this.markUnhealthy(userId, 'persist-failure')
@@ -342,6 +427,7 @@ export class UserStateCoordinator {
             `Failed to persist state for user ${userId}`,
             toError(error)
           )
+          if (this.stopping) return
           const delay = Math.min(
             this.initialBackoffMs * 2 ** attempt,
             this.maxBackoffMs
@@ -356,7 +442,7 @@ export class UserStateCoordinator {
       // sleep 中に enqueue が呼ばれ、ループを抜けた直後に新規アイテムが積まれている
       // 可能性があるため、queue が空でなければ処理ループを再起動する
       const queue = this.queues.get(userId)
-      if (queue && queue.length > 0) {
+      if (queue && !this.stopping && queue.length > 0) {
         this.startProcessingQueue(userId)
       }
     }
@@ -380,13 +466,17 @@ export class UserStateCoordinator {
   }
 
   /**
-   * 指定ユーザーを unhealthy としてマークする（既に unhealthy な場合は何もしない）
+   * 指定ユーザーを unhealthy としてマークする（回復不能な overflow を優先する）
    *
    * @param userId ユーザー ID
    * @param cause unhealthy の原因
    */
   private markUnhealthy(userId: string, cause: string): void {
-    if (this.unhealthy.has(userId)) {
+    const previous = this.unhealthy.get(userId)
+    if (
+      previous &&
+      (cause !== 'queue-overflow' || previous.cause === 'queue-overflow')
+    ) {
       return
     }
     this.unhealthy.set(userId, { cause, since: new Date().toISOString() })
@@ -399,6 +489,16 @@ export class UserStateCoordinator {
    * @param ms 待機するミリ秒
    */
   private async sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms))
+    if (this.stopping) return
+    await new Promise<void>((resolve) => {
+      const retry: { timer?: NodeJS.Timeout } = {}
+      const wake = (): void => {
+        clearTimeout(retry.timer)
+        this.retryWaiters.delete(wake)
+        resolve()
+      }
+      retry.timer = setTimeout(wake, ms)
+      this.retryWaiters.add(wake)
+    })
   }
 }

@@ -11,6 +11,8 @@ export interface CompiledRule {
   enabled: boolean
   /** 通知先 destination 名 */
   destinations: string[]
+  /** Worker と永続 outbox で再構築する元の CEL 式 */
+  when?: string
   /** compile 済みの条件式 */
   program: CompiledProgram
 }

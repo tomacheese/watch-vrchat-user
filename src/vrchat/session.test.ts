@@ -350,3 +350,214 @@ describe('getInstanceOwnerInfo', () => {
     ).rejects.toThrow('not found')
   })
 })
+
+describe('VRChatSession REST authentication recovery', () => {
+  let directory: string
+  let session: VRChatSession | undefined
+  let fetchSpy: jest.SpyInstance
+  const config = {
+    vrchat: {
+      username: 'test-user',
+      password: 'test-password',
+      totpSecret: 'unused',
+    },
+    configPath: 'unused',
+  }
+
+  beforeEach(() => {
+    const fs = jest.requireActual<typeof import('node:fs')>('node:fs')
+    const os = jest.requireActual<typeof import('node:os')>('node:os')
+    const path = jest.requireActual<typeof import('node:path')>('node:path')
+    const { KeyvFile: RealKeyvFile } =
+      jest.requireActual<typeof import('keyv-file')>('keyv-file')
+    directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vrchat-session-test-'))
+    ;(KeyvFile as unknown as jest.Mock).mockImplementation(
+      (options: object) =>
+        new RealKeyvFile({
+          ...options,
+          filename: path.join(directory, 'cookies.json'),
+        })
+    )
+    fetchSpy = jest.spyOn(globalThis, 'fetch')
+  })
+
+  afterEach(async () => {
+    session?.stop()
+    await session?.flush()
+    session = undefined
+    fetchSpy.mockRestore()
+    const fs = jest.requireActual<typeof import('node:fs')>('node:fs')
+    fs.rmSync(directory, { recursive: true, force: true })
+  })
+
+  it('失効時は並行する Cookie 検証と login を共有し、SDK Pipeline を作り直さない', async () => {
+    let loginCount = 0
+    let revoked = false
+    fetchSpy.mockImplementation(async (input: Request) => {
+      await Promise.resolve()
+      if (input.headers.has('authorization')) {
+        loginCount++
+        return Response.json(
+          { id: 'usr_test', displayName: 'Test' },
+          {
+            headers: {
+              'set-cookie': `auth=test_${loginCount}; Max-Age=3600; Path=/`,
+            },
+          }
+        )
+      }
+      return !input.headers.has('cookie') ||
+        (revoked && input.headers.get('cookie')?.includes('test_1'))
+        ? Response.json(
+            { error: { message: 'Unauthorized', status_code: 401 } },
+            { status: 401 }
+          )
+        : Response.json({ id: 'usr_test', displayName: 'Test' })
+    })
+    session = await VRChatSession.create(config)
+    const authenticate = jest.spyOn(session.client.pipeline, 'authenticate')
+    revoked = true
+    const first = session.getAuthenticatedCookie()
+    const second = session.getAuthenticatedCookie()
+    expect(first).toBe(second)
+    await expect(first).resolves.toBe('test_2')
+    expect(loginCount).toBe(2)
+    expect(authenticate).not.toHaveBeenCalled()
+    authenticate.mockRestore()
+  })
+
+  it('REST 401 も再認証後に元の API を 1 回だけ再試行する', async () => {
+    let loginCount = 0
+    let worldCount = 0
+    fetchSpy.mockImplementation(async (input: Request) => {
+      await Promise.resolve()
+      if (input.headers.has('authorization')) {
+        loginCount++
+        return Response.json(
+          { id: 'usr_test', displayName: 'Test' },
+          {
+            headers: {
+              'set-cookie': `auth=test_${loginCount}; Max-Age=3600; Path=/`,
+            },
+          }
+        )
+      }
+      if (new URL(input.url).pathname.includes('/worlds/')) {
+        worldCount++
+        return worldCount === 1
+          ? Response.json(
+              { error: { message: 'Unauthorized', status_code: 401 } },
+              { status: 401 }
+            )
+          : Response.json({ id: 'wrld_test', name: 'World', capacity: 16 })
+      }
+      return input.headers.has('cookie')
+        ? Response.json({ id: 'usr_test', displayName: 'Test' })
+        : Response.json(
+            { error: { message: 'Unauthorized', status_code: 401 } },
+            { status: 401 }
+          )
+    })
+    session = await VRChatSession.create(config)
+    const authenticate = jest.spyOn(session.client.pipeline, 'authenticate')
+    await expect(
+      getWorldInfo(session.client, 'wrld_test')
+    ).resolves.toMatchObject({ name: 'World', capacity: 16 })
+    expect(worldCount).toBe(2)
+    expect(loginCount).toBe(2)
+    expect(authenticate).not.toHaveBeenCalled()
+    authenticate.mockRestore()
+  })
+
+  it('遅れて届いた旧 Cookie の 401 は再認証を重複させない', async () => {
+    let loginCount = 0
+    let oldRequests = 0
+    const started = Promise.withResolvers<undefined>()
+    const late = Promise.withResolvers<Response>()
+    const unauthorized = (): Response =>
+      Response.json(
+        { error: { message: 'Unauthorized', status_code: 401 } },
+        { status: 401 }
+      )
+    fetchSpy.mockImplementation(async (input: Request) => {
+      await Promise.resolve()
+      if (input.headers.has('authorization')) {
+        loginCount++
+        return Response.json(
+          { id: 'usr_test', displayName: 'Test' },
+          {
+            headers: {
+              'set-cookie': `auth=test_${loginCount}; Max-Age=3600; Path=/`,
+            },
+          }
+        )
+      }
+      if (new URL(input.url).pathname.includes('/worlds/')) {
+        if (input.headers.get('cookie')?.includes('test_1')) {
+          const request = ++oldRequests
+          if (oldRequests === 2) started.resolve(undefined)
+          await started.promise
+          return request === 1 ? unauthorized() : late.promise
+        }
+        return Response.json({ id: 'wrld_test', name: 'World', capacity: 16 })
+      }
+      return input.headers.has('cookie')
+        ? Response.json({ id: 'usr_test', displayName: 'Test' })
+        : unauthorized()
+    })
+    session = await VRChatSession.create(config)
+    const first = getWorldInfo(session.client, 'wrld_test')
+    const second = getWorldInfo(session.client, 'wrld_test')
+    await first
+    late.resolve(unauthorized())
+    await second
+    expect(loginCount).toBe(2)
+  })
+
+  it('stop は実際の fetch の signal を中断する', async () => {
+    fetchSpy.mockImplementation((input: Request) =>
+      Promise.resolve(
+        Response.json(
+          { id: 'usr_test', displayName: 'Test' },
+          {
+            headers: input.headers.has('authorization')
+              ? { 'set-cookie': 'auth=test; Max-Age=3600; Path=/' }
+              : undefined,
+          }
+        )
+      )
+    )
+    // Cookie がない復元確認は未認証として返す。
+    fetchSpy.mockImplementationOnce(() =>
+      Promise.resolve(
+        Response.json(
+          { error: { message: 'Unauthorized', status_code: 401 } },
+          { status: 401 }
+        )
+      )
+    )
+    session = await VRChatSession.create(config)
+    let requestSignal: AbortSignal | undefined
+    const started = Promise.withResolvers<undefined>()
+    fetchSpy.mockImplementation((_input: Request, init: RequestInit) => {
+      if (!init.signal) throw new Error('Request signal missing')
+      requestSignal = init.signal
+      started.resolve(undefined)
+      return new Promise((_resolve, reject) =>
+        requestSignal?.addEventListener(
+          'abort',
+          () => {
+            reject(new Error('Aborted'))
+          },
+          { once: true }
+        )
+      )
+    })
+    const pending = getWorldInfo(session.client, 'wrld_test')
+    const assertion = expect(pending).rejects.toThrow()
+    await started.promise
+    session.stop()
+    await assertion
+    expect(requestSignal?.aborted).toBe(true)
+  })
+})

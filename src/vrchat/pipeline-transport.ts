@@ -11,6 +11,9 @@ export interface RawWebSocket {
   on(event: 'error', listener: (error: Error) => void): void
   on(event: 'message', listener: (data: Buffer) => void): void
   ping(): void
+  removeListener?(event: string, listener: (...args: never[]) => void): void
+  removeAllListeners?(event: string): void
+  terminate?(): void
 }
 
 /** raw WebSocket lifecycle / liveness イベントのコールバック */
@@ -122,7 +125,11 @@ export class PipelineTransportAdapter implements PipelineTransport {
    */
   close(vrchat: VRChat): void {
     try {
+      const raw = this.getRawWebSocket(vrchat)
+      // SDK の旧 socket から共有 emitter への business event 転送を止める。
+      raw.removeAllListeners?.('message')
       vrchat.pipeline.close()
+      raw.terminate?.()
     } catch {
       logger.warn('Failed to close pipeline (best-effort)')
     }
@@ -161,16 +168,37 @@ export class PipelineTransportAdapter implements PipelineTransport {
     }
 
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const timeout: { timer?: NodeJS.Timeout } = {}
+      const listeners = new Map<string, () => void>()
+      function cleanup(): void {
+        clearTimeout(timeout.timer)
+        for (const [event, listener] of listeners)
+          rawWs.removeListener?.(event, listener)
+      }
+      function onOpen(): void {
+        cleanup()
+        resolve()
+      }
+      function onClose(): void {
+        cleanup()
+        reject(new Error('Pipeline closed before opening'))
+      }
+      function onError(): void {
+        cleanup()
+        reject(new Error('Pipeline failed before opening'))
+      }
+      timeout.timer = setTimeout(() => {
+        cleanup()
         reject(
           new Error(`Pipeline WebSocket open timed out after ${timeoutMs}ms`)
         )
       }, timeoutMs)
-
-      rawWs.on('open', () => {
-        clearTimeout(timer)
-        resolve()
-      })
+      listeners.set('open', onOpen)
+      listeners.set('close', onClose)
+      listeners.set('error', onError)
+      rawWs.on('open', onOpen)
+      rawWs.on('close', onClose)
+      rawWs.on('error', onError)
     })
   }
 }

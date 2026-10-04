@@ -5,7 +5,7 @@ import { parseLocation } from '../state/location'
 import type { ReducerEffect } from '../state/user-state-reducer'
 import type { UserState } from '../state/user-state'
 import { buildContext } from '../rules/rule-context'
-import { evaluateRules } from '../rules/rule-engine'
+import { evaluateRules, type EvaluationResult } from '../rules/rule-engine'
 import type { WorldResolveResult } from '../vrchat/world-resolver'
 import { toError } from '../logger-utils'
 import { buildEmbed } from './embed-builder'
@@ -24,6 +24,10 @@ export interface NotificationDispatcherDeps {
       embed: DiscordEmbed
     ): Promise<void>
   }
+  evaluateRules?: (
+    rules: ConfigSnapshot['rules'],
+    context: Record<string, unknown>
+  ) => Promise<EvaluationResult>
   errorLog: {
     record(ruleName: string, kind: string, message: string, now: number): void
   }
@@ -32,6 +36,13 @@ export interface NotificationDispatcherDeps {
 /**
  * effect をルール評価し、一致した destination へ通知するクラス
  */
+/** 送信前に永続化できる通知内容 */
+export interface PreparedNotification {
+  name: string
+  url: string
+  embed: DiscordEmbed
+}
+
 export class NotificationDispatcher {
   /**
    * NotificationDispatcher を初期化する
@@ -54,7 +65,31 @@ export class NotificationDispatcher {
     effect: ReducerEffect,
     snapshot: ConfigSnapshot
   ): Promise<void> {
-    if (effect.type === 'no-op') return
+    const notifications = await this.prepareEffect(userId, effect, snapshot)
+    const results = await Promise.allSettled(
+      notifications.map(async ({ name, url, embed }) => {
+        await this.deps.notifier.send(name, url, embed)
+      })
+    )
+    for (const [index, result] of results.entries()) {
+      if (result.status !== 'rejected') continue
+      const { name, url } = notifications[index]
+      const message = toError(result.reason)
+        .message.split(url)
+        .join('[redacted]')
+      logger.error(`Failed to notify destination "${name}": ${message}`)
+    }
+  }
+
+  /** effect を評価し、配信内容を作る。送信は outbox の保存後に行う */
+  async prepareEffect(
+    userId: string,
+    effect: ReducerEffect,
+    snapshot: ConfigSnapshot,
+    evaluatedAt: Date = new Date()
+  ): Promise<PreparedNotification[]> {
+    if (effect.type === 'no-op') return []
+    if (snapshot.rules.every((rule) => !rule.enabled)) return []
 
     const [previous, current] = await Promise.all([
       this.resolveWorld(effect.previous),
@@ -63,10 +98,10 @@ export class NotificationDispatcher {
     const worlds = { previous, current }
     // friend-delete でも membership は除去しない（次回の Favorites 更新で置き換わる）
     const membership = this.deps.favorites.getGroups(userId)
-    const { matched, errors } = evaluateRules(
-      snapshot.rules,
-      buildContext(effect, membership, worlds)
-    )
+    const context = buildContext(effect, membership, worlds, evaluatedAt)
+    const { matched, errors } = this.deps.evaluateRules
+      ? await this.deps.evaluateRules(snapshot.rules, context)
+      : evaluateRules(snapshot.rules, context)
     for (const error of errors) {
       this.deps.errorLog.record(
         error.rule,
@@ -77,7 +112,7 @@ export class NotificationDispatcher {
     }
     if (matched.length === 0) {
       logger.info(`No rule matched: event=${effect.type} user=${userId}`)
-      return
+      return []
     }
 
     // owner は表示専用のため、一致したときだけ解決する
@@ -102,38 +137,27 @@ export class NotificationDispatcher {
       `Matched rules: event=${effect.type} user=${userId} ${matched.join(', ')} -> destinations: ${byDestination.keys().toArray().join(', ')}`
     )
 
-    const entries = [...byDestination]
-    const results = await Promise.allSettled(
-      entries.map(async ([name, ruleNames]) => {
-        const destination = snapshot.destinations[name] as
-          DestinationConfig | undefined
-        if (destination === undefined) {
-          logger.warn(`Destination "${name}" is not defined, skipping`)
-          return
-        }
-        await this.deps.notifier.send(
+    return [...byDestination].flatMap(([name, ruleNames]) => {
+      const destination = snapshot.destinations[name] as
+        DestinationConfig | undefined
+      if (!destination) {
+        logger.warn(`Destination "${name}" is not defined, skipping`)
+        return []
+      }
+      return [
+        {
           name,
-          destination.url,
-          buildEmbed(
+          url: destination.url,
+          embed: buildEmbed(
             effect,
             worlds,
             ruleNames,
-            new Date().toISOString(),
+            evaluatedAt.toISOString(),
             owners
-          )
-        )
-      })
-    )
-    for (const [index, result] of results.entries()) {
-      if (result.status !== 'rejected') continue
-      const [name] = entries[index]
-      // URL がエラー文言に含まれていても出さない
-      const url = snapshot.destinations[name].url
-      const message = toError(result.reason)
-        .message.split(url)
-        .join('[redacted]')
-      logger.error(`Failed to notify destination "${name}": ${message}`)
-    }
+          ),
+        },
+      ]
+    })
   }
 
   /** 可視な Location のワールドを解決する。失敗は「名前なし」として扱う */

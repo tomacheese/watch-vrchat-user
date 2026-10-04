@@ -55,6 +55,45 @@ class FakeTransport implements PipelineTransport {
 const fakeVrchat = {} as VRChat
 
 describe('PipelineSupervisor', () => {
+  it('stop は再接続 backoff のタイマーも解放する', async () => {
+    jest.useFakeTimers()
+    try {
+      const transport = new FakeTransport()
+      const supervisor = new PipelineSupervisor(
+        fakeVrchat,
+        transport,
+        jest.fn().mockResolvedValue(undefined),
+        { initialBackoffMs: 100_000 }
+      )
+      await supervisor.start(() => Promise.resolve('cookie'))
+      supervisor.requestReconnect('manual')
+      supervisor.stop()
+      await Promise.resolve()
+      expect(jest.getTimerCount()).toBe(0)
+      expect(transport.callbacksByGeneration).toHaveLength(1)
+      expect(supervisor.getState()).toBe('stopped')
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+  it('Cookie 待機中の stop は後続の接続を禁止する', async () => {
+    const cookie = Promise.withResolvers<string>()
+    const transport = new FakeTransport()
+    const synchronize = jest.fn()
+    const supervisor = new PipelineSupervisor(
+      fakeVrchat,
+      transport,
+      synchronize
+    )
+    const start = supervisor.start(() => cookie.promise)
+    supervisor.stop()
+    cookie.resolve('late-cookie')
+    await start
+    expect(transport.callbacksByGeneration).toHaveLength(0)
+    expect(synchronize).not.toHaveBeenCalled()
+    expect(supervisor.getState()).toBe('stopped')
+  })
+
   it('raw open 前は ready にならず、synchronize 完了後に ready になる', async () => {
     const transport = new FakeTransport()
     let synchronizeResolve = (): void => undefined

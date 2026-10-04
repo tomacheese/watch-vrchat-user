@@ -69,6 +69,27 @@ rules: []
     expect(parseConfigFile(text, {}).rules).toEqual([])
   })
 
+  it('総容量・通知先数・ルール数に上限を設ける', () => {
+    expect(errorOf(' '.repeat(1024 * 1024 + 1))).toMatch(/byte size limit/)
+    const destinations = Array.from(
+      { length: 65 },
+      (_, index) => `  d${index}: { type: discord-webhook, url: ${URL} }`
+    ).join('\n')
+    expect(
+      errorOf(`version: 1\ndestinations:\n${destinations}\nrules: []`)
+    ).toMatch(/destination limit/)
+    const rules = Array.from(
+      { length: 257 },
+      (_, index) =>
+        `  - name: rule-${index}\n    when: 'true'\n    destinations: [main]`
+    ).join('\n')
+    expect(
+      errorOf(
+        `version: 1\ndestinations:\n  main: { type: discord-webhook, url: ${URL} }\nrules:\n${rules}`
+      )
+    ).toMatch(/rule limit/)
+  })
+
   const cases: [string, string, string, RegExp][] = [
     ['duplicate rule name', 'name: off', 'name: dance-world', /Duplicate rule/],
     [

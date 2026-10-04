@@ -339,6 +339,33 @@ describe('reduce (ステータス / ステータスメッセージ)', () => {
     expect(result.nextState?.status).toBeUndefined()
   })
 
+  it('REST snapshot は未確認のprofile項目だけ初期化し、status-change を返さない', () => {
+    const current = state({ status: 'active' })
+    const result = run(current, {
+      type: 'profile',
+      profile: { status: 'busy', statusDescription: '作業中' },
+      profileBaseline: true,
+    })
+
+    expect(result.statusEffect).toBeUndefined()
+    expect(result.nextState).toMatchObject({
+      status: 'active',
+      statusDescription: '作業中',
+    })
+  })
+
+  it('REST snapshot は確認済みのprofile項目を上書きしない', () => {
+    const current = state({ status: 'active', statusDescription: 'a' })
+    const result = run(current, {
+      type: 'profile',
+      profile: { status: 'busy', statusDescription: 'b' },
+      profileBaseline: true,
+    })
+
+    expect(result.statusEffect).toBeUndefined()
+    expect(result.nextState).toBe(current)
+  })
+
   it('status が初めて確認されるのと同時のメッセージ変更では、status は変化として扱わない', () => {
     const result = run(state({ statusDescription: 'a' }), {
       type: 'profile',

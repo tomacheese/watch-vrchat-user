@@ -27,6 +27,7 @@ VRChat の全フレンドの状態変化 (オンライン / オフライン / Lo
 - 2FA コードの対話的プロンプト (`vrchat/session.ts`)。TOTP シークレット未設定時の想定動作。
 - `friend-update` のペイロード形状は実機で検証済みであり、router 側の型ガードは `status` / `statusDescription` が文字列でないペイロード (プロフィールの他項目のみを変更する更新など) を無視する点 (意図した挙動)。
 - ステータス未記録 (offline のまま等) でもメッセージが記録済みなら `status-change` を通知する点 (項目ごとの判定による意図した挙動)。
+- Friends API snapshot の profile は未確認項目の初期化にのみ使い、確認済み値を上書きせず、`status-change` は生成しない点 (REST snapshot は状態の読み取りであり、遷移イベントではない)。
 - ヘルスチェックサーバー (`health/health-service.ts`) が localhost のみで待ち受ける点 (意図的)。
 
 ## テスト

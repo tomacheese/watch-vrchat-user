@@ -136,7 +136,39 @@ describe('Reconciler.reconcileAll', () => {
     expect(appendSpy).toHaveBeenCalledWith(
       'usr_1',
       'Alice',
-      { type: 'location', location: 'wrld_a', profile },
+      {
+        type: 'location',
+        location: 'wrld_a',
+        profile,
+        profileBaseline: true,
+      },
+      0
+    )
+  })
+
+  it('REST snapshot の profile は status-change ではなく初期値として追記する', async () => {
+    const { coordinator, reconciler } = setup()
+    const appendSpy = jest.spyOn(coordinator, 'appendSnapshotObservation')
+    const profile = { status: 'busy', statusDescription: '作業中' }
+    mockSnapshot({
+      usr_1: {
+        displayName: 'Alice',
+        location: 'wrld_a',
+        profile,
+      },
+    })
+
+    await reconciler.reconcileAll()
+
+    expect(appendSpy).toHaveBeenCalledWith(
+      'usr_1',
+      'Alice',
+      {
+        type: 'location',
+        location: 'wrld_a',
+        profile,
+        profileBaseline: true,
+      },
       0
     )
   })

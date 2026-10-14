@@ -3,7 +3,7 @@ allowBuilds:
   esbuild: true
   unrs-resolver: true
 minimumReleaseAgeExclude:
-  - vrchat@2.24.0
+  - vrchat@2.26.0
   - '@book000/*'
 patchedDependencies:
-  vrchat@2.24.0: patches/vrchat@2.24.0.patch
+  vrchat@2.26.0: patches/vrchat@2.26.0.patch

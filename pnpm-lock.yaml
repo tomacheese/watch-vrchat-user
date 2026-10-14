@@ -163,7 +163,7 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  vrchat@2.24.0: 5df3146aeb71dbb25f421a2290f034d79e3c5d5f3f18294b77892e5c700a8dbc
+  vrchat@2.26.0: f66d70dc1e1c46d2972e2afdfdca0aac26574d98715a2ae975f867aacecb3b5b
 
 importers:
 
@@ -182,8 +182,8 @@ importers:
         specifier: 5.3.5
         version: 5.3.5
       vrchat:
-        specifier: 2.24.0
-        version: 2.24.0(patch_hash=5df3146aeb71dbb25f421a2290f034d79e3c5d5f3f18294b77892e5c700a8dbc)(supports-color@8.1.1)
+        specifier: 2.26.0
+        version: 2.26.0(patch_hash=f66d70dc1e1c46d2972e2afdfdca0aac26574d98715a2ae975f867aacecb3b5b)(supports-color@8.1.1)
       yaml:
         specifier: 2.9.1
         version: 2.9.1
@@ -3291,8 +3291,8 @@ packages:
     resolution: {integrity: sha512-kiGUalWN+rgBJ/1OHZsBtU4rXZOfj/7rKQxULKlIzwzQSvMJUUNgPwJEEh7gU6xEVxC0ahoOBvN2YI8GH6FNgA==}
     engines: {node: '>=10.12.0'}
 
-  vrchat@2.24.0:
-    resolution: {integrity: sha512-77DMhJRmYEPuC+KY2N3SSWBM9bIpVU/gIWugHXKC7W69q6FsV9XUpy/4kTfQJYWV1CydMQqhKaj4TKTAsYASag==}
+  vrchat@2.26.0:
+    resolution: {integrity: sha512-i4UkZHCFIbKt46Ep+AK/tU8OrIaUuput0fUSjqR0muY+O2B05QAlkJrdeEwbBnh2eHs5hK18uGzztA2TfNe6rA==}
 
   which-boxed-primitive@1.1.1:
     resolution: {integrity: sha512-TbX3mj8n0odCBFVlY8AxkqcHASw3L60jIuF8jFP78az3C2YhmGvqbHBpAjTRH2/xqYunrJ9g1jSyjCjpoWzIAA==}
@@ -6909,7 +6909,7 @@ snapshots:
       '@types/istanbul-lib-coverage': 2.0.6
       convert-source-map: 2.0.0
 
-  vrchat@2.24.0(patch_hash=5df3146aeb71dbb25f421a2290f034d79e3c5d5f3f18294b77892e5c700a8dbc)(supports-color@8.1.1):
+  vrchat@2.26.0(patch_hash=f66d70dc1e1c46d2972e2afdfdca0aac26574d98715a2ae975f867aacecb3b5b)(supports-color@8.1.1):
     dependencies:
       cacheable: 1.10.4
       debug: 4.4.3(supports-color@8.1.1)

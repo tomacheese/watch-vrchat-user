@@ -79,17 +79,17 @@ function isPersistedConfig(value: unknown): value is PersistedConfig {
         typeof destination.url === 'string' &&
         destination.url.startsWith('https://discord.com/api/webhooks/')
     ) &&
-    rules.every((rule: unknown) =>
-      isRecord(rule) &&
-      typeof rule.name === 'string' &&
-      typeof rule.when === 'string' &&
-      typeof rule.enabled === 'boolean' &&
-      Array.isArray(rule.destinations)
-        ? rule.destinations.every(
-            (name: unknown) =>
-              typeof name === 'string' && Object.hasOwn(destinations, name)
-          )
-        : false
+    rules.every(
+      (rule: unknown) =>
+        isRecord(rule) &&
+        typeof rule.name === 'string' &&
+        typeof rule.when === 'string' &&
+        typeof rule.enabled === 'boolean' &&
+        Array.isArray(rule.destinations) &&
+        rule.destinations.every(
+          (name: unknown) =>
+            typeof name === 'string' && Object.hasOwn(destinations, name)
+        )
     )
   )
 }

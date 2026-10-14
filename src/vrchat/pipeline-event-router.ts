@@ -110,9 +110,11 @@ function isUsableLocation(location: unknown): location is string {
  * @returns 有効な場合は true
  */
 function isFriendOfflineEvent(data: unknown): data is FriendOfflineEvent {
-  return typeof data !== 'object' || data === null
-    ? false
-    : typeof (data as Record<string, unknown>).userId === 'string'
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    typeof (data as Record<string, unknown>).userId === 'string'
+  )
 }
 
 /**

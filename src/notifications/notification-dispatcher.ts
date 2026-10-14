@@ -144,19 +144,17 @@ export class NotificationDispatcher {
         logger.warn(`Destination "${name}" is not defined, skipping`)
         return []
       }
-      return [
-        {
-          name,
-          url: destination.url,
-          embed: buildEmbed(
-            effect,
-            worlds,
-            ruleNames,
-            evaluatedAt.toISOString(),
-            owners
-          ),
-        },
-      ]
+      return {
+        name,
+        url: destination.url,
+        embed: buildEmbed(
+          effect,
+          worlds,
+          ruleNames,
+          evaluatedAt.toISOString(),
+          owners
+        ),
+      }
     })
   }
 

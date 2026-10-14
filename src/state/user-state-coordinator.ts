@@ -389,7 +389,7 @@ export class UserStateCoordinator {
           }
           if (deleteUser || (nextState && nextState !== current)) {
             logger.info(
-              `State changed: user=${userId} (${displayName}) ${describeState(current)} -> ${describeState(nextState)} effects=${[effect, followUp, statusEffect].flatMap((e) => (e && e.type !== 'no-op' ? [e.type] : [])).join(',') || 'none'}${item.baseline ? ' baseline' : ''}`
+              `State changed: user=${userId} (${displayName}) ${describeState(current)} -> ${describeState(nextState)} effects=${[effect, followUp, statusEffect].flatMap((e) => (e && e.type !== 'no-op' ? e.type : [])).join(',') || 'none'}${item.baseline ? ' baseline' : ''}`
             )
           }
           queue.shift()

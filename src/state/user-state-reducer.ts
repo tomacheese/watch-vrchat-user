@@ -105,10 +105,12 @@ function isLocationChange(
   previous: string | null,
   current: string | null
 ): boolean {
-  return previous === null || previous === current
-    ? false
-    : parseLocation(current).visible ||
-        (current === 'private' && parseLocation(previous).visible)
+  return (
+    previous !== null &&
+    previous !== current &&
+    (parseLocation(current).visible ||
+      (current === 'private' && parseLocation(previous).visible))
+  )
 }
 
 /**

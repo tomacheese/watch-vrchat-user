@@ -101,7 +101,7 @@ rules: []
     ['bad version', 'version: 1', 'version: 2', /version/],
     [
       'bad URL',
-      // eslint-disable-next-line no-template-curly-in-string
+
       '${DISCORD_WEBHOOK_MAIN}',
       'https://example.com/x',
       /must start with/,
@@ -136,7 +136,6 @@ rules: []
   })
 
   it('エラー: 部分的な placeholder を含む URL は destination 名を含み URL 値を含まない', () => {
-    // eslint-disable-next-line no-template-curly-in-string
     const partial = 'https://discord.com/api/webhooks/1/${TOKEN}'
     const message = errorOf(variant('$' + '{DISCORD_WEBHOOK_MAIN}', partial))
     expect(message).toContain('Destination "main"')

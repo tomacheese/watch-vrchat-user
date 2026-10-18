@@ -78,5 +78,5 @@
       "/node_modules/(?!(\\.pnpm/)?@marcbachmann[+/])"
     ]
   },
-  "packageManager": "pnpm@12.13.0"
+  "packageManager": "pnpm@12.14.0"
 }

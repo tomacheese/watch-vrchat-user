@@ -170,8 +170,8 @@ importers:
   .:
     dependencies:
       '@book000/node-utils':
-        specifier: 1.25.161
-        version: 1.25.161(@babel/core@7.29.7(supports-color@8.1.1))
+        specifier: 1.25.163
+        version: 1.25.163(@babel/core@7.29.7(supports-color@8.1.1))
       '@marcbachmann/cel-js':
         specifier: 8.0.0
         version: 8.0.0
@@ -412,8 +412,8 @@ packages:
     peerDependencies:
       eslint: 10.12.0
 
-  '@book000/node-utils@1.25.161':
-    resolution: {integrity: sha512-3y8l4eGNM2kHLjDy7PSDFOwaYIsCQhU7qIC5IMIPnvfT7QtjuvKtykdB1YB802NguJ1faDnYC5aMZBCzWHDtew==}
+  '@book000/node-utils@1.25.163':
+    resolution: {integrity: sha512-bLnvKlfUIjsXqPh7CMyvkvo4Xy688HW02Zlp89FmPlN9GIQrIHicyOVruPQSIbv8IAJSBUKs7B0/k0q5rgOPfg==}
 
   '@cacheable/memory@2.2.0':
     resolution: {integrity: sha512-CTLKqLItRCEixEAewD3/j9DB3/o96gpTPD4eJ1v+DGOlxZRZncRQkGYqqnAGCscYd6RNeXfGeiuCphsPtqyIfQ==}
@@ -3581,7 +3581,7 @@ snapshots:
       - ts-declaration-location
       - typescript
 
-  '@book000/node-utils@1.25.161(@babel/core@7.29.7(supports-color@8.1.1))':
+  '@book000/node-utils@1.25.163(@babel/core@7.29.7(supports-color@8.1.1))':
     dependencies:
       '@sentry/node': 11.8.0(@babel/core@7.29.7(supports-color@8.1.1))
       cycle: 1.0.3

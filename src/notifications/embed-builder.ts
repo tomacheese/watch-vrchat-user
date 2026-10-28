@@ -108,9 +108,9 @@ function describeOwner(
   if (instance.ownerId === '') return ''
   const icon = instance.type.startsWith('group') ? '\u{1F465}' : '\u{1F464}'
   const name =
-    owner?.name !== undefined && owner.stale !== true
-      ? owner.name
-      : instance.ownerId
+    owner?.name === undefined || owner.stale === true
+      ? instance.ownerId
+      : owner.name
   return ` · ${icon} ${link(name, ownerUrl(instance.ownerId))}`
 }
 

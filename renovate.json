@@ -1,3 +1,10 @@
 {
-  "extends": ["github>book000/templates//renovate/base-public"]
+  "extends": ["github>book000/templates//renovate/base-public"],
+  "packageRules": [
+    {
+      "description": "keyv-file 5.3.5 (latest) and vrchat SDK 2.26.0 (keyv ^5.5.5) both target keyv v5; keyv-file d.ts is incompatible with keyv v6 KeyvStorageAdapter (deleteMany). Lift when both support keyv 6.",
+      "matchPackageNames": ["keyv"],
+      "allowedVersions": "<6"
+    }
+  ]
 }

@@ -37,7 +37,7 @@
     "yaml": "2.9.1"
   },
   "devDependencies": {
-    "@book000/eslint-config": "1.16.106",
+    "@book000/eslint-config": "1.16.107",
     "@types/jest": "30.0.0",
     "@types/node": "26.6.5",
     "eslint": "10.13.0",

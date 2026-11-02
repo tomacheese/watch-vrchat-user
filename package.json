@@ -40,7 +40,7 @@
     "@book000/eslint-config": "1.16.112",
     "@types/jest": "30.0.0",
     "@types/node": "26.6.6",
-    "eslint": "10.13.0",
+    "eslint": "10.14.0",
     "eslint-config-standard": "17.1.0",
     "eslint-plugin-import": "2.32.0",
     "eslint-plugin-n": "18.5.0",

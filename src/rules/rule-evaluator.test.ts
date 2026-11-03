@@ -60,6 +60,34 @@ describe('RuleEvaluator', () => {
     }
   })
 
+  it('評価依頼の直後に main thread が期限を超えて停止しても、応答済みの評価を期限切れにしない', async () => {
+    const timeoutMs = 200
+    const evaluator = new RuleEvaluator({ timeoutMs })
+    try {
+      const compiled = rules(['user.id == "u"'])
+      const context = { user: { id: 'u' } }
+      // Worker の起動と式の parse を済ませ、以降の評価を十分速くしておく
+      expect(await evaluator.evaluate(compiled, context)).toEqual({
+        matched: ['r0'],
+        errors: [],
+      })
+
+      // 同期 I/O（SQLite の commit など）を模して、postMessage の直後に期限の 3 倍だけ止める
+      setImmediate(() => {
+        const end = Date.now() + timeoutMs * 3
+        while (Date.now() < end) {
+          // 同期的に待つ
+        }
+      })
+      expect(await evaluator.evaluate(compiled, context)).toEqual({
+        matched: ['r0'],
+        errors: [],
+      })
+    } finally {
+      await evaluator.stop()
+    }
+  })
+
   it('元の式がないルールは同期実行に戻らず、評価エラーにする', async () => {
     const evaluator = new RuleEvaluator()
     try {

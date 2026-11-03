@@ -42,7 +42,7 @@ class FakeTransport implements PipelineTransport {
     }
   }
 
-  // fake の ping/close は呼び出し記録が不要なテストでのみ使うため no-op でよい
+  // The fake's ping/close are only used by tests that need no call records, so no-ops suffice
   /* eslint-disable @typescript-eslint/no-empty-function */
   ping(): void {}
   close(): void {}
@@ -55,7 +55,7 @@ class FakeTransport implements PipelineTransport {
 const fakeVrchat = {} as VRChat
 
 describe('PipelineSupervisor', () => {
-  it('stop は再接続 backoff のタイマーも解放する', async () => {
+  it('stop also releases the reconnect backoff timer', async () => {
     jest.useFakeTimers()
     try {
       const transport = new FakeTransport()
@@ -76,7 +76,7 @@ describe('PipelineSupervisor', () => {
       jest.useRealTimers()
     }
   })
-  it('Cookie 待機中の stop は後続の接続を禁止する', async () => {
+  it('stop while waiting for the cookie prevents the subsequent connection', async () => {
     const cookie = Promise.withResolvers<string>()
     const transport = new FakeTransport()
     const synchronize = jest.fn()
@@ -94,13 +94,13 @@ describe('PipelineSupervisor', () => {
     expect(supervisor.getState()).toBe('stopped')
   })
 
-  it('raw open 前は ready にならず、synchronize 完了後に ready になる', async () => {
+  it('is not ready before raw open and becomes ready after synchronize completes', async () => {
     const transport = new FakeTransport()
     let synchronizeResolve = (): void => undefined
     const onSynchronize = jest.fn(
       () =>
-        // Promise.withResolvers() の resolve は `(value: void) => void` 型となり
-        // no-invalid-void-type と衝突するため、この形のまま使う
+        // The resolve of Promise.withResolvers() is typed `(value: void) => void`,
+        // which conflicts with no-invalid-void-type, so it is used as-is
         // eslint-disable-next-line unicorn/prefer-promise-with-resolvers
         new Promise<void>((resolve) => {
           synchronizeResolve = resolve
@@ -113,13 +113,13 @@ describe('PipelineSupervisor', () => {
     )
 
     const startPromise = supervisor.start(() => Promise.resolve('cookie'))
-    // authCookieProvider() / transport.connect() の await チェーン分の
-    // microtask をすべて flush するため、macrotask 境界まで待つ
+    // Wait until the macrotask boundary to flush all microtasks of the
+    // authCookieProvider() / transport.connect() await chain
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(supervisor.getState()).toBe('synchronizing')
 
-    // synchronizing 中に silent disconnect が起きても検知できるよう、
-    // liveness 監視は synchronize 完了を待たずに開始しているべき
+    // So that a silent disconnect during synchronizing is detected, liveness
+    // monitoring must start without waiting for synchronize to complete
     expect(supervisor.getLastMessageAt()).not.toBeNull()
 
     synchronizeResolve()
@@ -127,7 +127,7 @@ describe('PipelineSupervisor', () => {
     expect(supervisor.getState()).toBe('ready')
   })
 
-  it('raw close コールバックで reconnect する', async () => {
+  it('reconnects on the raw close callback', async () => {
     const transport = new FakeTransport()
     const onSynchronize = jest.fn().mockResolvedValue(undefined)
     const supervisor = new PipelineSupervisor(
@@ -151,7 +151,7 @@ describe('PipelineSupervisor', () => {
     expect(transport.callbacksByGeneration.length).toBe(2)
   })
 
-  it('raw close の close code / reason と無通信時間を診断に残し、reason は整形する', async () => {
+  it('records the raw close code / reason and silence duration in diagnostics, sanitizing the reason', async () => {
     const transport = new FakeTransport()
     const supervisor = new PipelineSupervisor(
       fakeVrchat,
@@ -176,7 +176,7 @@ describe('PipelineSupervisor', () => {
     await new Promise((resolve) => setTimeout(resolve, 20))
   })
 
-  it('ready 到達時に liveness (lastMessageAt) が初期化され、raw message でさらに更新される', async () => {
+  it('initializes liveness (lastMessageAt) on reaching ready and updates it on raw messages', async () => {
     const transport = new FakeTransport()
     const supervisor = new PipelineSupervisor(fakeVrchat, transport, () =>
       Promise.resolve()
@@ -193,7 +193,7 @@ describe('PipelineSupervisor', () => {
     )
   })
 
-  it('reconnect 後、新しい接続の lastMessageAt がリセットされる（stale reconnect storm 防止）', async () => {
+  it('resets lastMessageAt for the new connection after reconnect (prevents a stale reconnect storm)', async () => {
     const transport = new FakeTransport()
     const supervisor = new PipelineSupervisor(
       fakeVrchat,
@@ -217,7 +217,7 @@ describe('PipelineSupervisor', () => {
     )
   })
 
-  it('reconnect のたびに auth cookie provider を再呼び出しする（cookie rotation 対応）', async () => {
+  it('calls the auth cookie provider again on every reconnect (handles cookie rotation)', async () => {
     const transport = new FakeTransport()
     const supervisor = new PipelineSupervisor(
       fakeVrchat,
@@ -237,7 +237,7 @@ describe('PipelineSupervisor', () => {
     expect(getAuthCookie).toHaveBeenCalledTimes(2)
   })
 
-  it('古い generation からの callback は無視する', async () => {
+  it('ignores callbacks from an old generation', async () => {
     const transport = new FakeTransport()
     const supervisor = new PipelineSupervisor(
       fakeVrchat,
@@ -255,12 +255,12 @@ describe('PipelineSupervisor', () => {
     await new Promise((resolve) => setTimeout(resolve, 20))
 
     const generationBeforeStaleEvent = supervisor.getGeneration()
-    staleCallbacks.onClose() // 古い generation からの遅延 close
+    staleCallbacks.onClose() // Late close from an old generation
     expect(supervisor.getGeneration()).toBe(generationBeforeStaleEvent)
     expect(supervisor.getState()).toBe('ready')
   })
 
-  it('pong timeout で reconnect する', async () => {
+  it('reconnects on pong timeout', async () => {
     jest.useFakeTimers()
     const transport = new FakeTransport()
     const supervisor = new PipelineSupervisor(
@@ -282,7 +282,7 @@ describe('PipelineSupervisor', () => {
     jest.useRealTimers()
   })
 
-  it('pong を受信すると pong timeout がキャンセルされ reconnect しない', async () => {
+  it('receiving a pong cancels the pong timeout and does not reconnect', async () => {
     jest.useFakeTimers()
     const transport = new FakeTransport()
     const supervisor = new PipelineSupervisor(
@@ -298,8 +298,8 @@ describe('PipelineSupervisor', () => {
     )
     await supervisor.start(() => Promise.resolve('cookie'))
 
-    // ping 送信直後に pong を受信すれば、その ping に対応する timeout は解除される
-    // (次の ping (t=20) より前、かつ元の timeout (t=30) より前で検証する)
+    // A pong received right after a ping clears the timeout for that ping
+    // (verified before the next ping (t=20) and before the original timeout (t=30))
     jest.advanceTimersByTime(10)
     transport.callbacksByGeneration[0].onPong()
     jest.advanceTimersByTime(5)
@@ -311,15 +311,15 @@ describe('PipelineSupervisor', () => {
   })
 })
 
-/** stale 判定の閾値（3 分）。判定 interval は 60 秒になり、閾値より短い */
+/** Stale threshold (3 minutes). The check interval becomes 60 seconds, shorter than the threshold */
 const STALE_MS = 180_000
 
 type ProbeDrift = () => Promise<number | null>
 
 /**
- * probe を検証するための supervisor を fake timer 下で起動する
+ * Starts a supervisor under fake timers to verify the probe.
  *
- * ping は timer を進めても発火しないよう、十分に長い間隔にしておく。
+ * The ping interval is made long enough that ping never fires when timers advance.
  */
 async function startWithProbe(
   probeDrift: ProbeDrift | undefined,
@@ -350,7 +350,7 @@ function reconnectTriggered(supervisor: PipelineSupervisor) {
     .filter((event) => event.event === 'reconnect-triggered')
 }
 
-describe('PipelineSupervisor の stale 判定 (liveness probe)', () => {
+describe('PipelineSupervisor stale detection (liveness probe)', () => {
   beforeEach(() => {
     jest.useFakeTimers()
     logs.length = 0
@@ -359,7 +359,7 @@ describe('PipelineSupervisor の stale 判定 (liveness probe)', () => {
     jest.useRealTimers()
   })
 
-  it('AC-1: 無音が閾値を超えても drift=0 なら再接続しない', async () => {
+  it('AC-1: does not reconnect when silence exceeds the threshold but drift=0', async () => {
     const probeDrift = jest.fn(() => Promise.resolve<number | null>(0))
     const { supervisor } = await startWithProbe(probeDrift)
 
@@ -374,7 +374,7 @@ describe('PipelineSupervisor の stale 判定 (liveness probe)', () => {
     supervisor.stop()
   })
 
-  it('AC-2: 前回の probe から閾値が経つまで probe を繰り返さない', async () => {
+  it('AC-2: does not repeat the probe until the threshold has elapsed since the last probe', async () => {
     const probeDrift = jest.fn(() => Promise.resolve<number | null>(0))
     const { supervisor } = await startWithProbe(probeDrift)
 
@@ -389,7 +389,7 @@ describe('PipelineSupervisor の stale 判定 (liveness probe)', () => {
     supervisor.stop()
   })
 
-  it('AC-3: drift が 1 以上なら stale message stream で再接続する', async () => {
+  it('AC-3: reconnects with stale message stream when drift is 1 or more', async () => {
     const probeDrift = jest.fn(() => Promise.resolve<number | null>(2))
     const { supervisor } = await startWithProbe(probeDrift)
 
@@ -404,7 +404,7 @@ describe('PipelineSupervisor の stale 判定 (liveness probe)', () => {
     supervisor.stop()
   })
 
-  it('AC-4: probe が null を返したときは再接続する', async () => {
+  it('AC-4: reconnects when the probe returns null', async () => {
     const { supervisor } = await startWithProbe(() => Promise.resolve(null))
 
     await jest.advanceTimersByTimeAsync(STALE_MS)
@@ -416,7 +416,7 @@ describe('PipelineSupervisor の stale 判定 (liveness probe)', () => {
     supervisor.stop()
   })
 
-  it('AC-4: probe が例外を投げたときは再接続する', async () => {
+  it('AC-4: reconnects when the probe throws', async () => {
     const { supervisor } = await startWithProbe(() =>
       Promise.reject(new Error('probe failed'))
     )
@@ -427,7 +427,7 @@ describe('PipelineSupervisor の stale 判定 (liveness probe)', () => {
     supervisor.stop()
   })
 
-  it('AC-4: probe が probeTimeoutMs 内に完了しないときは再接続する', async () => {
+  it('AC-4: reconnects when the probe does not finish within probeTimeoutMs', async () => {
     const { supervisor } = await startWithProbe(
       () => new Promise<number | null>(() => undefined),
       { probeTimeoutMs: 5000 }
@@ -441,7 +441,7 @@ describe('PipelineSupervisor の stale 判定 (liveness probe)', () => {
     supervisor.stop()
   })
 
-  it('AC-5: probe が渡されていなければ従来どおり即座に再接続する', async () => {
+  it('AC-5: reconnects immediately when no probe is given', async () => {
     const { supervisor } = await startWithProbe(undefined)
 
     await jest.advanceTimersByTimeAsync(STALE_MS)
@@ -452,7 +452,7 @@ describe('PipelineSupervisor の stale 判定 (liveness probe)', () => {
     supervisor.stop()
   })
 
-  it('AC-6: ready 以外の状態では probe せず即座に再接続する', async () => {
+  it('AC-6: reconnects immediately without probing outside the ready state', async () => {
     const probeDrift = jest.fn(() => Promise.resolve<number | null>(0))
     const transport = new FakeTransport()
     const supervisor = new PipelineSupervisor(
@@ -478,7 +478,7 @@ describe('PipelineSupervisor の stale 判定 (liveness probe)', () => {
     supervisor.stop()
   })
 
-  it('AC-7: probe の完了前に generation が変わったら結果を無視する', async () => {
+  it('AC-7: ignores the result if the generation changes before the probe completes', async () => {
     const { promise, resolve: resolveProbe } = Promise.withResolvers<
       number | null
     >()
@@ -503,7 +503,7 @@ describe('PipelineSupervisor の stale 判定 (liveness probe)', () => {
     supervisor.stop()
   })
 
-  it('AC-8: probe の実行中は次の tick でも 2 つ目の probe を開始しない', async () => {
+  it('AC-8: does not start a second probe on the next tick while one is running', async () => {
     const probeDrift = jest.fn(
       () => new Promise<number | null>(() => undefined)
     )
@@ -518,7 +518,7 @@ describe('PipelineSupervisor の stale 判定 (liveness probe)', () => {
     supervisor.stop()
   })
 
-  it('AC-9: probe があっても raw close は従来どおり再接続する', async () => {
+  it('AC-9: still reconnects on raw close even with a probe', async () => {
     const probeDrift = jest.fn(() => Promise.resolve<number | null>(0))
     const { transport, supervisor } = await startWithProbe(probeDrift)
 
@@ -532,7 +532,7 @@ describe('PipelineSupervisor の stale 判定 (liveness probe)', () => {
     supervisor.stop()
   })
 
-  it('AC-9: probe があっても pong timeout は従来どおり再接続する', async () => {
+  it('AC-9: still reconnects on pong timeout even with a probe', async () => {
     const probeDrift = jest.fn(() => Promise.resolve<number | null>(0))
     const { supervisor } = await startWithProbe(probeDrift, {
       pingIntervalMs: 10,

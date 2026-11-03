@@ -18,7 +18,7 @@ const persistedConfigs = new WeakMap<
   { id: string; config: PersistedEffect['config'] }
 >()
 
-/** health 用の配信状況。Webhook URL と本文は含めない */
+/** Delivery status for health. Excludes Webhook URLs and bodies */
 export interface DeliveryStatus {
   pending: number
   blocked: number
@@ -28,7 +28,7 @@ export interface DeliveryStatus {
   oldestPendingAt: string | null
 }
 
-/** 設定の関数を取り除き、受理時点の通知予定を作る */
+/** Strips functions from the config and builds the pending notification at acceptance time */
 export function prepareEffects(
   userId: string,
   displayName: string,
@@ -76,7 +76,7 @@ export function prepareEffects(
   }))
 }
 
-/** 永続通知予定を評価し、通知先ごとに配信結果を保存する */
+/** Evaluates persisted pending notifications and saves a delivery result per destination */
 export class NotificationOutbox {
   private running = false
   private timer: NodeJS.Timeout | undefined
@@ -85,14 +85,14 @@ export class NotificationOutbox {
   private lastError: string | null = null
   private lastSuccessAt: string | null = null
 
-  /** @param repository state と共有する永続化先 @param dispatcher 評価と Embed 作成 @param notifier 配信処理 */
+  /** @param repository Persistence shared with the state @param dispatcher Evaluation and Embed building @param notifier Delivery */
   constructor(
     private readonly repository: UserStateRepository,
     private readonly dispatcher: NotificationDispatcher,
     private readonly notifier: DiscordNotifier
   ) {}
 
-  /** 再起動前に送信中だった通知は送達不明として保持し、自動再送しない */
+  /** Notifications that were sending before a restart are kept as uncertain and not retried automatically */
   async start(): Promise<void> {
     for (const entry of this.repository.getPendingEffects()) {
       if (!entry.deliveries?.some((delivery) => delivery.status === 'sending'))
@@ -118,7 +118,7 @@ export class NotificationOutbox {
     this.wake()
   }
 
-  /** 保存済み予定の処理を起動する。ユーザー単位の順序を維持する */
+  /** Starts processing saved pending notifications, preserving per-user order */
   wake(): void {
     if (!this.running) return
     const seen = new Set<string>()
@@ -154,7 +154,7 @@ export class NotificationOutbox {
     }
   }
 
-  /** @returns 未処理件数と障害状態 */
+  /** @returns Pending count and failure state */
   getStatus(): DeliveryStatus {
     const entries = this.repository.getPendingEffects()
     const deliveries = entries.flatMap((entry) => entry.deliveries ?? [])
@@ -176,7 +176,7 @@ export class NotificationOutbox {
     }
   }
 
-  /** 新規配信を止め、進行中の結果保存を期限内で待つ */
+  /** Stops new deliveries and waits, within a deadline, for in-flight results to be saved */
   async stop(timeoutMs = 10_000): Promise<boolean> {
     this.running = false
     clearInterval(this.timer)
@@ -196,7 +196,7 @@ export class NotificationOutbox {
     }
   }
 
-  /** 評価済み内容を保存してから送信し、途中終了を識別できるよう送信中も保存する */
+  /** Saves the evaluated content before sending, and also saves the sending state so an interrupted run can be identified */
   private async process(original: PersistedEffect): Promise<void> {
     let entry = original
     if (!entry.deliveries) {
@@ -284,7 +284,7 @@ export class NotificationOutbox {
     }
   }
 
-  /** HTTP の確定失敗だけを再送し、送達不明と永久失敗は明示的な復旧を待つ */
+  /** Retries only definite HTTP failures; uncertain and permanent failures wait for explicit recovery */
   private failedDelivery(
     delivery: PersistedDelivery,
     error: unknown

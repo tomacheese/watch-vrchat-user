@@ -1,5 +1,5 @@
-# 通知ルール設定ファイルの例 (data/config.yaml として配置する)
-# Webhook URL は ${ENV_VAR} 形式で環境変数から読み込む (URL 全体が ${NAME} のときのみ展開される)
+# Example notification rule configuration (place it at data/config.yaml).
+# Webhook URLs are read from the environment as ${ENV_VAR} (expanded only when the whole URL is ${NAME}).
 version: 1
 
 destinations:
@@ -11,21 +11,21 @@ destinations:
     url: ${DISCORD_WEBHOOK_DANCE}
 
 rules:
-  # 特定ユーザーの Location 変更のみ通知
+  # Notify only about Location changes of a specific user
   - name: specific-user-location
     when: |
       event.type == "location-change" &&
       user.id == "usr_00000000-0000-0000-0000-000000000000"
     destinations: [main]
 
-  # 特定ユーザーのオンライン / オフラインのみ通知
+  # Notify only about online / offline of a specific user
   - name: specific-user-presence
     when: |
       (event.type == "online" || event.type == "offline") &&
       user.id == "usr_00000000-0000-0000-0000-000000000000"
     destinations: [main]
 
-  # 誰かが World 名に「ダンス」を含む World へ移動したら通知
+  # Notify when someone moves to a world whose name contains "ダンス" (dance)
   - name: dance-world
     when: |
       event.type == "location-change" &&
@@ -34,14 +34,14 @@ rules:
       current.location.world.name.contains("ダンス")
     destinations: [dance]
 
-  # 「ダンス」を含むステータスメッセージに変えたら通知
+  # Notify when someone changes the status message to one containing "ダンス" (dance)
   - name: status-message-dance
     when: |
       event.type == "status-change" &&
       current.statusDescription.contains("ダンス")
     destinations: [dance]
 
-  # Favorite グループ group_0 のフレンドのオンライン / オフラインを通知
+  # Notify about online / offline of friends in Favorite group group_0
   - name: favorite-group-0-presence
     when: |
       (event.type == "online" || event.type == "offline") &&

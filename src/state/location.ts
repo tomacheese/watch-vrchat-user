@@ -1,4 +1,4 @@
-/** インスタンス種別 */
+/** Instance type */
 export type InstanceType =
   | 'public'
   | 'friends-plus'
@@ -9,44 +9,44 @@ export type InstanceType =
   | 'group-plus'
   | 'group-members'
 
-/** パース済みインスタンス情報 */
+/** Parsed instance information */
 export interface ParsedInstance {
-  /** インスタンス名（`:` の後から最初の `~` まで） */
+  /** Instance name (from after `:` up to the first `~`) */
   name: string
-  /** インスタンス種別 */
+  /** Instance type */
   type: InstanceType
-  /** オーナーのユーザー ID またはグループ ID（public は空文字） */
+  /** Owner user ID or group ID (empty string for public) */
   ownerId: string
-  /** リージョン（指定が無い場合は `us`） */
+  /** Region (`us` when not specified) */
   region: string
-  /** 年齢制限の有無 */
+  /** Whether the instance is age-gated */
   ageGate: boolean
 }
 
 /**
- * パース済み Location
+ * Parsed Location
  *
- * raw 文字列と nonce は意図的に含めない（CEL へ公開しないため）。
+ * The raw string and nonce are intentionally omitted so they are not exposed to CEL.
  */
 export type ParsedLocation =
   | { visible: false }
   | { visible: true; worldId: string; instance: ParsedInstance }
 
 /**
- * Location が transient な traveling 値かを判定する
+ * Determines whether a Location is the transient `traveling` value
  *
  * @param raw raw Location
- * @returns `traveling` で始まる場合は true
+ * @returns true if it starts with `traveling`
  */
 export function isTraveling(raw: string | null): boolean {
   return raw?.startsWith('traveling') ?? false
 }
 
 /**
- * `name(arg)` 形式のタグを分解する
+ * Splits a tag of the form `name(arg)`
  *
- * @param tag タグ文字列
- * @returns タグ名と引数（引数なしは空文字）
+ * @param tag Tag string
+ * @returns Tag name and argument (empty string when there is no argument)
  */
 function parseTag(tag: string): { key: string; arg: string } {
   const open = tag.indexOf('(')
@@ -57,10 +57,10 @@ function parseTag(tag: string): { key: string; arg: string } {
 }
 
 /**
- * インスタンス種別を判定する
+ * Determines the instance type
  *
- * @param tags タグ名から引数へのマップ
- * @returns インスタンス種別
+ * @param tags Map from tag name to argument
+ * @returns Instance type
  */
 function resolveType(tags: Map<string, string>): InstanceType {
   if (tags.has('group')) {
@@ -77,12 +77,12 @@ function resolveType(tags: Map<string, string>): InstanceType {
 }
 
 /**
- * raw Location を CEL 公開用の構造へパースする純粋関数
+ * Pure function that parses a raw Location into the structure exposed to CEL
  *
- * `wrld_` で始まらない値（`private` / `offline` / `traveling*` / 不正値 / null）は不可視として扱う。
+ * Values not starting with `wrld_` (`private` / `offline` / `traveling*` / invalid values / null) are treated as not visible.
  *
  * @param raw raw Location
- * @returns パース結果
+ * @returns Parse result
  */
 export function parseLocation(raw: string | null): ParsedLocation {
   if (!raw?.startsWith('wrld_')) {

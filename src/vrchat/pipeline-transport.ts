@@ -3,7 +3,7 @@ import type { VRChat } from 'vrchat'
 
 const logger = Logger.configure('PIPELINE-TRANSPORT')
 
-/** SDK 内部の raw WebSocket が持つ最小限のインターフェース */
+/** Minimal interface of the SDK's internal raw WebSocket */
 export interface RawWebSocket {
   readyState: number
   on(event: 'open' | 'pong', listener: () => void): void
@@ -16,17 +16,17 @@ export interface RawWebSocket {
   terminate?(): void
 }
 
-/** raw WebSocket lifecycle / liveness イベントのコールバック */
+/** Callbacks for raw WebSocket lifecycle / liveness events */
 export interface PipelineTransportCallbacks {
   onOpen: () => void
-  /** close code / reason は ws が渡す値。テスト等で省略されうる */
+  /** The close code and reason come from ws and may be omitted (e.g. in tests) */
   onClose: (code?: number, reason?: Buffer) => void
   onError: (error: Error) => void
   onMessage: (data: Buffer) => void
   onPong: () => void
 }
 
-/** Pipeline (WebSocket) transport の抽象インターフェース */
+/** Abstract interface of the Pipeline (WebSocket) transport */
 export interface PipelineTransport {
   connect(
     vrchat: VRChat,
@@ -44,21 +44,21 @@ const CLOSED = 3
 const DEFAULT_OPEN_TIMEOUT_MS = 10_000
 
 /**
- * SDK の raw WebSocket 依存を隔離する PipelineTransport 実装
+ * PipelineTransport implementation that isolates the dependency on the SDK's raw WebSocket.
  *
- * `pipeline.authenticate()` は raw socket が OPEN になるまで待たないため、
- * authenticate 開始直後に raw socket を取得し listener を登録してから
- * OPEN を待つことで、authenticate が同期的に open を発火させる場合でも
- * イベントを取りこぼさないようにする。
+ * `pipeline.authenticate()` does not wait for the raw socket to reach OPEN, so
+ * the raw socket is obtained and listeners are registered right after
+ * authenticate starts, and only then is OPEN awaited. This way no events are
+ * missed even if authenticate fires `open` synchronously.
  */
 export class PipelineTransportAdapter implements PipelineTransport {
   /**
-   * Pipeline へ接続し、raw WebSocket の lifecycle/liveness listener を登録する
+   * Connects to the Pipeline and registers raw WebSocket lifecycle/liveness listeners.
    *
-   * @param vrchat VRChat クライアント
-   * @param authCookie Pipeline 認証用の auth cookie
-   * @param callbacks raw WebSocket lifecycle/liveness イベントのコールバック
-   * @param openTimeoutMs raw socket の OPEN 待機タイムアウト（ミリ秒）
+   * @param vrchat VRChat client
+   * @param authCookie Auth cookie used to authenticate the Pipeline
+   * @param callbacks Callbacks for raw WebSocket lifecycle/liveness events
+   * @param openTimeoutMs Timeout (ms) for waiting for the raw socket to open
    */
   async connect(
     vrchat: VRChat,
@@ -67,9 +67,9 @@ export class PipelineTransportAdapter implements PipelineTransport {
     openTimeoutMs = DEFAULT_OPEN_TIMEOUT_MS
   ): Promise<void> {
     const authenticatePromise = vrchat.pipeline.authenticate(authCookie)
-    // getRawWebSocket/waitForOpen が先に throw/reject しても authenticatePromise が
-    // 誰にも await されないまま reject し unhandled rejection になるのを防ぐ
-    // （実際のエラー伝播は下の Promise.all が担う）
+    // Prevent an unhandled rejection if getRawWebSocket/waitForOpen throws first
+    // and authenticatePromise rejects without being awaited. The real error
+    // propagation is handled by the Promise.all below.
     authenticatePromise.catch(() => undefined)
 
     const rawWs = this.getRawWebSocket(vrchat)
@@ -79,8 +79,8 @@ export class PipelineTransportAdapter implements PipelineTransport {
     rawWs.on('message', callbacks.onMessage)
     rawWs.on('pong', callbacks.onPong)
 
-    // authenticatePromise は Promise.all に渡した時点で rejection handler が
-    // 付くため、waitForOpen が先に reject/resolve しても unhandled rejection にならない
+    // Passing authenticatePromise to Promise.all attaches a rejection handler,
+    // so it cannot become an unhandled rejection even if waitForOpen settles first.
     await Promise.all([
       this.waitForOpen(rawWs, openTimeoutMs),
       authenticatePromise,
@@ -88,14 +88,14 @@ export class PipelineTransportAdapter implements PipelineTransport {
   }
 
   /**
-   * raw WebSocket の readyState を取得する
+   * Gets the readyState of the raw WebSocket.
    *
-   * raw socket が存在しない場合（reconnect 中など）は例外を投げず CLOSED を返す。
-   * health endpoint から無条件に呼ばれるため、ここで例外にすると `/health` への
-   * リクエストがプロセスを落としかねない。
+   * Returns CLOSED instead of throwing when no raw socket exists (e.g. during
+   * reconnect). The health endpoint calls this unconditionally, so throwing here
+   * could let a `/health` request take the process down.
    *
-   * @param vrchat VRChat クライアント
-   * @returns raw WebSocket の readyState、取得できない場合は CLOSED (3)
+   * @param vrchat VRChat client
+   * @returns The raw WebSocket readyState, or CLOSED (3) if unavailable
    */
   getReadyState(vrchat: VRChat): number {
     try {
@@ -106,27 +106,28 @@ export class PipelineTransportAdapter implements PipelineTransport {
   }
 
   /**
-   * raw WebSocket へ ping フレームを送信する
+   * Sends a ping frame on the raw WebSocket.
    *
-   * @param vrchat VRChat クライアント
+   * @param vrchat VRChat client
    */
   ping(vrchat: VRChat): void {
     this.getRawWebSocket(vrchat).ping()
   }
 
   /**
-   * Pipeline を close する
+   * Closes the Pipeline.
    *
-   * SDK の EventEmitter は raw close を再送出しないため、close 完了は待たない。
-   * pipeline.close() 自体が投げる例外も、呼び出し側 (Supervisor.reconnect/stop)
-   * を巻き込んで reconnect 不能にしないよう、ここで確実に飲み込む (真に best-effort にする)。
+   * The SDK's EventEmitter does not re-emit raw close, so completion of the close
+   * is not awaited. Exceptions thrown by pipeline.close() are swallowed here so
+   * they cannot break the caller (Supervisor.reconnect/stop) and block reconnect;
+   * the close is strictly best-effort.
    *
-   * @param vrchat VRChat クライアント
+   * @param vrchat VRChat client
    */
   close(vrchat: VRChat): void {
     try {
       const raw = this.getRawWebSocket(vrchat)
-      // SDK の旧 socket から共有 emitter への business event 転送を止める。
+      // Stop the old socket from forwarding business events to the SDK's shared emitter.
       raw.removeAllListeners?.('message')
       vrchat.pipeline.close()
       raw.terminate?.()
@@ -136,11 +137,11 @@ export class PipelineTransportAdapter implements PipelineTransport {
   }
 
   /**
-   * VRChat SDK の private 実装から raw WebSocket を取得する
+   * Gets the raw WebSocket from the VRChat SDK's private implementation.
    *
-   * @param vrchat VRChat クライアント
-   * @returns raw WebSocket
-   * @throws raw WebSocket が存在しない場合（reconnect 中など）
+   * @param vrchat VRChat client
+   * @returns The raw WebSocket
+   * @throws If no raw WebSocket exists (e.g. during reconnect)
    */
   private getRawWebSocket(vrchat: VRChat): RawWebSocket {
     const rawWs = (
@@ -153,11 +154,11 @@ export class PipelineTransportAdapter implements PipelineTransport {
   }
 
   /**
-   * raw WebSocket が OPEN になるまで待つ
+   * Waits until the raw WebSocket is OPEN.
    *
-   * @param rawWs raw WebSocket
-   * @param timeoutMs 待機タイムアウト（ミリ秒）
-   * @throws タイムアウト時間内に OPEN にならなかった場合
+   * @param rawWs Raw WebSocket
+   * @param timeoutMs Timeout in milliseconds
+   * @throws If the socket closes, errors, or does not open within the timeout
    */
   private async waitForOpen(
     rawWs: RawWebSocket,

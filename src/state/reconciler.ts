@@ -11,15 +11,15 @@ import type { UserStateRepository } from './user-state-repository'
 
 const logger = Logger.configure('RECONCILER')
 
-/** 429 エラー発生時のクールダウン時間（ミリ秒） */
+/** Cooldown after a 429 error (ms) */
 const RATE_LIMIT_COOLDOWN_MS = 30 * 60 * 1000
 
 /**
- * フレンド一覧の Location を observation へ変換する
+ * Converts a Friends API location into an observation
  *
- * @param location Friends API の location
- * @param profile Friends API のステータスとステータスメッセージ
- * @returns observation。traveling は在席のみ確定（location は未確定）として扱う
+ * @param location Friends API location
+ * @param profile Friends API status and status message
+ * @returns Observation. `traveling` confirms only presence (the location stays unconfirmed)
  */
 function toObservation(location: string, profile?: Profile): UserObservation {
   const profileObservation =
@@ -31,13 +31,13 @@ function toObservation(location: string, profile?: Profile): UserObservation {
 }
 
 /**
- * observation が既存 state と食い違っているかを判定する
+ * Determines whether an observation disagrees with the existing state
  *
- * REST 同期で見つかった食い違いは、WebSocket で届かなかった差分の目安になる。
+ * A mismatch found by REST sync indicates a difference that did not arrive over WebSocket.
  *
- * @param current 既存 state（未知のユーザーは undefined。この場合は食い違いとしない）
- * @param observation REST snapshot から得た observation
- * @returns 食い違っている場合は true
+ * @param current Existing state (undefined for an unknown user, which is not counted as a mismatch)
+ * @param observation Observation derived from the REST snapshot
+ * @returns true if they disagree
  */
 function differsFromState(
   current: UserState | undefined,
@@ -51,11 +51,11 @@ function differsFromState(
 }
 
 /**
- * Friends API の REST snapshot を取得し、compare-and-enqueue で
- * UserStateCoordinator の queue に追記するクラス
+ * Fetches a Friends API REST snapshot and appends it to the
+ * UserStateCoordinator queue via compare-and-enqueue
  *
- * 起動時・reconnect 後・定期ポーリングのいずれからも同一ロジックで呼び出せる。
- * REST mismatch 自体は reconnect trigger にしない。
+ * The same logic is used on startup, after reconnect, and for periodic polling.
+ * A REST mismatch alone never triggers a reconnect.
  */
 export class Reconciler {
   private lastRunAt: Date | null = null
@@ -65,11 +65,11 @@ export class Reconciler {
   private lastError: string | null = null
 
   /**
-   * Reconciler を初期化する
+   * Initializes the Reconciler
    *
-   * @param getVrchat 現在の VRChat クライアントを取得する関数（未接続時は null）
-   * @param coordinator observation の追記先
-   * @param repository 既知ユーザー一覧と baseline 完了フラグの参照・永続化先
+   * @param getVrchat Function returning the current VRChat client (null when not connected)
+   * @param coordinator Destination queue for observations
+   * @param repository Source of known users and the baseline-completed flag, and where they are persisted
    */
   constructor(
     private readonly getVrchat: () => VRChat | null,
@@ -78,21 +78,21 @@ export class Reconciler {
   ) {}
 
   /**
-   * 直近の reconcile 実行日時を取得する
+   * Gets the time of the last reconcile run
    *
-   * @returns 実行日時、未実行の場合は null
+   * @returns Run time, or null if never run
    */
   getLastRunAt(): Date | null {
     return this.lastRunAt
   }
 
   /**
-   * 全フレンドの REST snapshot を取得し queue に追記する
+   * Fetches a REST snapshot of all friends and appends it to the queue
    *
-   * snapshot の取得に 1 ページでも失敗した場合は差分を一切適用しない。
+   * If fetching even one page of the snapshot fails, no differences are applied.
    *
-   * @returns 同期を完了できた場合は drift 件数（WebSocket で届かなかった差分の件数）。
-   * 未接続・cooldown 中・429・取得失敗など、同期を確認できなかった場合は null
+   * @returns Drift count (differences that did not arrive over WebSocket) when sync completed.
+   * null when sync could not be confirmed (not connected, cooling down, 429, fetch failure, etc.)
    */
   async reconcileAll(): Promise<number | null> {
     if (this.stopped) return null
@@ -102,22 +102,22 @@ export class Reconciler {
     return this.inFlight
   }
 
-  /** 非同期 REST 待機中の停止も検知する */
+  /** Also detects a stop requested while awaiting asynchronous REST calls */
   private isStopped(): boolean {
     return this.stopped
   }
 
-  /** 新しい同期を止める。進行中の REST は Session が中断する */
+  /** Stops new syncs. Session aborts any in-flight REST calls */
   stop(): void {
     this.stopped = true
   }
 
-  /** @returns 直近の同期失敗。外部レスポンスは公開しない */
+  /** @returns The last sync failure. External responses are not exposed */
   getLastError(): string | null {
     return this.lastError
   }
 
-  /** 同期を 1 回実行する */
+  /** Runs one sync */
   private async runReconciliation(): Promise<number | null> {
     const vrchat = this.getVrchat()
     if (!vrchat) {
@@ -152,13 +152,13 @@ export class Reconciler {
   }
 
   /**
-   * snapshot の取得・差分の追記・baseline 完了の永続化を行う
+   * Fetches the snapshot, enqueues differences, and persists baseline completion
    *
-   * @param vrchat VRChat クライアント
-   * @returns drift 件数
+   * @param vrchat VRChat client
+   * @returns Drift count
    */
   private async reconcile(vrchat: VRChat): Promise<number> {
-    // 取得前に全ユーザーの seq を控える（record を持たないユーザーも含む）。未観測は seq 0 とみなす
+    // Record every user's seq before fetching (including users without a record). Unobserved counts as seq 0
     const knownUsers = Object.values(this.repository.getAll())
     const expectedSeqs = this.coordinator.captureAllSeqs()
 
@@ -180,7 +180,7 @@ export class Reconciler {
       )
       if (appended && differs) drift++
     }
-    // WebSocket で届かなかった差分の件数（切断原因の調査用）
+    // Count of differences that did not arrive over WebSocket (for investigating disconnect causes)
     logger.info(
       `Reconciliation snapshot applied: friends=${snapshot.size} drift=${drift}`
     )
@@ -205,14 +205,14 @@ export class Reconciler {
   }
 
   /**
-   * フレンドでないことを API で確認できたかを返す
+   * Returns whether the API confirmed that the user is not a friend
    *
-   * 確認 API が失敗した場合は「フレンドでない」と確定できないため false を返す。
-   * 429 だけは cooldown 判定のため呼び出し元へ伝播する。
+   * Returns false if the check API fails, since "not a friend" cannot be concluded.
+   * Only 429 is propagated to the caller for cooldown handling.
    *
-   * @param vrchat VRChat クライアント
-   * @param userId 確認するユーザー ID
-   * @returns フレンドでないと確認できた場合は true
+   * @param vrchat VRChat client
+   * @param userId User ID to check
+   * @returns true if confirmed not a friend
    */
   private async isConfirmedDeleted(
     vrchat: VRChat,
@@ -233,13 +233,13 @@ export class Reconciler {
   }
 
   /**
-   * observation を compare-and-enqueue し、stale で drop された場合はログを出す
+   * Compare-and-enqueues an observation and logs when it is dropped as stale
    *
-   * @param userId ユーザー ID
-   * @param displayName 表示名
-   * @param observation 追記する observation
-   * @param expectedSeq 取得前に控えた seq
-   * @returns 追記した場合は true、stale のため drop した場合は false
+   * @param userId User ID
+   * @param displayName Display name
+   * @param observation Observation to enqueue
+   * @param expectedSeq Seq recorded before fetching
+   * @returns true if enqueued, false if dropped as stale
    */
   private appendOrDrop(
     userId: string,
@@ -262,12 +262,12 @@ export class Reconciler {
   }
 
   /**
-   * 全 baseline observation の persist 完了を待ち、成功時のみ完了フラグを永続化する
+   * Waits for all baseline observations to persist and persists the completed flag only on success
    *
-   * persist 失敗・queue overflow で drain が false になった場合は永続化せず、
-   * 次回の reconcile で再試行する。
+   * If draining returns false due to a persist failure or queue overflow, nothing is persisted
+   * and the next reconcile retries.
    *
-   * @param userIds 待機対象のユーザー ID
+   * @param userIds User IDs to wait for
    */
   private async completeBaseline(userIds: string[]): Promise<void> {
     const drained = await this.coordinator.drain(userIds)

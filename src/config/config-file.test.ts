@@ -24,7 +24,7 @@ rules:
 `
 
 /**
- * parseConfigFile がスローするエラーメッセージを取得する
+ * Gets the error message thrown by parseConfigFile
  */
 function errorOf(text: string, env: NodeJS.ProcessEnv = ENV): string {
   try {
@@ -36,7 +36,7 @@ function errorOf(text: string, env: NodeJS.ProcessEnv = ENV): string {
 }
 
 /**
- * VALID の一部を置換した YAML を作る
+ * Builds YAML with part of VALID replaced
  */
 function variant(from: string, to: string): string {
   expect(VALID).toContain(from)
@@ -44,7 +44,7 @@ function variant(from: string, to: string): string {
 }
 
 describe('parseConfigFile', () => {
-  it('正常系: destinations と rules を返し、URL の環境変数を展開する', () => {
+  it('returns destinations and rules and expands environment variables in URLs', () => {
     const result = parseConfigFile(VALID, ENV)
     expect(result.destinations).toEqual({
       main: { type: 'discord-webhook', url: URL },
@@ -60,7 +60,7 @@ describe('parseConfigFile', () => {
     ])
   })
 
-  it('URL 直書きと空の rules を許可する', () => {
+  it('allows a literal URL and empty rules', () => {
     const text = `version: 1
 destinations:
   a: { type: discord-webhook, url: ${URL} }
@@ -69,7 +69,7 @@ rules: []
     expect(parseConfigFile(text, {}).rules).toEqual([])
   })
 
-  it('総容量・通知先数・ルール数に上限を設ける', () => {
+  it('limits total size, destination count and rule count', () => {
     expect(errorOf(' '.repeat(1024 * 1024 + 1))).toMatch(/byte size limit/)
     const destinations = Array.from(
       { length: 65 },
@@ -129,47 +129,47 @@ rules: []
     ['non-boolean enabled', 'enabled: false', 'enabled: "no"', /"enabled"/],
     ['bad destination type', 'type: discord-webhook', 'type: slack', /type/],
   ]
-  it.each(cases)('エラー: %s', (_name, from, to, pattern) => {
+  it.each(cases)('error: %s', (_name, from, to, pattern) => {
     const message = errorOf(variant(from, to))
     expect(message).toMatch(pattern)
     expect(message).not.toContain(TOKEN)
   })
 
-  it('エラー: 部分的な placeholder を含む URL は destination 名を含み URL 値を含まない', () => {
+  it('error: a URL with a partial placeholder names the destination but not the URL value', () => {
     const partial = 'https://discord.com/api/webhooks/1/${TOKEN}'
     const message = errorOf(variant('$' + '{DISCORD_WEBHOOK_MAIN}', partial))
     expect(message).toContain('Destination "main"')
     expect(message).not.toContain('discord.com')
   })
 
-  it('エラー: 未定義の環境変数は変数名を含む', () => {
+  it('error: an undefined environment variable names the variable', () => {
     expect(errorOf(VALID, {})).toContain('DISCORD_WEBHOOK_MAIN')
   })
 
-  it('エラー: 空の環境変数も未定義扱い', () => {
+  it('error: an empty environment variable counts as undefined', () => {
     expect(errorOf(VALID, { DISCORD_WEBHOOK_MAIN: '' })).toContain(
       'DISCORD_WEBHOOK_MAIN'
     )
   })
 
-  it('エラー: destinations が空', () => {
+  it('error: destinations is empty', () => {
     expect(errorOf('version: 1\ndestinations: {}\nrules: []\n')).toMatch(
       /destinations/
     )
   })
 
-  it('エラー: when が 4096 文字超', () => {
+  it('error: when exceeds 4096 characters', () => {
     const message = errorOf(variant("'true'", `'${'a'.repeat(4097)}'`))
     expect(message).toMatch(/4096/)
   })
 
-  it('エラー: YAML 構文エラーでも URL が漏れない', () => {
+  it('error: a YAML syntax error does not leak the URL', () => {
     const message = errorOf(`version: 1\nx: ${URL}\n  bad: [\n`)
     expect(message).toMatch(/Failed to parse/)
     expect(message).not.toContain(TOKEN)
   })
 
-  it('未知のタグ警告でソース行（URL）を出力しない', () => {
+  it('an unknown-tag warning does not print the source line (URL)', () => {
     const spy = jest.spyOn(process, 'emitWarning').mockImplementation()
     try {
       const text = VALID.replace(/url: .*/, () => `url: !secret ${URL}`)
@@ -180,7 +180,7 @@ rules: []
     }
   })
 
-  it('config.example.yaml が parse と compile を通る', () => {
+  it('config.example.yaml passes parse and compile', () => {
     const text = readFileSync('config.example.yaml', 'utf8')
     const parsed = parseConfigFile(text, {
       DISCORD_WEBHOOK_MAIN: 'https://discord.com/api/webhooks/1/a',

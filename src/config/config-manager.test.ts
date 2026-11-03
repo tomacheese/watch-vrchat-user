@@ -13,10 +13,10 @@ const URL = 'https://discord.com/api/webhooks/1/secret'
 const ENV = { HOOK: URL }
 
 /**
- * テスト用の設定 YAML を作る
+ * Builds a config YAML for tests
  *
- * @param ruleName ルール名
- * @param when CEL 式
+ * @param ruleName Rule name
+ * @param when CEL expression
  * @returns YAML
  */
 function yaml(ruleName = 'r1', when = 'true'): string {
@@ -33,9 +33,9 @@ rules:
 }
 
 /**
- * 条件が満たされるまで待つ
+ * Waits until the condition is met
  *
- * @param condition 条件
+ * @param condition Condition
  */
 async function waitFor(condition: () => boolean): Promise<void> {
   const start = Date.now()
@@ -46,11 +46,11 @@ async function waitFor(condition: () => boolean): Promise<void> {
 }
 
 /**
- * mtime が確実に変わるよう、ファイルを書き換える
+ * Rewrites the file so that its mtime reliably changes
  *
- * @param file パス
- * @param text 内容
- * @param seconds mtime に加える秒数
+ * @param file Path
+ * @param text Content
+ * @param seconds Seconds to add to the mtime
  */
 function write(file: string, text: string, seconds: number): void {
   fs.writeFileSync(file, text)
@@ -75,7 +75,7 @@ describe('ConfigManager', () => {
   })
 
   /**
-   * 短い間隔の ConfigManager を作る
+   * Creates a ConfigManager with short intervals
    *
    * @returns ConfigManager
    */
@@ -89,24 +89,24 @@ describe('ConfigManager', () => {
     return manager
   }
 
-  it('起動時の不正設定は throw する', () => {
+  it('throws on an invalid config at startup', () => {
     fs.writeFileSync(file, yaml('r1', 'event.type =='))
     expect(() => {
       create().load()
     }).toThrow(/rule "r1"/)
   })
 
-  it('設定ファイルが無い場合は throw する', () => {
+  it('throws when the config file is missing', () => {
     expect(() => {
       create().load()
     }).toThrow()
   })
 
-  it('load 前の getSnapshot は throw する', () => {
+  it('getSnapshot throws before load', () => {
     expect(() => create().getSnapshot()).toThrow('Config has not been loaded')
   })
 
-  it('正常な設定を読み込み、snapshot は不変', () => {
+  it('loads a valid config and the snapshot is immutable', () => {
     fs.writeFileSync(file, yaml())
     const m = create()
     m.load()
@@ -121,7 +121,7 @@ describe('ConfigManager', () => {
     })
   })
 
-  it('reload の成功・失敗・復帰を扱う', async () => {
+  it('handles reload success, failure and recovery', async () => {
     fs.writeFileSync(file, yaml('r1'))
     const m = create()
     m.load()
@@ -130,7 +130,7 @@ describe('ConfigManager', () => {
     write(file, yaml('r2'), 10)
     await waitFor(() => m.getSnapshot() !== first)
     expect(m.getSnapshot().rules.map((r) => r.name)).toEqual(['r2'])
-    // 旧 snapshot は差し替え後も変わらない
+    // The old snapshot is unchanged after replacement
     expect(first.rules.map((r) => r.name)).toEqual(['r1'])
 
     const good = m.getSnapshot()
@@ -147,7 +147,7 @@ describe('ConfigManager', () => {
     expect(m.getStatus().lastReloadFailedAt).toBeNull()
   })
 
-  it('stop() 後は変更を検知せず、保留中の reload も破棄する', async () => {
+  it('after stop(), changes are not detected and a pending reload is discarded', async () => {
     fs.writeFileSync(file, yaml('r1'))
     const m = create()
     m.load()

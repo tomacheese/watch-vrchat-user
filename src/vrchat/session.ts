@@ -8,14 +8,15 @@ import type { Profile } from '../state/user-state'
 const logger = Logger.configure('VRCHAT-SESSION')
 const REQUEST_TIMEOUT_MS = 30_000
 
-/** Cookie ファイルのパス（環境変数で上書き可能） */
+/** Cookie file path (overridable via the COOKIE_FILE_PATH environment variable) */
 const COOKIE_FILE_PATH =
   process.env.COOKIE_FILE_PATH ?? 'data/vrchat-cookies.json'
 
 /**
- * readline を使って 2FA コードを入力させる
+ * Prompts for a 2FA code via readline.
  *
- * @returns ユーザーが入力した 2FA コード
+ * @param signal Aborts the prompt when signaled
+ * @returns The 2FA code the user entered
  */
 async function promptTwoFactorCode(signal?: AbortSignal): Promise<string> {
   const rl = readline.createInterface({
@@ -51,16 +52,16 @@ async function promptTwoFactorCode(signal?: AbortSignal): Promise<string> {
   })
 }
 
-/** Cookie データの型定義 */
+/** Shape of the stored cookie data */
 interface CookieData {
   value?: ({ name?: unknown; value?: unknown } | null)[]
 }
 
 /**
- * VRChat REST セッションを表すクラス
+ * Represents a VRChat REST session.
  *
- * REST 認証・Cookie 永続化・VRChat API client のライフサイクルのみを担当し、
- * Pipeline (WebSocket) の開始は担当しない。
+ * Responsible only for REST authentication, cookie persistence and the
+ * lifecycle of the VRChat API client; it does not start the Pipeline (WebSocket).
  */
 export class VRChatSession {
   private constructor(
@@ -69,7 +70,8 @@ export class VRChatSession {
     private readonly config: Config,
     private readonly controller: AbortController
   ) {
-    // SDK の自動認証は raw socket を置き換えるため、REST 認証だけをここで管理する。
+    // The SDK's automatic authentication replaces the raw socket, so only REST
+    // authentication is managed here (the response interceptor is replaced).
     const sdk = client as unknown as {
       saveCookies: (headers: Headers) => Promise<void>
     }
@@ -119,7 +121,7 @@ export class VRChatSession {
   private authentication: Promise<void> | undefined
   private checking: Promise<string> | undefined
 
-  /** Cookie を REST で検証し、失効時は再認証する。並行呼び出しは共有する。 */
+  /** Verifies the cookie via REST and reauthenticates if it has expired. Concurrent calls share one check. */
   getAuthenticatedCookie(): Promise<string> {
     this.checking ??= this.checkAuthentication().finally(() => {
       this.checking = undefined
@@ -127,12 +129,12 @@ export class VRChatSession {
     return this.checking
   }
 
-  /** REST リクエストを停止する。 */
+  /** Aborts in-flight REST requests. */
   stop(): void {
     this.controller.abort(new Error('VRChat session stopped'))
   }
 
-  /** Cookie の保存完了を待つ。 */
+  /** Writes the SDK's in-memory cookies to the cookie store. */
   async flush(): Promise<void> {
     const cookies = await this.getSdkCookies()
     if (cookies)
@@ -142,7 +144,7 @@ export class VRChatSession {
       )
   }
 
-  /** 現在の REST 認証を確認する。 */
+  /** Checks the current REST authentication and returns the auth cookie. */
   private async checkAuthentication(): Promise<string> {
     const result = await this.client.getCurrentUser({
       meta: { sessionAuthentication: true },
@@ -160,7 +162,7 @@ export class VRChatSession {
     return cookie
   }
 
-  /** 失効した REST セッションを一度だけ更新する。 */
+  /** Renews an expired REST session; concurrent callers share a single login. */
   private reauthenticate(): Promise<void> {
     this.authentication ??= this.login().finally(() => {
       this.authentication = undefined
@@ -168,7 +170,7 @@ export class VRChatSession {
     return this.authentication
   }
 
-  /** SDK の再帰的な 401 処理を避けてログインする。 */
+  /** Logs in, marking the request so the 401 interceptor does not recurse. */
   private async login(): Promise<void> {
     this.controller.signal.throwIfAborted()
     const result = await this.client.login({
@@ -185,12 +187,13 @@ export class VRChatSession {
   }
 
   /**
-   * VRChat REST セッションを確立する
+   * Establishes a VRChat REST session.
    *
-   * 既存 Cookie でのセッション復元を試み、無効であればログインする。
+   * Tries to restore the session from existing cookies and logs in if they are invalid.
    *
-   * @param config アプリケーション設定
-   * @returns 確立された VRChatSession
+   * @param config Application config
+   * @param signal Aborts the session's requests when signaled
+   * @returns The established VRChatSession
    */
   static async create(
     config: Config,
@@ -249,7 +252,7 @@ export class VRChatSession {
     }
   }
 
-  /** SDK のメモリ上の Cookie を取得する。 */
+  /** Gets the cookies held in the SDK's memory. */
   private getSdkCookies(): Promise<
     { name: string; value: string }[] | undefined
   > {
@@ -260,9 +263,9 @@ export class VRChatSession {
   }
 
   /**
-   * Pipeline (WebSocket) 認証用の auth cookie を取得する
+   * Gets the auth cookie used to authenticate the Pipeline (WebSocket).
    *
-   * @returns auth cookie の値、取得できない場合は undefined
+   * @returns The auth cookie value, or undefined if unavailable
    */
   async getAuthCookie(): Promise<string | undefined> {
     const sdkCookies = await this.getSdkCookies()
@@ -303,14 +306,15 @@ export class VRChatSession {
 }
 
 /**
- * 指定したユーザー ID がフレンドかどうかを確認する
+ * Checks whether the given user ID is a friend.
  *
- * API 呼び出し自体が失敗した場合は「フレンドではない」と確定できないため、
- * false を返さず例外を投げる（呼び出し側が誤って fatal 判定しないようにする）。
+ * If the API call itself fails, "not a friend" cannot be concluded, so this
+ * throws instead of returning false (so callers do not wrongly treat it as fatal).
  *
- * @param vrchat VRChat クライアント
- * @param userId 確認するユーザー ID
- * @returns フレンドの場合は true
+ * @param vrchat VRChat client
+ * @param userId User ID to check
+ * @param signal Aborts the request when signaled
+ * @returns True if the user is a friend
  */
 export async function isFriend(
   vrchat: VRChat,
@@ -326,16 +330,17 @@ export async function isFriend(
   return result.data.isFriend
 }
 
-/** ページング取得の 1 ページあたり件数 */
+/** Number of items per page when paging */
 const PAGE_SIZE = 100
 
 /**
- * API エラーを Error として投げる
+ * Throws an API error as an Error.
  *
- * 429 / rate limit の場合は message に `Rate limit error (429)` を含める（Reconciler の中断判定契約）。
+ * For 429 / rate limit errors the message includes `Rate limit error (429)`
+ * (a contract the Reconciler relies on to decide whether to abort).
  *
- * @param context エラーメッセージに付与する操作の説明
- * @param message API エラーの message
+ * @param context Description of the operation, prefixed to the error message
+ * @param message Message of the API error
  */
 function throwApiError(context: string, message: string): never {
   if (message.includes('429') || message.toLowerCase().includes('rate limit')) {
@@ -344,25 +349,26 @@ function throwApiError(context: string, message: string): never {
   throw new Error(`${context}: ${message}`)
 }
 
-/** Friends API の snapshot 1 件分 */
+/** One entry of a Friends API snapshot */
 export interface FriendSnapshot {
-  /** 表示名 */
+  /** Display name */
   displayName: string
   /** raw Location */
   location: string
-  /** ステータスとステータスメッセージ（取得できなかった場合は undefined） */
+  /** Status and status message (undefined if unavailable) */
   profile?: Profile
 }
 
 /**
- * 全フレンドのスナップショットを取得する
+ * Gets a snapshot of all friends.
  *
- * online (active 含む) と offline の 2 系統をページングして統合する。
- * 両方に同一ユーザーが居る場合は online 側を採用する。
- * いずれかのページ取得が失敗した場合は部分結果を返さず例外を投げる。
+ * Pages through the online (including active) and offline lists and merges them.
+ * If a user is in both, the online entry wins.
+ * If any page fails to load, this throws instead of returning a partial result.
  *
- * @param vrchat VRChat クライアント
- * @returns ユーザー ID から表示名・Location・ステータスへの Map
+ * @param vrchat VRChat client
+ * @param signal Aborts the requests when signaled
+ * @returns Map from user ID to display name, Location and status
  */
 export async function getFriendsSnapshot(
   vrchat: VRChat,
@@ -370,7 +376,7 @@ export async function getFriendsSnapshot(
 ): Promise<Map<string, FriendSnapshot>> {
   const snapshot = new Map<string, FriendSnapshot>()
 
-  // online を先に処理し、offline 側では既存エントリを上書きしない
+  // Process online first; the offline pass never overwrites existing entries
   for (const offline of [false, true]) {
     let offset = 0
     while (true) {
@@ -411,11 +417,12 @@ export async function getFriendsSnapshot(
 }
 
 /**
- * ワールド情報を取得する
+ * Gets world information.
  *
- * @param vrchat VRChat クライアント
- * @param worldId ワールド ID
- * @returns ワールド情報
+ * @param vrchat VRChat client
+ * @param worldId World ID
+ * @param signal Aborts the request when signaled
+ * @returns World information
  */
 export async function getWorldInfo(
   vrchat: VRChat,
@@ -440,11 +447,12 @@ export async function getWorldInfo(
 }
 
 /**
- * インスタンスオーナー (ユーザーまたはグループ) の名前を取得する
+ * Gets the name of an instance owner (user or group).
  *
- * @param vrchat VRChat クライアント
- * @param ownerId ユーザー ID (`usr_`) またはグループ ID (`grp_`)
- * @returns オーナーの ID と名前
+ * @param vrchat VRChat client
+ * @param ownerId User ID (`usr_`) or group ID (`grp_`)
+ * @param signal Aborts the request when signaled
+ * @returns The owner's ID and name
  */
 export async function getInstanceOwnerInfo(
   vrchat: VRChat,
@@ -469,12 +477,13 @@ export async function getInstanceOwnerInfo(
 }
 
 /**
- * フレンドのお気に入りグループ (group_0 から group_3) をユーザーごとに集約する
+ * Aggregates friends' favorite groups (group_0 to group_3) per user.
  *
- * いずれかのページ取得が失敗した場合は部分結果を返さず例外を投げる。
+ * If any page fails to load, this throws instead of returning a partial result.
  *
- * @param vrchat VRChat クライアント
- * @returns ユーザー ID からお気に入りグループ名の配列への Map
+ * @param vrchat VRChat client
+ * @param signal Aborts the requests when signaled
+ * @returns Map from user ID to an array of favorite group names
  */
 export async function getFriendFavoriteGroups(
   vrchat: VRChat,

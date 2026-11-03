@@ -9,7 +9,7 @@ const record = {
 }
 
 describe('isUserStateStoreData', () => {
-  it('schemaVersion 3 の正しいデータは true', () => {
+  it('valid schemaVersion 3 data is true', () => {
     expect(
       isUserStateStoreData({
         schemaVersion: 3,
@@ -19,16 +19,16 @@ describe('isUserStateStoreData', () => {
     ).toBe(true)
   })
 
-  it('schemaVersion 2 と legacy 形式は false', () => {
+  it('schemaVersion 2 and the legacy format are false', () => {
     expect(isUserStateStoreData({ schemaVersion: 2, users: {} })).toBe(false)
     expect(isUserStateStoreData({ users: {} })).toBe(false)
   })
 
-  it('baselineCompleted が boolean でない場合は false', () => {
+  it('false when baselineCompleted is not a boolean', () => {
     expect(isUserStateStoreData({ schemaVersion: 3, users: {} })).toBe(false)
   })
 
-  it('レコードの location が undefined の場合は false', () => {
+  it('false when the record location is undefined', () => {
     expect(
       isUserStateStoreData({
         schemaVersion: 3,
@@ -38,7 +38,7 @@ describe('isUserStateStoreData', () => {
     ).toBe(false)
   })
 
-  it('レコードの presence が online/offline 以外の場合は false', () => {
+  it('false when the record presence is not online/offline', () => {
     expect(
       isUserStateStoreData({
         schemaVersion: 3,

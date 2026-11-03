@@ -12,7 +12,7 @@ import { buildEmbed } from './embed-builder'
 
 const logger = Logger.configure('DISPATCHER')
 
-/** Dispatcher が依存するコンポーネント（テストで差し替え可能な構造的型） */
+/** Components the dispatcher depends on (structural types that tests can replace) */
 export interface NotificationDispatcherDeps {
   worldResolver: { resolve(worldId: string): Promise<WorldResolveResult> }
   ownerResolver: { resolve(ownerId: string): Promise<WorldResolveResult> }
@@ -33,31 +33,29 @@ export interface NotificationDispatcherDeps {
   }
 }
 
-/**
- * effect をルール評価し、一致した destination へ通知するクラス
- */
-/** 送信前に永続化できる通知内容 */
+/** Notification content that can be persisted before sending */
 export interface PreparedNotification {
   name: string
   url: string
   embed: DiscordEmbed
 }
 
+/** Evaluates rules for an effect and notifies the matching destinations */
 export class NotificationDispatcher {
   /**
-   * NotificationDispatcher を初期化する
+   * Initializes the NotificationDispatcher
    *
-   * @param deps 依存コンポーネント
+   * @param deps Dependencies
    */
   constructor(private readonly deps: NotificationDispatcherDeps) {}
 
   /**
-   * state の変化（effect）を評価して通知する
+   * Evaluates a state change (effect) and notifies
    *
-   * @param userId Favorite group の照会に使うユーザー ID
-   * @param _displayName 表示名（effect 側の値を使うため未使用）
-   * @param effect reducer の effect
-   * @param snapshot 受理時点の設定スナップショット
+   * @param userId User ID used to look up Favorite groups
+   * @param _displayName Display name (unused; the effect carries its own)
+   * @param effect Reducer effect
+   * @param snapshot Config snapshot at acceptance time
    */
   async handleEffect(
     userId: string,
@@ -81,7 +79,7 @@ export class NotificationDispatcher {
     }
   }
 
-  /** effect を評価し、配信内容を作る。送信は outbox の保存後に行う */
+  /** Evaluates the effect and builds the delivery content. Sending happens after the outbox is saved */
   async prepareEffect(
     userId: string,
     effect: ReducerEffect,
@@ -96,7 +94,7 @@ export class NotificationDispatcher {
       this.resolveWorld(effect.current),
     ])
     const worlds = { previous, current }
-    // friend-delete でも membership は除去しない（次回の Favorites 更新で置き換わる）
+    // Membership is not removed on friend-delete either (it is replaced by the next Favorites refresh)
     const membership = this.deps.favorites.getGroups(userId)
     const context = buildContext(effect, membership, worlds, evaluatedAt)
     const { matched, errors } = this.deps.evaluateRules
@@ -115,14 +113,14 @@ export class NotificationDispatcher {
       return []
     }
 
-    // owner は表示専用のため、一致したときだけ解決する
+    // The owner is display-only, so it is resolved only when a rule matched
     const [previousOwner, currentOwner] = await Promise.all([
       this.resolveOwner(effect.previous),
       this.resolveOwner(effect.current),
     ])
     const owners = { previous: previousOwner, current: currentOwner }
 
-    // destination ごとに一致ルール名を設定順でまとめる
+    // Group matched rule names per destination, in config order
     const byDestination = new Map<string, string[]>()
     for (const rule of snapshot.rules) {
       if (!matched.includes(rule.name)) continue
@@ -158,7 +156,7 @@ export class NotificationDispatcher {
     })
   }
 
-  /** 可視な Location のワールドを解決する。失敗は「名前なし」として扱う */
+  /** Resolves the world of a visible Location. A failure is treated as "no name" */
   private async resolveWorld(
     state: UserState | undefined
   ): Promise<WorldResolveResult | undefined> {
@@ -174,7 +172,7 @@ export class NotificationDispatcher {
     }
   }
 
-  /** 可視な Location のインスタンスオーナー名を解決する。オーナーがいない場合は undefined */
+  /** Resolves the instance owner name of a visible Location. undefined when there is no owner */
   private async resolveOwner(
     state: UserState | undefined
   ): Promise<WorldResolveResult | undefined> {

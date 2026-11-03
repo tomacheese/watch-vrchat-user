@@ -1,7 +1,7 @@
 import './env'
 import { UserStateRepository } from './state/user-state-repository'
 
-/** 停止中の通知予定を確認し、管理者が送達不明・永久失敗から復旧する */
+/** Inspects pending notifications while the app is stopped and lets an operator recover from uncertain or permanently failed deliveries */
 async function main(): Promise<void> {
   const [command, id, destination, ...extra] = process.argv.slice(2) as (
     string | undefined
@@ -79,7 +79,7 @@ async function main(): Promise<void> {
 }
 
 main().catch(() => {
-  // 外部エラーに含まれ得る URL や本文を CLI へ出さない。
+  // Do not print URLs or bodies that external errors may contain to the CLI.
   console.error(
     'Outbox recovery failed; check the arguments and stop the application first'
   )

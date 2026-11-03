@@ -32,7 +32,7 @@ describe('WorldResolver', () => {
     })
   }
 
-  it('初回は取得して name を返す', async () => {
+  it('fetches and returns the name on first use', async () => {
     const fetcher = jest
       .fn()
       .mockResolvedValue({ id: 'wrld_a', name: 'W', capacity: 32 })
@@ -42,7 +42,7 @@ describe('WorldResolver', () => {
     expect(result.stale).toBeFalsy()
   })
 
-  it('古いキャッシュに capacity がなければ再取得する', async () => {
+  it('refetches when the old cache entry has no capacity', async () => {
     fs.writeFileSync(
       file,
       JSON.stringify({
@@ -62,7 +62,7 @@ describe('WorldResolver', () => {
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
 
-  it('capacity の再取得に失敗しても fresh な name を返し、再試行を遅らせる', async () => {
+  it('returns the fresh name and delays the retry when refetching capacity fails', async () => {
     fs.writeFileSync(
       file,
       JSON.stringify({
@@ -95,7 +95,7 @@ describe('WorldResolver', () => {
     expect(fetcherAfterRestart).toHaveBeenCalledTimes(1)
   })
 
-  it('最大人数を要求しない名前キャッシュは再取得しない', async () => {
+  it('does not refetch a name-only cache entry when capacity is not required', async () => {
     const fetcher = jest.fn().mockResolvedValue({ id: 'usr_a', name: 'Owner' })
     const resolver = create(fetcher)
     await resolver.resolve('usr_a')
@@ -106,7 +106,7 @@ describe('WorldResolver', () => {
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
 
-  it('TTL 内は API を呼ばない', async () => {
+  it('does not call the API within the TTL', async () => {
     const fetcher = jest
       .fn()
       .mockResolvedValue({ id: 'wrld_a', name: 'W', capacity: 32 })
@@ -119,7 +119,7 @@ describe('WorldResolver', () => {
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
 
-  it('TTL 超過後は再取得する', async () => {
+  it('refetches after the TTL has expired', async () => {
     const fetcher = jest
       .fn()
       .mockResolvedValueOnce({ id: 'wrld_a', name: 'Old' })
@@ -132,7 +132,7 @@ describe('WorldResolver', () => {
     })
   })
 
-  it('TTL 超過後に取得失敗した場合は name なし・stale・lastFetchedAt を返す', async () => {
+  it('returns no name, stale and lastFetchedAt when the fetch fails after the TTL has expired', async () => {
     const fetcher = jest
       .fn()
       .mockResolvedValueOnce({ id: 'wrld_a', name: 'Old' })
@@ -147,13 +147,13 @@ describe('WorldResolver', () => {
     expect(result.lastFetchedAt).toBe(fetchedAt)
   })
 
-  it('未取得で取得失敗した場合は name なし・stale', async () => {
+  it('returns no name and stale when the fetch fails with nothing cached', async () => {
     const fetcher = jest.fn().mockRejectedValue(new Error('fail'))
     const result = await create(fetcher).resolve('wrld_a')
     expect(result).toEqual({ stale: true })
   })
 
-  it('再起動後もキャッシュが復元され API を呼ばない', async () => {
+  it('restores the cache after a restart without calling the API', async () => {
     const fetcher = jest
       .fn()
       .mockResolvedValue({ id: 'wrld_a', name: 'W', capacity: 32 })
@@ -165,14 +165,14 @@ describe('WorldResolver', () => {
     expect(fetcher2).not.toHaveBeenCalled()
   })
 
-  it('キャッシュファイルが破損していても空で起動する', async () => {
+  it('starts empty even if the cache file is corrupted', async () => {
     fs.writeFileSync(file, '{not json')
     const fetcher = jest.fn().mockResolvedValue({ id: 'wrld_a', name: 'W' })
     const result = await create(fetcher).resolve('wrld_a')
     expect(result.name).toBe('W')
   })
 
-  it('同一 worldId の同時 resolve は 1 回の取得を共有する', async () => {
+  it('concurrent resolves of the same worldId share one fetch', async () => {
     const { promise, resolve } = Promise.withResolvers<{
       id: string
       name: string
@@ -186,12 +186,12 @@ describe('WorldResolver', () => {
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
 
-  it('取得が 10 秒を超えたら失敗扱いにする', async () => {
+  it('treats a fetch exceeding 10 seconds as a failure', async () => {
     jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] })
     try {
       const fetcher = jest.fn().mockReturnValue(Promise.withResolvers().promise)
       const promise = create(fetcher).resolve('wrld_a')
-      // キャッシュ読み込み (実 fs) が終わり fetcher が呼ばれてからタイマーを進める
+      // Advance the timer only after the cache load (real fs) has finished and the fetcher has been called
       while (fetcher.mock.calls.length === 0) {
         await new Promise((resolve) => setImmediate(resolve))
       }
@@ -202,7 +202,7 @@ describe('WorldResolver', () => {
     }
   })
 
-  it('label オプションをログ文言に使う', async () => {
+  it('uses the label option in log messages', async () => {
     const fetcher = jest.fn().mockRejectedValue(new Error('boom'))
     const resolver = new WorldResolver({
       fetcher,
@@ -215,7 +215,7 @@ describe('WorldResolver', () => {
     expect(result.stale).toBe(true)
     warn.mockRestore()
   })
-  it('初回の並行取得では読み込みと保存を共有し、すべての ID を保持する', async () => {
+  it('shares the load and save across initial concurrent fetches and keeps every ID', async () => {
     const read = jest.spyOn(fsPromises, 'readFile')
     const write = jest.spyOn(fsPromises, 'writeFile')
     try {
@@ -240,7 +240,7 @@ describe('WorldResolver', () => {
     }
   })
 
-  it('キャッシュの件数上限を超えると古い取得結果から削除する', async () => {
+  it('evicts the oldest fetched entries when the cache entry limit is exceeded', async () => {
     const resolver = new WorldResolver({
       filePath: file,
       now: () => now,
@@ -259,7 +259,7 @@ describe('WorldResolver', () => {
     ])
   })
 
-  it('stop は未完了の取得を中断し、遅い結果を保存しない', async () => {
+  it('stop aborts unfinished fetches and does not save late results', async () => {
     const pending = Promise.withResolvers<{ id: string; name: string }>()
     const fetcher = jest.fn().mockReturnValue(pending.promise)
     const resolver = create(fetcher)

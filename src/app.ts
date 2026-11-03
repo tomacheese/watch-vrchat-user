@@ -28,12 +28,12 @@ import { WorldResolver } from './vrchat/world-resolver'
 
 const logger = Logger.configure('APP')
 
-/** 定期 REST reconciliation の実行間隔（ミリ秒） */
+/** Interval of the periodic REST reconciliation (milliseconds) */
 const RECONCILE_INTERVAL_MS = 60 * 60 * 1000
 
 /**
- * アプリケーション全体を配線し、起動・reconnect・定期 reconciliation の
- * シーケンスを担うクラス
+ * Wires up the whole application and runs startup, reconnect and periodic
+ * reconciliation sequences
  */
 export class App {
   private repository: UserStateRepository | null = null
@@ -55,19 +55,19 @@ export class App {
   private stopPromise: Promise<void> | undefined
 
   /**
-   * App を初期化する
+   * Initializes the App
    *
-   * @param config アプリケーション設定
+   * @param config Application configuration
    */
   constructor(private readonly config: Config) {}
 
   /**
-   * アプリケーションを起動する
+   * Starts the application
    *
-   * 設定読み込み (不正なら fatal) -> user state load -> REST セッション確立 ->
-   * Favorites 初回取得 (失敗は非致命) -> Coordinator/Router 準備 ->
-   * Pipeline 接続 (atomic connect) -> synchronizing 中の REST snapshot cutover ->
-   * ready、の順で初期化する。
+   * Initializes in this order: load config (fatal if invalid) -> load user state -> establish REST session ->
+   * initial Favorites fetch (non-fatal on failure) -> prepare Coordinator/Router ->
+   * connect Pipeline (atomic connect) -> REST snapshot cutover while synchronizing ->
+   * ready.
    */
   async start(): Promise<void> {
     try {
@@ -78,7 +78,7 @@ export class App {
     }
   }
 
-  /** 各サービスを順に起動する */
+  /** Starts the services in order */
   private async startServices(): Promise<void> {
     logger.info('Starting watch-vrchat-user...')
 
@@ -103,7 +103,7 @@ export class App {
       fetcher: (signal) => getFriendFavoriteGroups(session.client, signal),
     })
     this.favorites = favorites
-    // 失敗は FavoritesService の status に記録される非致命エラー
+    // A failure is a non-fatal error recorded in the FavoritesService status
     await favorites.refresh()
     this.assertRunning()
 
@@ -189,36 +189,36 @@ export class App {
   }
 
   /**
-   * 指定ユーザーの現在の永続 state を取得する（テスト・診断用）
+   * Gets a user's current persisted state (for tests and diagnostics)
    *
-   * @param userId ユーザー ID
-   * @returns 現在の state、未初期化または存在しない場合は undefined
+   * @param userId User ID
+   * @returns The current state, or undefined if uninitialized or absent
    */
   getUserState(userId: string) {
     return this.repository?.get(userId)
   }
 
   /**
-   * health endpoint が実際に listen しているポートを取得する（テスト・診断用）
+   * Gets the port the health endpoint is actually listening on (for tests and diagnostics)
    *
-   * @returns ポート番号、未起動の場合は 0
+   * @returns Port number, or 0 if not started
    */
   getHealthPort(): number {
     return this.healthService?.getListeningPort() ?? 0
   }
 
   /**
-   * アプリケーションを停止する
+   * Stops the application
    *
-   * shutdown handler (main.ts) の `.catch`/`.finally` が確実に走るよう、
-   * 同期的な例外が発生してもここで飲み込み、reject させない。
+   * Swallows synchronous exceptions here and never rejects, so the `.catch`/`.finally`
+   * of the shutdown handler (main.ts) always run.
    */
   stop(): Promise<void> {
     this.stopPromise ??= this.stopServices()
     return this.stopPromise
   }
 
-  /** 受付停止後、state と進行中の配信結果を期限内で保存する */
+  /** After stopping intake, saves state and in-flight delivery results within the deadline */
   private async stopServices(): Promise<void> {
     this.stopping = true
     this.abortController.abort(new Error('Application stopped'))
@@ -254,13 +254,13 @@ export class App {
       )
   }
 
-  /** 停止中の非同期起動がサービスを再開しないようにする */
+  /** Prevents an asynchronous startup from restarting services after a stop */
   private assertRunning(): void {
     if (this.stopping) throw new Error('Application startup was interrupted')
   }
 
   /**
-   * HealthService へ渡す現在の観測データを構築する
+   * Builds the current observation data passed to HealthService
    *
    * @returns health snapshot
    */

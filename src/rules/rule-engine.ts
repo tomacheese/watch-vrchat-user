@@ -5,27 +5,27 @@ import type { RawRule } from '../config/config-file'
 
 const logger = Logger.configure('RuleEngine')
 
-/** warning を出す間隔（ミリ秒） */
+/** Interval between warnings (ms) */
 const WARN_INTERVAL_MS = 60 * 1000
-/** health 用に保持する直近エラーの窓（ミリ秒） */
+/** Window of recent errors kept for health (ms) */
 const RECENT_WINDOW_MS = 60 * 60 * 1000
 
-/** ルール評価エラー */
+/** Rule evaluation error */
 export interface RuleError {
   rule: string
   kind: string
   message: string
 }
 
-/** 評価結果 */
+/** Evaluation result */
 export interface EvaluationResult {
-  /** 一致したルール名（設定順） */
+  /** Names of matched rules (in configuration order) */
   matched: string[]
-  /** 評価エラー */
+  /** Evaluation errors */
   errors: RuleError[]
 }
 
-/** health 用のルールエラー集計 */
+/** Rule error summary for health */
 export interface RuleErrorSummary {
   rule: string
   count: number
@@ -33,7 +33,7 @@ export interface RuleErrorSummary {
   lastError: string
 }
 
-/** エラー種別ごとの集計エントリ */
+/** Summary entry per error kind */
 interface ErrorEntry {
   occurrences: number[]
   lastAtMs: number
@@ -42,18 +42,18 @@ interface ErrorEntry {
 }
 
 /**
- * ルール評価エラーの集計と warning 抑制を行う
+ * Aggregates rule evaluation errors and throttles warnings
  */
 export class RuleErrorLog {
   private readonly entries = new Map<string, ErrorEntry>()
 
   /**
-   * エラーを記録する。warning は (ルール名, 種別) ごとに一定間隔に 1 回までに抑制する
+   * Records an error. Warnings are limited to one per interval for each (rule name, kind)
    *
-   * @param ruleName ルール名
-   * @param kind エラー種別
-   * @param message エラーメッセージ
-   * @param now 現在時刻（ミリ秒）
+   * @param ruleName Rule name
+   * @param kind Error kind
+   * @param message Error message
+   * @param now Current time (ms)
    */
   record(ruleName: string, kind: string, message: string, now: number): void {
     const key = JSON.stringify([ruleName, kind])
@@ -80,10 +80,10 @@ export class RuleErrorLog {
   }
 
   /**
-   * 集計窓内のエラーをルール名ごとに集計して返す
+   * Summarizes errors within the window per rule name
    *
-   * @param now 現在時刻（ミリ秒）
-   * @returns 集計結果
+   * @param now Current time (ms)
+   * @returns Summary
    */
   getRecent(now: number): RuleErrorSummary[] {
     const byRule = new Map<string, RuleErrorSummary & { atMs: number }>()
@@ -126,18 +126,18 @@ export class RuleErrorLog {
   }
 
   /**
-   * rate-limit 済みの warning を出す
+   * Emits a rate-limited warning
    *
-   * @param ruleName ルール名
-   * @param kind エラー種別
-   * @param message エラーメッセージ
+   * @param ruleName Rule name
+   * @param kind Error kind
+   * @param message Error message
    */
   private warn(ruleName: string, kind: string, message: string): void {
     logger.warn(`Rule "${ruleName}" evaluation failed (${kind}): ${message}`)
   }
 }
 
-/** ルール式の構造上限 */
+/** Structural limits for rule expressions */
 export const CEL_LIMITS = {
   maxAstNodes: 500,
   maxDepth: 32,
@@ -146,7 +146,7 @@ export const CEL_LIMITS = {
   maxCallArguments: 8,
 }
 
-// previous / current は null を取りうるため dyn で宣言する（schema 型付けは null 比較不可）
+// previous / current can be null, so declare them as dyn (schema typing cannot compare with null)
 const env = new Environment({ limits: CEL_LIMITS })
   .registerVariable('event', 'map')
   .registerVariable('user', 'map')
@@ -154,23 +154,23 @@ const env = new Environment({ limits: CEL_LIMITS })
   .registerVariable('current', 'dyn')
 
 /**
- * エラー値からメッセージを取り出す
+ * Extracts a message from an error value
  *
- * @param error 捕捉した値
- * @returns メッセージ
+ * @param error Caught value
+ * @returns Message
  */
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
 /**
- * 生ルールを compile する。1 つでも不正なら設定エラーとして throw する
+ * Compiles raw rules. Throws a configuration error if any rule is invalid
  *
- * disabled ルールも構文・型の検証は行う。
+ * Disabled rules are also validated for syntax and types.
  *
- * @param raw 検証済みの生ルール
- * @returns compile 済みルール（設定順）
- * @throws 式が不正な場合（ルール名を含む英語メッセージ）
+ * @param raw Validated raw rules
+ * @returns Compiled rules (in configuration order)
+ * @throws If an expression is invalid (English message including the rule name)
  */
 export function compileRules(raw: RawRule[]): CompiledRule[] {
   return raw.map((rule) => {
@@ -197,13 +197,13 @@ export function compileRules(raw: RawRule[]): CompiledRule[] {
 }
 
 /**
- * 有効なルールを評価し、一致したルール名とエラーを返す
+ * Evaluates enabled rules and returns matched rule names and errors
  *
- * 1 ルールの例外や非 boolean の結果は当該ルールのみ false とし、他ルールを止めない。
+ * An exception or non-boolean result in one rule makes only that rule false and does not stop the others.
  *
- * @param rules compile 済みルール
- * @param context CEL コンテキスト
- * @returns 評価結果
+ * @param rules Compiled rules
+ * @param context CEL context
+ * @returns Evaluation result
  */
 export function evaluateRules(
   rules: readonly CompiledRule[],

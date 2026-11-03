@@ -1,32 +1,32 @@
 import type { DestinationConfig } from './config-file'
 
-/** compile 済みの CEL 式。コンテキストを渡して評価する */
+/** Compiled CEL expression, evaluated by passing a context */
 export type CompiledProgram = (context: Record<string, unknown>) => unknown
 
-/** compile 済みのルール */
+/** Compiled rule */
 export interface CompiledRule {
-  /** ルール名（設定内で一意） */
+  /** Rule name (unique within the config) */
   name: string
-  /** 有効かどうか */
+  /** Whether the rule is enabled */
   enabled: boolean
-  /** 通知先 destination 名 */
+  /** Destination names to notify */
   destinations: string[]
-  /** Worker と永続 outbox で再構築する元の CEL 式 */
+  /** Original CEL expression, used to rebuild it in the Worker and the persistent outbox */
   when?: string
-  /** compile 済みの条件式 */
+  /** Compiled condition */
   program: CompiledProgram
 }
 
 /**
- * ある時点で有効な設定の不変スナップショット
+ * Immutable snapshot of the config in effect at a point in time
  *
- * イベントは受理（enqueue）時点のスナップショットで最後まで評価される。
+ * An event is evaluated to the end with the snapshot taken when it was accepted (enqueued).
  */
 export interface ConfigSnapshot {
-  /** destination 名をキーとした通知先定義 */
+  /** Destination definitions keyed by destination name */
   readonly destinations: Readonly<Record<string, DestinationConfig>>
-  /** 設定ファイルの並び順を保持した compile 済みルール */
+  /** Compiled rules in config file order */
   readonly rules: readonly CompiledRule[]
-  /** 読み込み日時（ISO 8601 形式） */
+  /** Load time (ISO 8601) */
   readonly loadedAt: string
 }

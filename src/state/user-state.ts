@@ -1,56 +1,56 @@
-/** ユーザーの在席状態 */
+/** User presence */
 export type Presence = 'online' | 'offline'
 
-/** ユーザーのステータスとステータスメッセージ */
+/** User status and status message */
 export interface Profile {
-  /** ステータス（`join me` / `active` / `ask me` / `busy`） */
+  /** Status (`join me` / `active` / `ask me` / `busy`) */
   status: string
-  /** ステータスメッセージ */
+  /** Status message */
   statusDescription: string
 }
 
-/** ユーザーの永続 state */
+/** Persisted per-user state */
 export interface UserState {
-  /** ユーザー ID */
+  /** User ID */
   userId: string
-  /** ユーザーの表示名 */
+  /** User display name */
   displayName: string
-  /** 在席状態 */
+  /** Presence */
   presence: Presence
-  /** 最後に確定した実 Location（未確定または offline の場合は null） */
+  /** Last confirmed real Location (null when unconfirmed or offline) */
   location: string | null
-  /** online 遷移後、最初の確定 Location を通知する必要がある場合は true */
+  /** True if the first confirmed Location after going online still needs to be notified */
   firstLocationPending?: boolean
-  /** 最後に確認したステータス（未確認の場合は undefined。`offline` は記録しない） */
+  /** Last confirmed status (undefined when unconfirmed; `offline` is never recorded) */
   status?: string
-  /** 最後に確認したステータスメッセージ（未確認の場合は undefined） */
+  /** Last confirmed status message (undefined when unconfirmed) */
   statusDescription?: string
-  /** 最終更新日時（ISO 8601 形式） */
+  /** Last update time (ISO 8601) */
   updatedAt: string
 }
 
-/** 永続ストアのデータ構造（schemaVersion 3） */
+/** Persisted store data structure (schemaVersion 3) */
 export interface UserStateStoreData {
-  /** スキーマバージョン */
+  /** Schema version */
   schemaVersion: 3
-  /** 初回 baseline 構築が完了したか */
+  /** Whether the initial baseline has completed */
   baselineCompleted: boolean
-  /** ユーザー ID をキーとした state のマップ */
+  /** Map of state keyed by user ID */
   users: Record<string, UserState>
 }
 
-/** ワールド間移動中の transient な Location 値。永続化・通知の対象外 */
+/** Transient Location value while moving between worlds. Not persisted or notified */
 export const TRAVELING_LOCATION = 'traveling'
 
 /**
- * 値が 1 件分の UserState として有効かを検証する
+ * Validates that a value is a valid single UserState
  *
- * 壊れた・手編集された永続ファイルから `undefined` 等の不正値が
- * `location`/`presence` に紛れ込むと、reducer の `=== null` 判定をすり抜けて
- * 誤った通知を発火しうるため、個々のレコードの形を検証する。
+ * If an invalid value such as `undefined` slips into `location`/`presence` from a corrupted or
+ * hand-edited persisted file, it bypasses the reducer's `=== null` checks and
+ * can trigger wrong notifications, so the shape of each record is validated.
  *
- * @param value 検証する値
- * @returns 有効な場合は true
+ * @param value Value to validate
+ * @returns true if valid
  */
 export function isValidUserState(value: unknown): value is UserState {
   if (typeof value !== 'object' || value === null) {
@@ -74,12 +74,12 @@ export function isValidUserState(value: unknown): value is UserState {
 }
 
 /**
- * データが schemaVersion 3 の UserStateStoreData として有効かを検証する
+ * Validates that data is a valid schemaVersion 3 UserStateStoreData
  *
- * 旧形式・不正な形式は false になり、呼び出し側は空データで起動する。
+ * Legacy or malformed data yields false; the repository then refuses to start rather than overwrite it.
  *
- * @param raw 検証するデータ
- * @returns 有効な場合は true
+ * @param raw Data to validate
+ * @returns true if valid
  */
 export function isUserStateStoreData(raw: unknown): raw is UserStateStoreData {
   if (typeof raw !== 'object' || raw === null) {

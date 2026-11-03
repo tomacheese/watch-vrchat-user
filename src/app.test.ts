@@ -86,18 +86,18 @@ describe('App.start', () => {
     fs.rmSync(dir, { recursive: true, force: true })
   })
 
-  it('起動シーケンスで VRChatSession -> Supervisor.start -> Reconciler.reconcileAll の順に呼ばれる', async () => {
+  it('startup calls VRChatSession -> Supervisor.start -> Reconciler.reconcileAll in order', async () => {
     const app = new App(config())
     await app.start()
 
-    // static method を値として渡すため this バインディングに依存せず false positive
+    // unbound-method is a false positive here: the static method is passed as a value and does not rely on this
     // eslint-disable-next-line @typescript-eslint/unbound-method
     expect(VRChatSession.create).toHaveBeenCalledTimes(1)
     const supervisorInstance = (PipelineSupervisor as unknown as jest.Mock).mock
       .instances[0] as {
       start: jest.Mock<Promise<void>, [() => Promise<string>]>
     }
-    // start() は固定 cookie 文字列ではなく provider 関数を受け取る
+    // start() receives a provider function, not a fixed cookie string
     expect(supervisorInstance.start).toHaveBeenCalledWith(expect.any(Function))
     const authCookieProvider = supervisorInstance.start.mock.calls[0][0]
     await expect(authCookieProvider()).resolves.toBe('cookie')
@@ -110,7 +110,7 @@ describe('App.start', () => {
     await app.stop()
   })
 
-  it('設定ファイルが不正な場合は start() が reject し、認証まで進まない', async () => {
+  it('start() rejects on an invalid config file and never reaches authentication', async () => {
     fs.writeFileSync(path.join(dir, 'config.yaml'), 'version: 99\n')
     const app = new App(config())
 
@@ -121,7 +121,7 @@ describe('App.start', () => {
     await app.stop()
   })
 
-  it('supervisor.stop() が同期的に例外を投げても stop() は reject せず完了する', async () => {
+  it('stop() resolves even if supervisor.stop() throws synchronously', async () => {
     const app = new App(config())
     await app.start()
 
@@ -133,7 +133,7 @@ describe('App.start', () => {
 
     await expect(app.stop()).resolves.toBeUndefined()
   })
-  it('初回 REST 同期が失敗した場合は起動を拒否し writer lock を解放する', async () => {
+  it('rejects startup and releases the writer lock when the initial REST sync fails', async () => {
     ;(Reconciler as unknown as jest.Mock).mockImplementation(function (this: {
       reconcileAll: jest.Mock
       stop: jest.Mock

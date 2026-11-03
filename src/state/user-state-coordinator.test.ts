@@ -21,7 +21,7 @@ const snapshot: ConfigSnapshot = {
 }
 const getSnapshot = (): ConfigSnapshot => snapshot
 
-/** baseline 完了済みで、指定 record を持つ Repository を作る */
+/** Builds a Repository with the baseline completed and the given records */
 async function completedRepository(
   ...records: ('offline' | 'online')[]
 ): Promise<UserStateRepository> {
@@ -53,7 +53,7 @@ async function waitFor(condition: () => boolean): Promise<void> {
 }
 
 describe('UserStateCoordinator', () => {
-  it('state が変化しない observation では永続化しない', async () => {
+  it('does not persist an observation that leaves state unchanged', async () => {
     const repository = await completedRepository('offline')
     const commit = jest.spyOn(repository, 'commitUserState')
     const coordinator = new UserStateCoordinator(
@@ -69,8 +69,8 @@ describe('UserStateCoordinator', () => {
     expect(commit).not.toHaveBeenCalled()
   })
 
-  it('同一ユーザーの observation を順番に処理し effect を発火する', async () => {
-    // baseline 完了済みかつ既存 offline record がある通常フローから開始する
+  it('processes observations of the same user in order and fires effects', async () => {
+    // Start from the normal flow: baseline completed and an existing offline record
     const repository = await completedRepository('offline')
     const effects: ReducerEffect[] = []
     const coordinator = new UserStateCoordinator(
@@ -93,7 +93,7 @@ describe('UserStateCoordinator', () => {
 
     await waitFor(() => effects.length === 4)
 
-    // no-op effect は onEffect に渡されない（Coordinator の実装が effect.type !== 'no-op' でフィルタする）
+    // no-op effects are not passed to onEffect (the Coordinator filters on effect.type !== 'no-op')
     expect(effects.map((effect) => effect.type)).toEqual([
       'online',
       'location-change',
@@ -114,7 +114,7 @@ describe('UserStateCoordinator', () => {
     })
   })
 
-  it('ステータスの変化は status-change として発火・永続化され、初回は記録だけを行う', async () => {
+  it('status changes fire and persist as status-change, and the first observation only records', async () => {
     const repository = await completedRepository('online')
     const effects: ReducerEffect[] = []
     const coordinator = new UserStateCoordinator(
@@ -149,7 +149,7 @@ describe('UserStateCoordinator', () => {
     })
   })
 
-  it('appendSnapshotObservation は expectedSeq が古い場合 dropped し false を返す', () => {
+  it('appendSnapshotObservation drops and returns false when expectedSeq is stale', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
     const coordinator = new UserStateCoordinator(
@@ -159,7 +159,7 @@ describe('UserStateCoordinator', () => {
     )
 
     const seq = coordinator.captureSeq('u1')
-    coordinator.enqueue('u1', 'Alice', { type: 'online' }) // seq を進める
+    coordinator.enqueue('u1', 'Alice', { type: 'online' }) // advance seq
 
     const appended = coordinator.appendSnapshotObservation(
       'u1',
@@ -170,7 +170,7 @@ describe('UserStateCoordinator', () => {
     expect(appended).toBe(false)
   })
 
-  it('appendSnapshotObservation は queue に変化がなければ true を返し末尾に追記する', () => {
+  it('appendSnapshotObservation returns true and appends to the tail when the queue is unchanged', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
     const coordinator = new UserStateCoordinator(
@@ -189,12 +189,12 @@ describe('UserStateCoordinator', () => {
     expect(appended).toBe(true)
   })
 
-  it('persist が失敗した observation は queue head で保持され、後続を処理しない', async () => {
+  it('an observation that fails to persist stays at the queue head and later ones are not processed', async () => {
     const repository = await completedRepository('offline')
 
-    // 1 回目の commit だけ失敗させ、以降は実際の commitUserState を通す
-    // （mock で完全に置き換えると in-memory state が更新されず retry 後も
-    // reducer が current=undefined のまま扱ってしまうため）
+    // Fail only the first commit and let later ones go through the real commitUserState
+    // (fully replacing it with a mock would not update the in-memory state, so even after a retry the
+    // reducer would keep treating current as undefined)
     const realCommit = repository.commitUserState.bind(repository)
     let callCount = 0
     jest
@@ -221,12 +221,12 @@ describe('UserStateCoordinator', () => {
     coordinator.enqueue('u1', 'Alice', { type: 'online' })
     coordinator.enqueue('u1', 'Alice', { type: 'location', location: 'wrld_a' })
 
-    // 1 回目の persist 失敗直後（retry backoff 待機中）は unhealthy かつ何も effect が発火していない
+    // Right after the first persist failure (waiting for retry backoff) the user is unhealthy and no effect has fired
     await wait(10)
     expect(coordinator.getUnhealthy('u1')).toBeDefined()
     expect(effects).toEqual([])
 
-    // retry が成功すると head から順に処理され、unhealthy が解消する
+    // Once the retry succeeds, items are processed from the head and unhealthy clears
     await waitFor(
       () => effects.length === 2 && coordinator.getUnhealthy('u1') === undefined
     )
@@ -237,12 +237,12 @@ describe('UserStateCoordinator', () => {
     expect(coordinator.getUnhealthy('u1')).toBeUndefined()
   })
 
-  it('queue が上限に達すると新規 enqueue を停止し unhealthy になる', () => {
+  it('when the queue reaches its limit, new enqueues stop and the user becomes unhealthy', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
     jest
       .spyOn(repository, 'commitUserState')
-      // eslint-disable-next-line @typescript-eslint/no-empty-function -- queue-overflow を検証するため commit を意図的に永遠に処理中にする
+      // eslint-disable-next-line @typescript-eslint/no-empty-function -- keep commit pending forever on purpose to verify queue-overflow
       .mockReturnValue(new Promise(() => {}))
     const coordinator = new UserStateCoordinator(
       repository,
@@ -260,11 +260,11 @@ describe('UserStateCoordinator', () => {
     expect(coordinator.getUnhealthy('u1')?.cause).toBe('queue-overflow')
   })
 
-  it('queue-overflow は persist が成功しても解消されない（データ損失の記録を保持する）', async () => {
+  it('queue-overflow is not cleared even when persist succeeds (the data-loss record is kept)', async () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
-    // Promise.withResolvers() の resolve は `(value: void) => void` 型となり
-    // no-invalid-void-type と衝突するため、この形のまま使う
+    // The resolve from Promise.withResolvers() has type `(value: void) => void`,
+    // which conflicts with no-invalid-void-type, so it is used in this form
     const { promise: firstCommitPromise, resolve: resolveFirstCommit } =
       // eslint-disable-next-line @typescript-eslint/no-invalid-void-type
       Promise.withResolvers<void>()
@@ -292,11 +292,11 @@ describe('UserStateCoordinator', () => {
     resolveFirstCommit()
     await wait(50)
 
-    // head の commit は成功したが、overflow によるデータ損失自体は解消しない
+    // The head commit succeeded, but the data loss from the overflow itself is not resolved
     expect(coordinator.getUnhealthy('u1')?.cause).toBe('queue-overflow')
   })
 
-  it('AC-11: onEffect には enqueue 時点の snapshot が渡され、getSnapshot が後で変わっても影響しない', async () => {
+  it('AC-11: onEffect receives the snapshot from enqueue time and is unaffected by later getSnapshot changes', async () => {
     const repository = await completedRepository('offline')
     const snapshotA: ConfigSnapshot = { ...snapshot, loadedAt: 'A' }
     const snapshotB: ConfigSnapshot = { ...snapshot, loadedAt: 'B' }
@@ -323,7 +323,7 @@ describe('UserStateCoordinator', () => {
     expect(received).toEqual([snapshotA, snapshotB])
   })
 
-  it('オンライン化と同時の公開 Location 確定は online に続けて location-change を発火する', async () => {
+  it('a public Location confirmed together with going online fires location-change after online', async () => {
     const repository = await completedRepository('offline')
     const effects: ReducerEffect[] = []
     const coordinator = new UserStateCoordinator(
@@ -347,7 +347,7 @@ describe('UserStateCoordinator', () => {
     ])
   })
 
-  it('friend-delete は record を削除し、friend-delete effect を発火する', async () => {
+  it('friend-delete removes the record and fires the friend-delete effect', async () => {
     const repository = await completedRepository('online')
     const effects: ReducerEffect[] = []
     const coordinator = new UserStateCoordinator(
@@ -370,7 +370,7 @@ describe('UserStateCoordinator', () => {
     expect(repository.get('u1')).toBeUndefined()
   })
 
-  it('baseline 未完了中に届いた未知ユーザーの observation は通知なしで state 化される', async () => {
+  it('an observation of an unknown user received before the baseline completes becomes state without notification', async () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
     const effects: ReducerEffect[] = []
@@ -393,7 +393,7 @@ describe('UserStateCoordinator', () => {
     })
   })
 
-  it('baseline 完了後の未知ユーザーは friend-add のみを通知する', async () => {
+  it('after the baseline completes, an unknown user notifies friend-add only', async () => {
     const repository = await completedRepository()
     const effects: ReducerEffect[] = []
     const coordinator = new UserStateCoordinator(
@@ -412,7 +412,7 @@ describe('UserStateCoordinator', () => {
   })
 
   describe('drain', () => {
-    it('対象の queue が空になれば true を返す', async () => {
+    it('returns true once the target queues are empty', async () => {
       const repository = await completedRepository('offline', 'offline')
       const coordinator = new UserStateCoordinator(
         repository,
@@ -428,7 +428,7 @@ describe('UserStateCoordinator', () => {
       expect(repository.get('u2')?.presence).toBe('online')
     })
 
-    it('enqueue されていないユーザーだけなら即座に true を返す', async () => {
+    it('returns true immediately when only never-enqueued users are given', async () => {
       const repository = await completedRepository()
       const coordinator = new UserStateCoordinator(
         repository,
@@ -438,7 +438,7 @@ describe('UserStateCoordinator', () => {
       await expect(coordinator.drain(['u1'])).resolves.toBe(true)
     })
 
-    it('待機中に persist 失敗で unhealthy になると false を返す', async () => {
+    it('returns false if a persist failure makes a user unhealthy while waiting', async () => {
       const repository = await completedRepository('offline')
       jest
         .spyOn(repository, 'commitUserState')
@@ -455,11 +455,11 @@ describe('UserStateCoordinator', () => {
       await expect(coordinator.drain(['u1'])).resolves.toBe(false)
     })
 
-    it('queue-overflow 済みのユーザーが対象なら false を返す', async () => {
+    it('returns false when a target user already has queue-overflow', async () => {
       const repository = await completedRepository('offline')
       jest
         .spyOn(repository, 'commitUserState')
-        // eslint-disable-next-line @typescript-eslint/no-empty-function -- overflow を作るため commit を永遠に処理中にする
+        // eslint-disable-next-line @typescript-eslint/no-empty-function -- keep commit pending forever to create an overflow
         .mockReturnValue(new Promise(() => {}))
       const coordinator = new UserStateCoordinator(
         repository,
@@ -476,7 +476,7 @@ describe('UserStateCoordinator', () => {
 })
 
 describe('coordinator recovery and shutdown', () => {
-  it('persist-failure 後の overflow は復旧後も記録する', async () => {
+  it('an overflow after persist-failure is still recorded after recovery', async () => {
     const repository = await completedRepository('offline')
     jest
       .spyOn(repository, 'commitUserState')
@@ -501,7 +501,7 @@ describe('coordinator recovery and shutdown', () => {
     await expect(coordinator.stop()).resolves.toBe(false)
   })
 
-  it('offline の表示名は先行 observation の commit 後に補完する', async () => {
+  it('the display name for offline is filled in after the preceding observation commits', async () => {
     const repository = await completedRepository('offline')
     const coordinator = new UserStateCoordinator(
       repository,
@@ -517,7 +517,7 @@ describe('coordinator recovery and shutdown', () => {
     })
   })
 
-  it('stop は受付を終了して正常な queue の永続化を待つ', async () => {
+  it('stop ends intake and waits for healthy queues to persist', async () => {
     const repository = await completedRepository('offline')
     const coordinator = new UserStateCoordinator(
       repository,
@@ -532,7 +532,7 @@ describe('coordinator recovery and shutdown', () => {
     expect(repository.get('u1')?.presence).toBe('offline')
   })
 
-  it('stop は失敗中の retry 待機を起こして終了する', async () => {
+  it('stop wakes a failing retry wait and finishes', async () => {
     const repository = await completedRepository('offline')
     const commit = jest
       .spyOn(repository, 'commitUserState')
@@ -551,7 +551,7 @@ describe('coordinator recovery and shutdown', () => {
     expect(commit).toHaveBeenCalledTimes(2)
   })
 
-  it('stop は完了しない dispatch を期限で打ち切る', async () => {
+  it('stop cuts off a dispatch that never completes at the deadline', async () => {
     const repository = await completedRepository('offline')
     const { promise: pending, resolve: release } =
       // eslint-disable-next-line @typescript-eslint/no-invalid-void-type
@@ -567,7 +567,7 @@ describe('coordinator recovery and shutdown', () => {
     await waitFor(() => repository.get('u1')?.presence === 'online')
   })
 
-  it('永続 outbox モードは network dispatch を待たず state を処理する', async () => {
+  it('persistent outbox mode processes state without waiting for network dispatch', async () => {
     const repository = await completedRepository('offline')
     const legacyDispatch = jest.fn(() => new Promise<void>(() => undefined))
     const onCommitted = jest.fn()
@@ -616,7 +616,7 @@ describe('coordinator recovery and shutdown', () => {
 })
 
 describe('durable event clock', () => {
-  it('永続化を再試行しても受信時刻を固定する', async () => {
+  it('keeps the receive time fixed across persist retries', async () => {
     const repository = await completedRepository('offline')
     jest
       .spyOn(repository, 'commitUserState')

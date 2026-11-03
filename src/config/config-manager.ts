@@ -7,34 +7,34 @@ import type { ConfigSnapshot } from './config-snapshot'
 
 const logger = Logger.configure('ConfigManager')
 
-/** ConfigManager のオプション */
+/** Options for ConfigManager */
 export interface ConfigManagerOptions {
-  /** 設定ファイルのパス */
+  /** Path to the config file */
   configPath: string
-  /** `${ENV_VAR}` 展開に使う環境変数 */
+  /** Environment variables used for `${ENV_VAR}` expansion */
   env: NodeJS.ProcessEnv
-  /** watchFile のポーリング間隔（ミリ秒） */
+  /** Polling interval for watchFile (milliseconds) */
   pollIntervalMs?: number
-  /** 変更検知後、書き込みが落ち着くまで待つ時間（ミリ秒） */
+  /** Time to wait after a change is detected until writes settle (milliseconds) */
   stableMs?: number
-  /** 現在時刻の取得関数 */
+  /** Function returning the current time */
   now?: () => Date
 }
 
-/** health 用の設定状態 */
+/** Config status for health */
 export interface ConfigStatus {
-  /** 現在有効な設定の読み込み日時 */
+  /** Load time of the config currently in effect */
   loadedAt: string | null
-  /** 直近の reload 失敗メッセージ（成功で解消される） */
+  /** Message of the latest reload failure (cleared on success) */
   lastReloadError: string | null
-  /** 直近の reload 失敗日時 */
+  /** Time of the latest reload failure */
   lastReloadFailedAt: string | null
 }
 
 /**
- * 設定ファイルの読み込みと hot reload を担う
+ * Handles loading the config file and hot reload
  *
- * reload に失敗した場合は last-known-good のスナップショットを維持する。
+ * On reload failure, the last-known-good snapshot is kept.
  */
 export class ConfigManager {
   private readonly configPath: string
@@ -51,9 +51,9 @@ export class ConfigManager {
   private knownStat: { mtimeMs: number; size: number } | undefined
 
   /**
-   * ConfigManager を初期化する
+   * Initializes the ConfigManager
    *
-   * @param options 設定ファイルのパス・環境変数・ポーリング間隔など
+   * @param options Config file path, environment variables, polling interval, etc.
    */
   constructor(options: ConfigManagerOptions) {
     this.configPath = options.configPath
@@ -64,18 +64,18 @@ export class ConfigManager {
   }
 
   /**
-   * 設定を読み込み、ファイル監視を開始する。失敗時は throw する
+   * Loads the config and starts watching the file. Throws on failure
    *
-   * @throws 設定ファイルの読み込み・検証・compile に失敗した場合
+   * @throws If reading, validating or compiling the config file fails
    */
   load(): void {
-    // 読み込みより前に stat を取る。読み込み中の書き換えは次回のポーリングで検知される
+    // Take the stat before reading; a write during the read is caught by the next poll
     const { mtimeMs, size } = fs.statSync(this.configPath)
     this.snapshot = this.readSnapshot()
     this.knownStat = { mtimeMs, size }
     if (this.pollTimer !== undefined) return
-    // fs.watchFile は比較の基準となる最初の stat を非同期で取るため、
-    // load() 直後の書き換えを取りこぼす。読み込み時点の stat と直接比較する
+    // fs.watchFile takes its baseline stat asynchronously, so a write right after
+    // load() would be missed. Compare directly against the stat taken at load time
     this.pollTimer = setInterval(() => {
       this.poll()
     }, this.pollIntervalMs)
@@ -83,10 +83,10 @@ export class ConfigManager {
   }
 
   /**
-   * 現在有効な設定スナップショットを返す
+   * Returns the config snapshot currently in effect
    *
-   * @returns スナップショット
-   * @throws `load()` 前に呼んだ場合
+   * @returns The snapshot
+   * @throws If called before `load()`
    */
   getSnapshot(): ConfigSnapshot {
     if (this.snapshot === undefined) {
@@ -96,9 +96,9 @@ export class ConfigManager {
   }
 
   /**
-   * health 用の設定状態を返す
+   * Returns the config status for health
    *
-   * @returns 設定状態
+   * @returns Config status
    */
   getStatus(): ConfigStatus {
     return {
@@ -109,7 +109,7 @@ export class ConfigManager {
   }
 
   /**
-   * ファイル監視と保留中の reload を停止する
+   * Stops the file watcher and any pending reload
    */
   stop(): void {
     if (this.pollTimer !== undefined) {
@@ -122,9 +122,9 @@ export class ConfigManager {
   }
 
   /**
-   * 設定ファイルから不変スナップショットを作る
+   * Builds an immutable snapshot from the config file
    *
-   * @returns スナップショット
+   * @returns The snapshot
    */
   private readSnapshot(): ConfigSnapshot {
     const text = fs.readFileSync(this.configPath, 'utf8')
@@ -138,14 +138,14 @@ export class ConfigManager {
   }
 
   /**
-   * 設定ファイルの mtime / size が読み込み時点から変わっていれば reload を予約する
+   * Schedules a reload if the config file mtime / size changed since it was loaded
    */
   private poll(): void {
     let stat: fs.Stats
     try {
       stat = fs.statSync(this.configPath)
     } catch {
-      // 置き換え中などで一時的に読めない場合は次回のポーリングに回す
+      // Defer to the next poll when the file is temporarily unreadable (e.g. being replaced)
       return
     }
     if (
@@ -159,7 +159,7 @@ export class ConfigManager {
   }
 
   /**
-   * 書き込みが落ち着くのを待ってから reload を予約する
+   * Schedules a reload after writes settle
    */
   private scheduleReload(): void {
     if (this.stableTimer !== undefined) clearTimeout(this.stableTimer)
@@ -170,7 +170,7 @@ export class ConfigManager {
   }
 
   /**
-   * 再読込する。失敗時は last-known-good を維持して状態に記録する
+   * Reloads. On failure, keeps the last-known-good snapshot and records the failure
    */
   private reload(): void {
     try {
@@ -183,7 +183,7 @@ export class ConfigManager {
       logger.info('Config reloaded')
     } catch (error) {
       const message = toError(error).message
-      // 同一内容の連続ログは抑止する
+      // Suppress consecutive identical logs
       if (message !== this.lastReloadError) {
         logger.error(
           'Config reload failed; keeping last known good config',

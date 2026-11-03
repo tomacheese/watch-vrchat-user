@@ -3,7 +3,7 @@ import type { DiscordEmbed } from '@book000/node-utils'
 import type { DestinationConfig, RawRule } from '../config/config-file'
 import type { NotifiableEffect } from '../rules/rule-context'
 
-/** 再起動後も評価できる、受理時点の設定 */
+/** Config at acceptance time, evaluable after a restart */
 export interface PersistedConfig {
   destinations: Record<string, DestinationConfig>
   rules: RawRule[]
@@ -18,7 +18,7 @@ export function getPersistedConfigId(config: PersistedConfig): string {
     .digest('hex')
 }
 
-/** 通知先ごとの配信結果。送達不明は自動再送しない */
+/** Per-destination delivery result. Uncertain deliveries are not retried automatically */
 export interface PersistedDelivery {
   name: string
   embed: DiscordEmbed
@@ -28,7 +28,7 @@ export interface PersistedDelivery {
   lastError?: string
 }
 
-/** state と同じ transaction で保存する通知予定 */
+/** Pending notification saved in the same transaction as the state */
 export interface PersistedEffect {
   id: string
   userId: string

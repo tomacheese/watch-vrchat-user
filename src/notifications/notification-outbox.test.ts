@@ -18,7 +18,7 @@ jest.mock('@book000/node-utils', () => ({
   Logger: { configure: () => ({ error: jest.fn(), warn: jest.fn() }) },
 }))
 
-/** 処理完了を固定 sleep に依存せず待つ */
+/** Waits for processing to finish without relying on a fixed sleep */
 async function waitFor(check: () => boolean): Promise<void> {
   const deadline = Date.now() + 3000
   while (!check()) {
@@ -51,7 +51,7 @@ const snapshot: ConfigSnapshot = {
   loadedAt: state.updatedAt,
 }
 
-/** 通知予定を受理時点の設定と日時で生成する */
+/** Builds a pending notification with the config and time at acceptance */
 function intent(): PersistedEffect {
   return prepareEffects(
     'u',
@@ -80,7 +80,7 @@ describe('NotificationOutbox', () => {
     fs.rmSync(directory, { recursive: true, force: true })
   })
 
-  /** 実際の Repository を使い、外部配信だけを差し替える */
+  /** Uses a real Repository and replaces only the external delivery */
   function setup(repo = repository, destinations = ['a']) {
     const prepareEffect = jest
       .fn()
@@ -100,7 +100,7 @@ describe('NotificationOutbox', () => {
     return { outbox, prepareEffect, send, stop }
   }
 
-  it('state と通知予定が同じ transaction に保存され、再起動後に復元する', async () => {
+  it('state and pending notifications are saved in one transaction and restored after a restart', async () => {
     const entry = intent()
     await repository.commitUserState('u', state, [entry])
     expect(repository.get('u')).toEqual(state)
@@ -125,7 +125,7 @@ describe('NotificationOutbox', () => {
     expect(send).toHaveBeenCalledTimes(1)
   })
 
-  it('schema 3 の JSON outbox を元ファイルを保持したまま SQLite へ移行する', () => {
+  it('migrates a schema 3 JSON outbox to SQLite while keeping the source file', () => {
     const legacyFile = path.join(directory, 'legacy-friend-states.json')
     const entry = intent()
     const legacyEntry = Object.fromEntries(
@@ -151,7 +151,7 @@ describe('NotificationOutbox', () => {
     migrated.close()
   })
 
-  it('同じ設定の大量通知は設定を一度だけ保存し、設定 snapshot 数も制限する', async () => {
+  it('many notifications with the same config store it once, and the config snapshot count is limited', async () => {
     const entries = Array.from({ length: 1000 }, (_, index) => ({
       ...intent(),
       id: `queued-${index}`,
@@ -236,7 +236,7 @@ describe('NotificationOutbox', () => {
     ).rejects.toThrow(/too many configuration snapshots/)
   })
 
-  it('1 通知先が成功済みなら、別の通知先の transient failure 後も再送しない', async () => {
+  it('a destination that already succeeded is not resent after a transient failure of another destination', async () => {
     await repository.commitUserState('u', state, [intent()])
     const { outbox, send } = setup(repository, ['a', 'b'])
     send
@@ -268,7 +268,7 @@ describe('NotificationOutbox', () => {
     expect(resumed.send.mock.calls.map(([name]) => name)).toEqual(['b'])
   })
 
-  it('送達不明は永続化され、自動再送されない', async () => {
+  it('an uncertain delivery is persisted and not retried automatically', async () => {
     await repository.commitUserState('u', state, [intent()])
     const { outbox, send } = setup()
     send.mockRejectedValue(
@@ -285,7 +285,7 @@ describe('NotificationOutbox', () => {
     expect(send).toHaveBeenCalledTimes(1)
   })
 
-  it('再起動時の sending は uncertain に変更して再送しない', async () => {
+  it('a sending entry at restart is changed to uncertain and not retried', async () => {
     const entry = intent()
     entry.deliveries = [
       { name: 'a', embed: { title: 'a' }, status: 'sending', attempts: 1 },
@@ -302,7 +302,7 @@ describe('NotificationOutbox', () => {
     )
   })
 
-  it('429 は通知を保持して指定された待機時間の後に再試行する', async () => {
+  it('a 429 keeps the notification and retries after the specified wait', async () => {
     await repository.commitUserState('u', state, [intent()])
     const { outbox, send } = setup()
     send.mockRejectedValue(new DeliveryError('rate limited', 429, 60_000))
@@ -320,7 +320,7 @@ describe('NotificationOutbox', () => {
     expect(send).toHaveBeenCalledTimes(1)
   })
 
-  it('shutdown は通信を中断し、送達不明の結果を保存するまで待つ', async () => {
+  it('shutdown aborts the request and waits until the uncertain result is saved', async () => {
     await repository.commitUserState('u', state, [intent()])
     const { promise, reject } = Promise.withResolvers<undefined>()
     const { outbox, send, stop } = setup()
@@ -343,7 +343,7 @@ describe('NotificationOutbox', () => {
     )
   })
 
-  it('永続化の失敗では state も通知予定も確定しない', async () => {
+  it('a persistence failure commits neither the state nor the pending notification', async () => {
     const first = intent()
     await repository.commitUserState('u', state, [first])
     await expect(

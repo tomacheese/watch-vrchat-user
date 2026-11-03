@@ -21,15 +21,15 @@ function tempFilePath(): string {
   )
 }
 
-// VRChat SDK の pipeline は Node 流の EventEmitter API を持つため、
-// fake もそれに合わせる（EventTarget では on()/emit() の形が一致しない）。
+// The VRChat SDK's pipeline has a Node-style EventEmitter API, so the fake
+// follows it (an EventTarget does not match the on()/emit() shape).
 function fakePipeline(): PipelineEventEmitterLike & EventEmitter {
   // eslint-disable-next-line unicorn/prefer-event-target
   return new EventEmitter()
 }
 
 describe('PipelineEventRouter', () => {
-  it('対象ユーザーの friend-location を coordinator へ enqueue する', () => {
+  it('enqueues a friend-location for the user to the coordinator', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
     const coordinator = new UserStateCoordinator(
@@ -54,7 +54,7 @@ describe('PipelineEventRouter', () => {
     })
   })
 
-  it('全ユーザーの event を対象にする（targetUserIds フィルタなし）', () => {
+  it('handles events of all users (no targetUserIds filter)', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
     const coordinator = new UserStateCoordinator(
@@ -75,7 +75,7 @@ describe('PipelineEventRouter', () => {
     expect(enqueueSpy).toHaveBeenCalledWith('usr_2', 'Bob', { type: 'online' })
   })
 
-  it('friend-online の有効な location を online observation に載せる', () => {
+  it('puts a usable friend-online location on the online observation', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
     const coordinator = new UserStateCoordinator(
@@ -114,7 +114,7 @@ describe('PipelineEventRouter', () => {
     ])
   })
 
-  it('friend-add / friend-delete を observation として enqueue する', () => {
+  it('enqueues friend-add / friend-delete as observations', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
     const coordinator = new UserStateCoordinator(
@@ -141,7 +141,7 @@ describe('PipelineEventRouter', () => {
     })
   })
 
-  it('friend-add / friend-delete の不正な payload は無視する', () => {
+  it('ignores invalid friend-add / friend-delete payloads', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
     const coordinator = new UserStateCoordinator(
@@ -162,7 +162,7 @@ describe('PipelineEventRouter', () => {
     expect(enqueueSpy).not.toHaveBeenCalled()
   })
 
-  it('friend-update のステータスを profile observation として enqueue する', () => {
+  it('enqueues the friend-update status as a profile observation', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
     const coordinator = new UserStateCoordinator(
@@ -184,7 +184,7 @@ describe('PipelineEventRouter', () => {
         statusDescription: '作業中',
       },
     })
-    // status を含まない更新（bio / avatar など）と不正な payload は無視する
+    // Updates without status (bio / avatar etc.) and invalid payloads are ignored
     pipeline.emit('friend-update', {
       userId: 'usr_4',
       user: { id: 'usr_4', displayName: 'Dave' },
@@ -198,7 +198,7 @@ describe('PipelineEventRouter', () => {
     })
   })
 
-  it('friend-online / friend-location の user からステータスを取り出す', () => {
+  it('extracts the status from the user of friend-online / friend-location', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
     const coordinator = new UserStateCoordinator(
@@ -236,7 +236,7 @@ describe('PipelineEventRouter', () => {
     })
   })
 
-  it('attach を再実行しても listener が重複しない', () => {
+  it('does not duplicate listeners when attach is called again', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
     const coordinator = new UserStateCoordinator(
@@ -255,7 +255,7 @@ describe('PipelineEventRouter', () => {
     expect(enqueueSpy).toHaveBeenCalledTimes(1)
   })
 
-  it('不正な payload は enqueue せず無視する', () => {
+  it('ignores invalid payloads without enqueueing', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
     const coordinator = new UserStateCoordinator(
@@ -273,7 +273,7 @@ describe('PipelineEventRouter', () => {
     expect(enqueueSpy).not.toHaveBeenCalled()
   })
 
-  it('friend-offline はフォールバック displayName で enqueue する', () => {
+  it('enqueues friend-offline with the fallback displayName', () => {
     const repository = new UserStateRepository(tempFilePath())
     repository.load()
     const coordinator = new UserStateCoordinator(
@@ -295,7 +295,7 @@ describe('PipelineEventRouter', () => {
 })
 
 describe('router lifecycle', () => {
-  it('detach は他の利用者の listener を維持して自身の listener を解除する', () => {
+  it("detach removes its own listeners and keeps other users' listeners", () => {
     const repository = new UserStateRepository(tempFilePath())
     const coordinator = new UserStateCoordinator(
       repository,
@@ -317,7 +317,7 @@ describe('router lifecycle', () => {
     expect(otherListener).toHaveBeenCalledTimes(1)
   })
 
-  it('別 pipeline への attach は古い pipeline の listener を解除する', () => {
+  it('attaching to another pipeline removes the listeners of the old pipeline', () => {
     const repository = new UserStateRepository(tempFilePath())
     const coordinator = new UserStateCoordinator(
       repository,

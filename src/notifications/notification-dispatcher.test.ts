@@ -24,7 +24,7 @@ const URL_SUB = 'https://discord.com/api/webhooks/2/secret-sub'
 const HOME = 'https://vrchat.com/home'
 const WORLD = 'wrld_00000000-0000-0000-0000-000000000001'
 
-/** Embed に出る world / instance のリンクを組み立てる（括弧は URL エンコードされる） */
+/** Builds the world / instance links shown in the Embed (parentheses are URL-encoded) */
 function linked(world: string, label: string, instanceId: string): string {
   const id = encodeURIComponent(instanceId)
     .replaceAll('(', '%28')
@@ -92,7 +92,7 @@ describe('NotificationDispatcher', () => {
     logs.length = 0
   })
 
-  it('AC-5: 2 ルールが同じ destination に一致しても 1 通で footer に両ルール名を載せる', async () => {
+  it('AC-5: two rules matching the same destination produce one message with both rule names in the footer', async () => {
     const { dispatcher, send } = setup()
     await dispatcher.handleEffect(
       'usr_1',
@@ -111,7 +111,7 @@ describe('NotificationDispatcher', () => {
     expect(sub?.[2].footer?.text).toBe('検知ルール: b')
   })
 
-  it('一致 0 件なら送信しない', async () => {
+  it('sends nothing when no rule matches', async () => {
     const { dispatcher, send } = setup()
     await dispatcher.handleEffect(
       'usr_1',
@@ -122,7 +122,7 @@ describe('NotificationDispatcher', () => {
     expect(send).not.toHaveBeenCalled()
   })
 
-  it('no-op は何もしない', async () => {
+  it('a no-op does nothing', async () => {
     const { dispatcher, send } = setup()
     await dispatcher.handleEffect(
       'usr_1',
@@ -133,7 +133,7 @@ describe('NotificationDispatcher', () => {
     expect(send).not.toHaveBeenCalled()
   })
 
-  it('一方の destination が失敗しても他方は送信される', async () => {
+  it('the other destination is still sent when one fails', async () => {
     const { dispatcher, send } = setup()
     send.mockImplementation((name) =>
       name === 'main' ? Promise.reject(new Error('boom')) : Promise.resolve()
@@ -149,7 +149,7 @@ describe('NotificationDispatcher', () => {
     expect(send).toHaveBeenCalledTimes(2)
   })
 
-  it('送信が失敗した destination はエラーログに残り（URL なし）、他方は送信される', async () => {
+  it('a failed destination is logged as an error (without the URL) and the other is still sent', async () => {
     const { dispatcher, send } = setup()
     send.mockImplementation((name, url) =>
       name === 'main'
@@ -168,7 +168,7 @@ describe('NotificationDispatcher', () => {
     expect(output).not.toContain(URL_MAIN)
   })
 
-  it('スナップショットに無い destination は warn ログに残し、他方は送信される', async () => {
+  it('a destination missing from the snapshot is logged as a warning and the other is still sent', async () => {
     const { dispatcher, send } = setup()
     await dispatcher.handleEffect(
       'usr_1',
@@ -180,7 +180,7 @@ describe('NotificationDispatcher', () => {
     expect(logs.join('\n')).toContain('Destination "ghost" is not defined')
   })
 
-  it('World 取得失敗時は Embed に失敗表示が出て、CEL の name は欠落する', async () => {
+  it('on a World fetch failure the Embed shows a failure notice and the CEL name is absent', async () => {
     const { dispatcher, send, record } = setup(
       jest.fn().mockRejectedValue(new Error('down'))
     )
@@ -203,7 +203,7 @@ describe('NotificationDispatcher', () => {
     expect(JSON.stringify(embed.fields)).toContain('取得失敗')
   })
 
-  it('インスタンスオーナーを解決して Embed に表示し、public では解決しない', async () => {
+  it('resolves the instance owner and shows it in the Embed, but not for public instances', async () => {
     const { dispatcher, send, ownerResolve } = setup()
     await dispatcher.handleEffect(
       'usr_1',
@@ -218,7 +218,7 @@ describe('NotificationDispatcher', () => {
     )
   })
 
-  it('ルールに一致しない場合はオーナーを解決しない', async () => {
+  it('does not resolve the owner when no rule matches', async () => {
     const { dispatcher, send, ownerResolve } = setup()
     await dispatcher.handleEffect(
       'usr_1',
@@ -230,7 +230,7 @@ describe('NotificationDispatcher', () => {
     expect(ownerResolve).not.toHaveBeenCalled()
   })
 
-  it('previous 側のオーナーも解決して表示する', async () => {
+  it('also resolves and shows the previous owner', async () => {
     const { dispatcher, send, ownerResolve } = setup()
     await dispatcher.handleEffect(
       'usr_1',
@@ -249,7 +249,7 @@ describe('NotificationDispatcher', () => {
     )
   })
 
-  it('オーナーの解決に失敗しても通知は送られ、ID が表示される', async () => {
+  it('the notification is still sent and the ID shown when owner resolution fails', async () => {
     const { dispatcher, send, ownerResolve } = setup()
     ownerResolve.mockRejectedValue(new Error('down'))
     await dispatcher.handleEffect(
@@ -264,7 +264,7 @@ describe('NotificationDispatcher', () => {
     )
   })
 
-  it('stale の場合は最終取得時刻を表示する', () => {
+  it('shows the last fetch time when stale', () => {
     const embed = buildEmbed(
       move,
       { current: { stale: true, lastFetchedAt: '2026-01-01T00:00:00.000Z' } },
@@ -275,7 +275,7 @@ describe('NotificationDispatcher', () => {
     )
   })
 
-  it('評価エラーは RuleErrorLog に記録され、他ルールの通知は継続する', async () => {
+  it('evaluation errors are recorded in RuleErrorLog and other rules still notify', async () => {
     const { dispatcher, send, record } = setup()
     await dispatcher.handleEffect(
       'usr_1',
@@ -295,7 +295,7 @@ describe('NotificationDispatcher', () => {
     expect(send).toHaveBeenCalledTimes(1)
   })
 
-  it('Webhook URL はログに出力されない', async () => {
+  it('the Webhook URL is not logged', async () => {
     const { dispatcher, send } = setup()
     send.mockRejectedValue(new Error('x'))
     await dispatcher.handleEffect(
@@ -335,7 +335,7 @@ describe('buildEmbed', () => {
     ],
   ]
 
-  it.each(effects)('%s のタイトルとユーザー field', (_n, effect, title) => {
+  it.each(effects)('%s title and user field', (_n, effect, title) => {
     const embed = buildEmbed(effect, {}, ['r'])
     expect(embed.title).toBe(title)
     expect(embed.fields?.[0]).toMatchObject({
@@ -345,7 +345,7 @@ describe('buildEmbed', () => {
     expect(embed.footer?.text).toBe('検知ルール: r')
   })
 
-  it('location-change は移動前後のワールドと instance 種別を表示する', () => {
+  it('location-change shows the worlds and instance type before and after the move', () => {
     const embed = buildEmbed(
       move,
       { previous: { name: 'Old' }, current: { name: 'New' } },
@@ -359,7 +359,7 @@ describe('buildEmbed', () => {
     )
   })
 
-  it('オーナー名が解決できていれば名前を、失敗していれば ID を表示する', () => {
+  it('shows the owner name when resolved and the ID when not', () => {
     const resolved = buildEmbed(
       move,
       { current: { name: 'New' } },
@@ -382,7 +382,7 @@ describe('buildEmbed', () => {
     )
   })
 
-  it(String.raw`リンクの表示文字列に含まれる [ ] \ はエスケープされる`, () => {
+  it(String.raw`[ ] \ in link text are escaped`, () => {
     const embed = buildEmbed(
       {
         type: 'offline',
@@ -397,7 +397,7 @@ describe('buildEmbed', () => {
     )
   })
 
-  it('public にはオーナー行を出さない', () => {
+  it('public instances show no owner line', () => {
     const embed = buildEmbed(move, { previous: { name: 'Old' } }, ['r'])
     expect(embed.fields?.[1].value).not.toContain('👤')
   })
@@ -409,7 +409,7 @@ describe('buildEmbed', () => {
     ['group-public', 'Group Public'],
     ['group-plus', 'Group+'],
     ['group-members', 'Group'],
-  ] as const)('instance 種別 %s は %s と表示する', (type, label) => {
+  ] as const)('instance type %s is displayed as %s', (type, label) => {
     const tags: Record<string, string> = {
       friends: '~friends(usr_a)',
       invite: '~private(usr_a)',
@@ -435,7 +435,7 @@ describe('buildEmbed', () => {
     )
   })
 
-  it('インスタンス ID を持たない Location は instanceId なしの起動リンクにする', () => {
+  it('a Location without an instance ID gets a launch link without instanceId', () => {
     const embed = buildEmbed(
       {
         type: 'online',
@@ -450,7 +450,7 @@ describe('buildEmbed', () => {
     expect(value).not.toContain('instanceId=')
   })
 
-  it('status-change は変わった項目だけを VRChat 上の表記で表示する', () => {
+  it('status-change shows only the changed fields, as written in VRChat', () => {
     const embed = buildEmbed(
       {
         type: 'status-change',
@@ -484,7 +484,7 @@ describe('buildEmbed', () => {
     ])
   })
 
-  it('status-change は変更前のステータスが未確認なら、メッセージだけを表示する', () => {
+  it('status-change shows only the message when the previous status is unknown', () => {
     const embed = buildEmbed(
       {
         type: 'status-change',
@@ -503,7 +503,7 @@ describe('buildEmbed', () => {
     ])
   })
 
-  it('private は Private、Location 不明は 不明 と表示する', () => {
+  it('private is shown as Private and an unknown Location as 不明', () => {
     const priv = buildEmbed(
       { type: 'online', previous: undefined, current: state('private') },
       {},
@@ -518,7 +518,7 @@ describe('buildEmbed', () => {
     expect(unknown.fields?.[1].value).toBe('不明')
   })
 
-  it('上限を超える入力を切り詰める', () => {
+  it('truncates input over the limit', () => {
     const long = 'あ'.repeat(3000)
     const embed = buildEmbed(
       {

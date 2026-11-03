@@ -2,8 +2,8 @@ import { EventEmitter } from 'node:events'
 import { PipelineTransportAdapter } from './pipeline-transport'
 import type { VRChat } from 'vrchat'
 
-// 本物の raw WebSocket (ws ライブラリ) は Node 流の EventEmitter API を持つため、
-// fake もそれに合わせる（EventTarget では on()/emit() の形が一致しない）。
+// The real raw WebSocket (the ws library) has a Node-style EventEmitter API,
+// so the fake follows it (an EventTarget does not match the on()/emit() shape).
 // eslint-disable-next-line unicorn/prefer-event-target
 class FakeRawWebSocket extends EventEmitter {
   readyState = 0 // CONNECTING
@@ -21,10 +21,10 @@ function fakeVRChat(
 }
 
 describe('PipelineTransportAdapter.connect', () => {
-  it('authenticate 開始後、即座に raw socket へ listener を登録してから OPEN を待つ', async () => {
+  it('registers listeners on the raw socket right after authenticate starts, then waits for OPEN', async () => {
     const rawWs = new FakeRawWebSocket()
     const authenticate = jest.fn().mockImplementation(async () => {
-      // authenticate が resolve する前に open を発火させても listener は既に登録済みであること
+      // Listeners must already be registered even if open fires before authenticate resolves
       await new Promise((resolve) => setImmediate(resolve))
       rawWs.readyState = 1 // OPEN
       rawWs.emit('open')
@@ -45,7 +45,7 @@ describe('PipelineTransportAdapter.connect', () => {
     expect(authenticate).toHaveBeenCalledWith('cookie')
   })
 
-  it('OPEN 待機がタイムアウトすると reject する', async () => {
+  it('rejects when waiting for OPEN times out', async () => {
     const rawWs = new FakeRawWebSocket()
     const authenticate = jest.fn().mockResolvedValue(undefined)
     const vrchat = fakeVRChat(rawWs, authenticate)
@@ -67,10 +67,10 @@ describe('PipelineTransportAdapter.connect', () => {
     ).rejects.toThrow(/timed out/)
   })
 
-  it('OPEN 待機タイムアウト後に authenticate が reject しても unhandled rejection にならない', async () => {
+  it('does not cause an unhandled rejection if authenticate rejects after the OPEN timeout', async () => {
     const rawWs = new FakeRawWebSocket()
-    // Promise.withResolvers() の resolve は `(value: void) => void` 型となり
-    // no-invalid-void-type と衝突するため、この形のまま使う
+    // The resolve of Promise.withResolvers() is typed `(value: void) => void`,
+    // which conflicts with no-invalid-void-type, so it is used as-is
     const { promise: authenticatePromise, reject: rejectAuthenticate } =
       // eslint-disable-next-line @typescript-eslint/no-invalid-void-type
       Promise.withResolvers<void>()
@@ -103,7 +103,7 @@ describe('PipelineTransportAdapter.connect', () => {
     process.off('unhandledRejection', unhandled)
   })
 
-  it('raw message/pong を liveness コールバックへ橋渡しする', async () => {
+  it('bridges raw message/pong to the liveness callbacks', async () => {
     const rawWs = new FakeRawWebSocket()
     rawWs.readyState = 1
     const authenticate = jest.fn().mockResolvedValue(undefined)
@@ -129,7 +129,7 @@ describe('PipelineTransportAdapter.connect', () => {
 })
 
 describe('PipelineTransportAdapter lifecycle recovery', () => {
-  it('OPEN 前の close を即座に失敗とし、待機 listener を除去する', async () => {
+  it('treats a close before OPEN as an immediate failure and removes the waiting listeners', async () => {
     const raw = new FakeRawWebSocket()
     const adapter = new PipelineTransportAdapter()
     const pending = adapter.connect(
@@ -150,7 +150,7 @@ describe('PipelineTransportAdapter lifecycle recovery', () => {
     expect(raw.listenerCount('close')).toBe(1)
   })
 
-  it('close は旧 socket の SDK message 転送を停止する', () => {
+  it('close stops the old socket from forwarding messages to the SDK', () => {
     const raw = new FakeRawWebSocket()
     const sdkMessage = jest.fn()
     raw.on('message', sdkMessage)
@@ -162,7 +162,7 @@ describe('PipelineTransportAdapter lifecycle recovery', () => {
 })
 
 describe('PipelineTransportAdapter.getReadyState / ping / close', () => {
-  it('raw socket の readyState を返す', () => {
+  it('returns the raw socket readyState', () => {
     const rawWs = new FakeRawWebSocket()
     rawWs.readyState = 1
     const vrchat = fakeVRChat(rawWs, jest.fn())
@@ -170,7 +170,7 @@ describe('PipelineTransportAdapter.getReadyState / ping / close', () => {
     expect(adapter.getReadyState(vrchat)).toBe(1)
   })
 
-  it('raw socket が存在しない場合は例外を投げず CLOSED を返す', () => {
+  it('returns CLOSED without throwing when no raw socket exists', () => {
     const vrchat = {
       pipeline: { authenticate: jest.fn(), websocket: undefined },
     } as unknown as VRChat
@@ -178,7 +178,7 @@ describe('PipelineTransportAdapter.getReadyState / ping / close', () => {
     expect(adapter.getReadyState(vrchat)).toBe(3)
   })
 
-  it('ping は raw socket の ping を呼ぶ', () => {
+  it('ping calls the raw socket ping', () => {
     const rawWs = new FakeRawWebSocket()
     const vrchat = fakeVRChat(rawWs, jest.fn())
     const adapter = new PipelineTransportAdapter()
@@ -186,7 +186,7 @@ describe('PipelineTransportAdapter.getReadyState / ping / close', () => {
     expect(rawWs.ping).toHaveBeenCalledTimes(1)
   })
 
-  it('close は pipeline.close を best-effort で呼ぶ', () => {
+  it('close calls pipeline.close on a best-effort basis', () => {
     const rawWs = new FakeRawWebSocket()
     const close = jest.fn()
     const vrchat = fakeVRChat(rawWs, jest.fn(), close)
@@ -196,7 +196,7 @@ describe('PipelineTransportAdapter.getReadyState / ping / close', () => {
     expect(close).toHaveBeenCalledTimes(1)
   })
 
-  it('pipeline.close が例外を投げても close は例外を伝播させない', () => {
+  it('close does not propagate an exception thrown by pipeline.close', () => {
     const rawWs = new FakeRawWebSocket()
     const close = jest.fn().mockImplementation(() => {
       throw new Error('already closed')

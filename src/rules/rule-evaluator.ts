@@ -7,13 +7,13 @@ import {
   type RuleError,
 } from './rule-engine'
 
-/** Worker 起動と 1 ルールの実行に対する期限 */
+/** Deadline for Worker startup and for running one rule */
 export interface RuleEvaluatorOptions {
   timeoutMs?: number
   startupTimeoutMs?: number
 }
 
-// 設定由来の式は実行コードへ挿入せず、structured clone で送る。
+// Config-derived expressions are sent via structured clone, never interpolated into executable code.
 const WORKER_SOURCE = `
 const { parentPort, workerData } = require('node:worker_threads');
 (async () => {
@@ -42,7 +42,7 @@ const { parentPort, workerData } = require('node:worker_threads');
 })().catch(() => process.exit(1));
 `
 
-/** CEL を期限付き Worker で評価し、問題のあるルールだけを不一致にする */
+/** Evaluates CEL in a Worker with a deadline; only the problematic rule is treated as non-matching */
 export class RuleEvaluator {
   private readonly timeoutMs: number
   private readonly startupTimeoutMs: number
@@ -50,13 +50,13 @@ export class RuleEvaluator {
   private queue: Promise<unknown> = Promise.resolve()
   private stopped = false
 
-  /** 評価期限を設定する */
+  /** Sets the evaluation deadline */
   constructor(options: RuleEvaluatorOptions = {}) {
     this.timeoutMs = options.timeoutMs ?? 100
     this.startupTimeoutMs = options.startupTimeoutMs ?? 2000
   }
 
-  /** 複数イベントの評価を直列化し、同じ Worker の応答を混同しない */
+  /** Serializes evaluation across events so responses from the same Worker are not mixed up */
   async evaluate(
     rules: readonly CompiledRule[],
     context: Record<string, unknown>
@@ -68,13 +68,13 @@ export class RuleEvaluator {
     return operation
   }
 
-  /** 評価中の Worker を停止する */
+  /** Stops the Worker in use */
   async stop(): Promise<void> {
     this.stopped = true
     await this.discardWorker()
   }
 
-  /** 各ルールの期限切れ後は Worker を捨て、後続ルールを別 Worker で続ける */
+  /** After a rule times out, discards the Worker and continues with later rules in a fresh one */
   private async evaluateSerial(
     rules: readonly CompiledRule[],
     context: Record<string, unknown>
@@ -116,14 +116,14 @@ export class RuleEvaluator {
     return { matched, errors }
   }
 
-  /** Worker の初期化はルール実行とは別の期限で待つ */
+  /** Worker initialization is awaited with a deadline separate from rule execution */
   private async getWorker(): Promise<Worker> {
     if (this.stopped) throw new Error('Rule evaluator stopped')
     if (this.worker) return this.worker
     const worker = new Worker(WORKER_SOURCE, {
       eval: true,
       workerData: {
-        // CommonJS と ts-jest の両方でこのモジュールから依存を解決する。
+        // Resolve dependencies from this module under both CommonJS and ts-jest.
         // eslint-disable-next-line unicorn/prefer-module
         modulePath: createRequire(__filename).resolve('@marcbachmann/cel-js'),
         limits: CEL_LIMITS,
@@ -134,14 +134,14 @@ export class RuleEvaluator {
       },
     })
     this.worker = worker
-    // 待機中以外は Worker がプロセス終了を妨げない。
+    // Outside of waiting, the Worker does not keep the process alive.
     worker.unref()
     const result = await this.receive(worker, this.startupTimeoutMs)
     if (!result.ready) throw new Error('Rule worker failed to initialize')
     return worker
   }
 
-  /** リスナーを確実に解除して 1 回の Worker 応答を待つ */
+  /** Waits for one Worker response, always removing the listeners */
   private async receive(
     worker: Worker,
     timeoutMs: number,
@@ -167,7 +167,7 @@ export class RuleEvaluator {
         reject(new Error('Rule worker exited'))
       }
       const timer = setTimeout(() => {
-        // main thread の停止で応答済みの評価を期限切れと誤判定しないよう、reject を 1 周遅らせる
+        // Delay the reject by one tick so an already-answered evaluation is not misjudged as timed out by a main thread stall
         setImmediate(() => {
           reject(new Error(`Rule evaluation timed out after ${timeoutMs}ms`))
         })
@@ -189,7 +189,7 @@ export class RuleEvaluator {
     }
   }
 
-  /** 期限切れの処理を OS スレッドごと終了する */
+  /** Terminates the timed-out work together with its OS thread */
   private async discardWorker(): Promise<void> {
     const worker = this.worker
     this.worker = undefined

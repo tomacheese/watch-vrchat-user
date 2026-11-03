@@ -270,7 +270,7 @@ function createSchema(database: DatabaseSync, data: StoreData): void {
   }
 }
 
-/** state と outbox を transaction で保存する SQLite repository */
+/** SQLite repository that saves state and outbox in one transaction */
 export class UserStateRepository {
   private data: StoreData = emptyData()
   private readonly filePath: string
@@ -291,7 +291,7 @@ export class UserStateRepository {
     this.databaseFilePath = getUserStateDatabasePath(this.filePath)
   }
 
-  /** JSON schema 3 を SQLite へ一度だけ移行し、不正な既存データは保持して停止する */
+  /** Migrates JSON schema 3 to SQLite exactly once; invalid existing data is preserved and startup stops */
   load(): void {
     if (this.options.exclusive) this.acquireWriterLock()
     if (fs.existsSync(this.databaseFilePath)) {
@@ -324,7 +324,7 @@ export class UserStateRepository {
     }
   }
 
-  /** アプリと recovery CLI の排他を SQLite の OS-level file lock で維持する */
+  /** Keeps the app and the recovery CLI mutually exclusive via a SQLite OS-level file lock */
   private acquireWriterLock(): void {
     const lockPath = `${this.databaseFilePath}.writer-lock.sqlite`
     fs.mkdirSync(path.dirname(lockPath), { recursive: true, mode: 0o700 })

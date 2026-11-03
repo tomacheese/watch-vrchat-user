@@ -2,9 +2,9 @@ import { Logger, type DiscordEmbed } from '@book000/node-utils'
 
 const logger = Logger.configure('DISCORD')
 
-/** HTTP 応答と送達結果を区別する配信エラー。秘密情報は保持しない */
+/** Delivery error distinguishing HTTP responses from delivery outcomes. Holds no secrets */
 export class DeliveryError extends Error {
-  /** 配信エラーの分類を初期化する */
+  /** Initializes the delivery error classification */
   constructor(
     message: string,
     readonly status?: number,
@@ -18,7 +18,7 @@ export class DeliveryError extends Error {
   }
 }
 
-/** 中断可能な Embed 配信クライアント */
+/** Abortable Embed delivery client */
 export interface EmbedClient {
   sendMessage(
     message: { embeds: DiscordEmbed[] },
@@ -26,14 +26,14 @@ export interface EmbedClient {
   ): Promise<unknown>
 }
 
-/** DiscordNotifier の生成オプション */
+/** Options for creating a DiscordNotifier */
 export interface DiscordNotifierOptions {
   createClient?: (url: string) => EmbedClient
   timeoutMs?: number
   retryDelayMs?: number
 }
 
-/** 同一 Webhook の配信を直列化し、HTTP の送達結果を呼び出し元へ返す */
+/** Serializes deliveries per Webhook and returns the HTTP delivery outcome to the caller */
 export class DiscordNotifier {
   private readonly queues = new Map<string, Promise<void>>()
   private readonly blockedUntil = new Map<string, number>()
@@ -43,14 +43,14 @@ export class DiscordNotifier {
   private readonly retryDelayMs: number
   private stopped = false
 
-  /** 配信期限とテスト用の通信実装を設定する */
+  /** Sets the delivery deadline and the transport implementation (replaceable in tests) */
   constructor(options: DiscordNotifierOptions = {}) {
     this.createClient = options.createClient
     this.timeoutMs = options.timeoutMs ?? 10_000
     this.retryDelayMs = options.retryDelayMs ?? 1000
   }
 
-  /** 同一 URL の待機列に配信を追加する */
+  /** Appends a delivery to the queue for the same URL */
   async send(name: string, url: string, embed: DiscordEmbed): Promise<void> {
     const previous = this.queues.get(url) ?? Promise.resolve()
     const operation = previous
@@ -75,14 +75,14 @@ export class DiscordNotifier {
     }
   }
 
-  /** 通信と rate limit の待機を中断する */
+  /** Aborts requests and rate-limit waits */
   stop(): void {
     this.stopped = true
     for (const controller of this.controllers) controller.abort()
     this.blockedUntil.clear()
   }
 
-  /** 429 の明示的な未受理だけを再送する。応答不明は outbox に判断を返す */
+  /** Retries only an explicit 429 rejection; an unknown outcome is left to the outbox to decide */
   private async deliver(
     name: string,
     url: string,
@@ -116,7 +116,7 @@ export class DiscordNotifier {
     }
   }
 
-  /** HTTP 通信を期限付きで実行し、曖昧な失敗は再送しない */
+  /** Performs the HTTP request with a deadline; ambiguous failures are not retried */
   private async request(url: string, embed: DiscordEmbed): Promise<void> {
     if (this.stopped)
       throw new DeliveryError(
@@ -159,7 +159,7 @@ export class DiscordNotifier {
       await Promise.race([operation, aborted])
     } catch (error) {
       if (error instanceof DeliveryError) throw error
-      // ネットワークの例外には URL が含まれ得るため元のメッセージを公開しない。
+      // Network exceptions may contain the URL, so the original message is not exposed.
       throw new DeliveryError(
         'Discord delivery outcome is unknown',
         undefined,
@@ -173,7 +173,7 @@ export class DiscordNotifier {
     }
   }
 
-  /** 成功応答と HTTP 失敗を構造化する */
+  /** Structures successful responses and HTTP failures */
   private async post(
     url: string,
     embed: DiscordEmbed,
@@ -212,7 +212,7 @@ export class DiscordNotifier {
           )
         }
       } catch {
-        // 本文が壊れていても header の待機時間は保持する。
+        // Keep the header wait time even if the body is malformed.
       }
     } else {
       await response.body?.cancel()
@@ -226,7 +226,7 @@ export class DiscordNotifier {
     )
   }
 
-  /** shutdown で中断できる待機 */
+  /** Wait that can be interrupted by shutdown */
   private async wait(ms: number): Promise<void> {
     if (this.stopped)
       throw new DeliveryError(

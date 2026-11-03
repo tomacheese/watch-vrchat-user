@@ -50,7 +50,7 @@ describe('HealthService', () => {
     delete process.env.HEALTH_HOST
   })
 
-  it('healthy な状態では 200 を返す', async () => {
+  it('returns 200 when healthy', async () => {
     process.env.HEALTH_PORT = '0'
     const service = new HealthService(() => healthySnapshot)
     service.start()
@@ -63,7 +63,7 @@ describe('HealthService', () => {
     service.stop()
   })
 
-  it('supervisorState が ready 以外の場合は 503 を返す', async () => {
+  it('returns 503 when supervisorState is not ready', async () => {
     process.env.HEALTH_PORT = '0'
     const service = new HealthService(() => ({
       ...healthySnapshot,
@@ -78,7 +78,7 @@ describe('HealthService', () => {
     service.stop()
   })
 
-  it('unhealthyUsers が存在する場合は 503 を返す', async () => {
+  it('returns 503 when unhealthyUsers exist', async () => {
     process.env.HEALTH_PORT = '0'
     const service = new HealthService(() => ({
       ...healthySnapshot,
@@ -99,7 +99,7 @@ describe('HealthService', () => {
     service.stop()
   })
 
-  it('getSnapshot が例外を投げても 503 を返し、プロセスをクラッシュさせない', async () => {
+  it('returns 503 without crashing the process when getSnapshot throws', async () => {
     process.env.HEALTH_PORT = '0'
     const service = new HealthService(() => {
       throw new Error('Pipeline raw WebSocket is not available')
@@ -115,7 +115,7 @@ describe('HealthService', () => {
 
   const degradedCases: [string, Partial<HealthSnapshot>][] = [
     [
-      'config reload 失敗',
+      'config reload failure',
       {
         config: {
           loadedAt: null,
@@ -138,7 +138,7 @@ describe('HealthService', () => {
       },
     ],
     [
-      'favorites 取得失敗',
+      'favorites fetch failure',
       {
         favorites: { lastUpdatedAt: null, lastError: 'Rate limit error (429)' },
       },
@@ -146,7 +146,7 @@ describe('HealthService', () => {
   ]
 
   it.each(degradedCases)(
-    '%s の場合は degraded かつ 200 を返す',
+    'returns degraded with 200 on %s',
     async (_name, patch) => {
       process.env.HEALTH_PORT = '0'
       const service = new HealthService(() => ({
@@ -164,7 +164,7 @@ describe('HealthService', () => {
     }
   )
 
-  it('unhealthy 条件は degraded 条件より優先される', async () => {
+  it('unhealthy conditions take precedence over degraded conditions', async () => {
     process.env.HEALTH_PORT = '0'
     const service = new HealthService(() => ({
       ...healthySnapshot,

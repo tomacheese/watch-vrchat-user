@@ -6,7 +6,7 @@ services:
       - VRCHAT_USERNAME=${VRCHAT_USERNAME}
       - VRCHAT_PASSWORD=${VRCHAT_PASSWORD}
       - VRCHAT_TOTP_SECRET=${VRCHAT_TOTP_SECRET:-}
-      # config.yaml の ${...} 展開に使う Webhook URL (config.yaml で参照する変数をここに追加する)
+      # Webhook URLs used by the ${...} expansion in config.yaml (add every variable that config.yaml references)
       - DISCORD_WEBHOOK_MAIN=${DISCORD_WEBHOOK_MAIN:-}
       - DISCORD_WEBHOOK_DANCE=${DISCORD_WEBHOOK_DANCE:-}
       - SENTRY_DSN=${SENTRY_DSN:-}

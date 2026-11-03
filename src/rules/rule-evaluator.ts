@@ -167,7 +167,10 @@ export class RuleEvaluator {
         reject(new Error('Rule worker exited'))
       }
       const timer = setTimeout(() => {
-        reject(new Error(`Rule evaluation timed out after ${timeoutMs}ms`))
+        // main thread の停止で応答済みの評価を期限切れと誤判定しないよう、reject を 1 周遅らせる
+        setImmediate(() => {
+          reject(new Error(`Rule evaluation timed out after ${timeoutMs}ms`))
+        })
       }, timeoutMs)
       worker.once('message', resolve)
       worker.once('error', onError)

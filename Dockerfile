@@ -23,8 +23,8 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm fetch
 COPY tsconfig.json ./
 COPY src src
 
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --offline && \
-  rm -rf patches
+# patches は ENTRYPOINT の pnpm start が行う依存関係の検証でも参照されるため、実行時イメージにも残す
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --offline
 
 # 環境変数でデータディレクトリを /data に設定
 ENV COOKIE_FILE_PATH=/data/vrchat-cookies.json

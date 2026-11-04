@@ -3,25 +3,25 @@ import type { ReducerEffect } from '../state/user-state-reducer'
 import type { UserState } from '../state/user-state'
 import type { WorldResolveResult } from '../vrchat/world-resolver'
 
-/** 通知対象の effect（no-op を除く） */
+/** Effect to notify about (excludes no-op) */
 export type NotifiableEffect = Exclude<ReducerEffect, { type: 'no-op' }>
 
-/** previous / current それぞれの World 解決結果 */
+/** World resolution results for previous / current */
 export interface ContextWorlds {
   previous?: WorldResolveResult
   current?: WorldResolveResult
 }
 
-/** previous / current それぞれのインスタンスオーナー名の解決結果（通知表示用） */
+/** Instance owner name resolution results for previous / current (display only) */
 export type ContextOwners = ContextWorlds
 
 /**
- * 1 つの state を CEL 公開用の構造へ変換する
+ * Converts one state into the structure exposed to CEL
  *
- * @param state 変換対象の state
- * @param membership Favorite group の所属
- * @param world World 解決結果
- * @returns CEL コンテキスト用オブジェクト
+ * @param state State to convert
+ * @param membership Favorite group membership
+ * @param world World resolution result
+ * @returns Object for the CEL context
  */
 function buildSide(
   state: UserState,
@@ -32,7 +32,7 @@ function buildSide(
   if (state.location !== null) {
     const parsed = parseLocation(state.location)
     if (parsed.visible) {
-      // 未取得の World 値は含めず、参照する式を評価エラーにする。
+      // Omit World values that are not fetched so expressions referencing them fail evaluation.
       const hasName = world?.name !== undefined && world.stale !== true
       const hasCapacity = world?.capacity !== undefined && world.stale !== true
       const worldInfo: Record<string, unknown> = {
@@ -59,15 +59,15 @@ function buildSide(
 }
 
 /**
- * effect から CEL の評価コンテキストを組み立てる
+ * Builds the CEL evaluation context from an effect
  *
- * `friend-add` は previous が null、`friend-delete` は current が null になる。
+ * `previous` is null for `friend-add` and `current` is null for `friend-delete`.
  *
- * @param effect 通知対象の effect
- * @param membership 評価時点の Favorite group 所属
- * @param worlds World 解決結果
- * @param now 評価時刻（`event.month` などの算出に使う。ローカルタイムゾーンで解釈する）
- * @returns CEL コンテキスト
+ * @param effect Effect to notify about
+ * @param membership Favorite group membership at evaluation time
+ * @param worlds World resolution results
+ * @param now Evaluation time (used for `event.month` etc., interpreted in the local time zone)
+ * @returns CEL context
  */
 export function buildContext(
   effect: NotifiableEffect,
@@ -77,7 +77,7 @@ export function buildContext(
 ): Record<string, unknown> {
   const subject = effect.current ?? effect.previous
   return {
-    // 時刻は CEL の int リテラルと算術・比較できるよう bigint で渡す
+    // Pass time values as bigint so CEL can do arithmetic and comparisons with int literals
     event: {
       type: effect.type,
       month: BigInt(now.getMonth() + 1),

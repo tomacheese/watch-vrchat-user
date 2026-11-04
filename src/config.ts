@@ -3,34 +3,34 @@ import { Logger } from '@book000/node-utils'
 const logger = Logger.configure('CONFIG')
 
 /**
- * VRChat 認証情報の設定
+ * VRChat credentials
  */
 interface VRChatConfig {
-  /** VRChat ユーザー名（メールアドレス） */
+  /** VRChat username (email address) */
   username: string
-  /** VRChat パスワード */
+  /** VRChat password */
   password: string
-  /** TOTP シークレット（設定すると自動 2FA） */
+  /** TOTP secret (enables automatic 2FA when set) */
   totpSecret?: string
 }
 
 /**
- * アプリケーション全体の設定
+ * Application-wide configuration
  */
 export interface Config {
-  /** VRChat 認証情報 */
+  /** VRChat credentials */
   vrchat: VRChatConfig
-  /** 通知ルール設定ファイル (YAML) のパス */
+  /** Path to the notification rule config file (YAML) */
   configPath: string
 }
 
 /**
- * 必須環境変数を取得する
- * 存在しない場合はエラーをスローする
+ * Gets a required environment variable
+ * Throws if it is not set.
  *
- * @param name 環境変数名
- * @returns 環境変数の値
- * @throws 環境変数が設定されていない場合
+ * @param name Environment variable name
+ * @returns The environment variable value
+ * @throws If the environment variable is not set
  */
 function getRequiredEnv(name: string): string {
   const value = process.env[name]
@@ -41,10 +41,10 @@ function getRequiredEnv(name: string): string {
 }
 
 /**
- * 環境変数から設定を読み込む
+ * Loads the configuration from environment variables
  *
- * @returns アプリケーション設定
- * @throws 必須環境変数が設定されていない場合
+ * @returns Application configuration
+ * @throws If a required environment variable is not set
  */
 export function loadConfig(): Config {
   const errors = [

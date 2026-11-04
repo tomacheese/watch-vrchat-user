@@ -6,7 +6,7 @@ jest.mock('@book000/node-utils', () => ({
 const URL = 'https://discord.com/api/webhooks/1/secret'
 const embed = { title: 't' }
 
-/** テスト用 HTTP 応答 */
+/** HTTP response for tests */
 function response(status = 200, retryAfter?: number): Response {
   return new Response(
     status === 200 ? '{}' : JSON.stringify({ retry_after: retryAfter }),
@@ -23,7 +23,7 @@ describe('DiscordNotifier', () => {
     jest.restoreAllMocks()
   })
 
-  it('送信期限は通信を中断し、送達不明な POST を再送しない', async () => {
+  it('the delivery deadline aborts the request and an uncertain POST is not retried', async () => {
     let signal: AbortSignal | undefined
     const fetchSpy = jest
       .spyOn(globalThis, 'fetch')
@@ -44,7 +44,7 @@ describe('DiscordNotifier', () => {
     notifier.stop()
   })
 
-  it('同じ URL の異なる destination も直列化する', async () => {
+  it('serializes different destinations that share a URL', async () => {
     const { promise, resolve: release } = Promise.withResolvers<undefined>()
     const sendMessage = jest
       .fn()
@@ -63,7 +63,7 @@ describe('DiscordNotifier', () => {
     notifier.stop()
   })
 
-  it('429 の指定された期間を待って再送する', async () => {
+  it('waits for the period specified by a 429 and retries', async () => {
     const times: number[] = []
     jest.spyOn(globalThis, 'fetch').mockImplementation(() => {
       times.push(Date.now())
@@ -81,7 +81,7 @@ describe('DiscordNotifier', () => {
     notifier.stop()
   })
 
-  it('5xx は outbox に再試行を返し、無効な Webhook は恒久失敗を返す', async () => {
+  it('5xx returns a retry to the outbox and an invalid Webhook returns a permanent failure', async () => {
     const fetchSpy = jest
       .spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(response(503))
@@ -100,7 +100,7 @@ describe('DiscordNotifier', () => {
     notifier.stop()
   })
 
-  it('shutdown は長い rate limit 待機も終了する', async () => {
+  it('shutdown also ends a long rate-limit wait', async () => {
     jest.spyOn(globalThis, 'fetch').mockResolvedValue(response(429, 60))
     const notifier = new DiscordNotifier()
     const send = notifier.send('main', URL, embed)
@@ -113,7 +113,7 @@ describe('DiscordNotifier', () => {
     await result
   })
 
-  it('未知の通信エラーに含まれる秘密情報は公開しない', async () => {
+  it('secrets in an unknown network error are not exposed', async () => {
     const notifier = new DiscordNotifier({
       createClient: () => ({
         sendMessage: () => Promise.reject(new Error(`bad ${URL}`)),

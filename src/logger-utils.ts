@@ -1,12 +1,12 @@
 /**
- * unknown 型の値を Error インスタンスに変換する
+ * Converts an unknown value to an Error instance
  *
- * catch 節で受け取る error は TypeScript 上 unknown 型であり、
- * Logger.error/warn の第 2 引数 (Error 型必須) にそのまま渡せないため、
- * Error でない場合は文字列化してラップする
+ * The error received in a catch clause is typed unknown, so it cannot be passed
+ * as-is to the second argument of Logger.error/warn (which requires an Error);
+ * non-Error values are stringified and wrapped
  *
- * @param error 変換対象の値
- * @returns Error インスタンス
+ * @param error Value to convert
+ * @returns An Error instance
  */
 export function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error))

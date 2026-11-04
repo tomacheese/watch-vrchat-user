@@ -17,10 +17,10 @@ jest.mock('@book000/node-utils', () => ({
 const WORLD = 'wrld_11111111-1111-1111-1111-111111111111'
 
 /**
- * テスト用の state を作る
+ * Builds a state for tests
  *
- * @param userId ユーザー ID
- * @param presence 在席状態
+ * @param userId User ID
+ * @param presence Presence
  * @param location raw Location
  * @returns state
  */
@@ -39,25 +39,25 @@ function state(
 }
 
 /**
- * テスト用のルールを作る
+ * Builds a rule for tests
  *
- * @param name ルール名
- * @param when CEL 式
- * @param enabled 有効か
- * @returns 生ルール
+ * @param name Rule name
+ * @param when CEL expression
+ * @param enabled Whether enabled
+ * @returns Raw rule
  */
 function rule(name: string, when: string, enabled = true): RawRule {
   return { name, enabled, when, destinations: ['main'] }
 }
 
 /**
- * 1 つの式を評価する
+ * Evaluates a single expression
  *
- * @param when CEL 式
+ * @param when CEL expression
  * @param effect effect
  * @param membership favorite group
- * @param worlds World 解決結果
- * @returns 評価結果
+ * @param worlds World resolution result
+ * @returns Evaluation result
  */
 function run(
   when: string,
@@ -85,14 +85,14 @@ describe('event.hour', () => {
       buildContext(move, [], {}, new Date(2026, 0, 1, hour))
     ).matched
 
-  it('夜間の時間帯だけ一致する', () => {
+  it('matches only during the night hours', () => {
     expect(at(23)).toEqual(['r'])
     expect(at(3)).toEqual(['r'])
     expect(at(12)).toEqual([])
     expect(at(6)).toEqual([])
   })
 
-  it('分と組み合わせた算術も評価できる', () => {
+  it('also evaluates arithmetic combined with minutes', () => {
     const after2230 = 'event.hour * 60 + event.minute >= 1350'
     const at2 = (hour: number, minute: number) =>
       evaluateRules(
@@ -105,7 +105,7 @@ describe('event.hour', () => {
 })
 
 describe('buildContext', () => {
-  it('location-change の previous / current を組み立てる', () => {
+  it('builds previous / current for location-change', () => {
     const ctx = buildContext(
       move,
       ['group_0'],
@@ -159,7 +159,7 @@ describe('buildContext', () => {
     })
   })
 
-  it('friend-add は previous が null、friend-delete は current が null', () => {
+  it('friend-add has null previous; friend-delete has null current', () => {
     const add = buildContext(
       {
         type: 'friend-add',
@@ -183,14 +183,14 @@ describe('buildContext', () => {
     expect(del.user).toEqual({ id: 'u', displayName: 'name-u' })
   })
 
-  it('stale な World 情報では name を含めない', () => {
+  it('omits name for stale World info', () => {
     const ctx = buildContext(move, [], {
       current: { name: 'old', stale: true },
     }) as { current: { location: { world: object } } }
     expect(ctx.current.location.world).toEqual({ id: WORLD })
   })
 
-  it('World の最大人数を current / previous の CEL context に含める', () => {
+  it('includes the World capacity in the current / previous CEL context', () => {
     const ctx = buildContext(move, [], {
       previous: { name: 'Old', capacity: 16 },
       current: { name: 'New', capacity: 32 },
@@ -205,7 +205,7 @@ describe('buildContext', () => {
 })
 
 describe('compileRules / evaluateRules', () => {
-  it('AC-1: 特定ユーザーの location-change のみ一致する', () => {
+  it('AC-1: matches only location-change for a specific user', () => {
     const when = 'user.id == "usr_x" && event.type == "location-change"'
     expect(run(when, move).matched).toEqual(['r'])
     const other: NotifiableEffect = {
@@ -221,7 +221,7 @@ describe('compileRules / evaluateRules', () => {
     expect(run(when, online).matched).toEqual([])
   })
 
-  it('AC-2: online / offline のみ一致する', () => {
+  it('AC-2: matches only online / offline', () => {
     const when = 'event.type in ["online","offline"] && user.id == "usr_x"'
     const offline: NotifiableEffect = {
       type: 'offline',
@@ -235,7 +235,7 @@ describe('compileRules / evaluateRules', () => {
   const dance =
     'event.type == "location-change" && current.location != null && current.location.visible && current.location.world.name.contains("ダンス")'
 
-  it('AC-3: World 名にダンスを含む場合のみ一致する', () => {
+  it('AC-3: matches only when the World name contains the dance keyword', () => {
     expect(
       run(dance, move, [], { current: { name: 'ダンスの世界' } }).matched
     ).toEqual(['r'])
@@ -244,7 +244,7 @@ describe('compileRules / evaluateRules', () => {
     ).toEqual([])
   })
 
-  it('World の最大人数でルールを評価する', () => {
+  it('evaluates rules using the World capacity', () => {
     const when =
       'current.location != null && current.location.world.capacity >= 24'
     expect(
@@ -255,7 +255,7 @@ describe('compileRules / evaluateRules', () => {
     ).toEqual([])
   })
 
-  it('World の最大人数がないとその値を使うルールは評価エラーになる', () => {
+  it('a rule using the World capacity errors when the capacity is missing', () => {
     const result = run('current.location.world.capacity >= 24', move, [], {
       current: { name: 'W' },
     })
@@ -263,7 +263,7 @@ describe('compileRules / evaluateRules', () => {
     expect(result.errors).toHaveLength(1)
   })
 
-  it('AC-3/AC-10: world.name 欠落は当該ルールのみ false でエラーが返る', () => {
+  it('AC-3/AC-10: a missing world.name makes only that rule false and returns an error', () => {
     const rules = compileRules([
       rule('dance', dance),
       rule('all', 'event.type == "location-change"'),
@@ -281,7 +281,7 @@ describe('compileRules / evaluateRules', () => {
     expect(result.errors[0].message).toContain('name')
   })
 
-  it('AC-4: group_0 所属の online / offline のみ一致する', () => {
+  it('AC-4: matches only online / offline for group_0 members', () => {
     const when =
       '"group_0" in current.favoriteGroups && event.type in ["online","offline"]'
     const online: NotifiableEffect = {
@@ -294,7 +294,7 @@ describe('compileRules / evaluateRules', () => {
     expect(run(when, online, []).matched).toEqual([])
   })
 
-  it('status-change では status / statusDescription を CEL から参照できる', () => {
+  it('status-change can reference status / statusDescription from CEL', () => {
     const change: NotifiableEffect = {
       type: 'status-change',
       previous: {
@@ -316,7 +316,7 @@ describe('compileRules / evaluateRules', () => {
     ).toEqual([])
   })
 
-  it('friend-delete では previous.favoriteGroups を参照できる', () => {
+  it('friend-delete can reference previous.favoriteGroups', () => {
     const del: NotifiableEffect = {
       type: 'friend-delete',
       previous: state('usr_x', 'online', null),
@@ -327,7 +327,7 @@ describe('compileRules / evaluateRules', () => {
     expect(run(when, del, ['group_0']).matched).toEqual(['r'])
   })
 
-  it('current が null のとき current.location の参照は評価エラーになり、null 比較は可能', () => {
+  it('referencing current.location errors when current is null, while null comparison works', () => {
     const del: NotifiableEffect = {
       type: 'friend-delete',
       previous: state('usr_x', 'online', null),
@@ -337,7 +337,7 @@ describe('compileRules / evaluateRules', () => {
     expect(run('current == null', del).matched).toEqual(['r'])
   })
 
-  it('location が null のとき短絡評価で false になる', () => {
+  it('short-circuits to false when location is null', () => {
     const online: NotifiableEffect = {
       type: 'online',
       previous: state('u', 'offline', null),
@@ -351,39 +351,39 @@ describe('compileRules / evaluateRules', () => {
     expect(result.errors).toEqual([])
   })
 
-  it('構文エラーで compile が失敗し、ルール名を含む', () => {
+  it('compile fails on a syntax error and includes the rule name', () => {
     expect(() => compileRules([rule('bad', 'event.type ==')])).toThrow(
       /rule "bad"/
     )
   })
 
-  it('未宣言の識別子で compile が失敗する', () => {
+  it('compile fails on an undeclared identifier', () => {
     expect(() => compileRules([rule('bad', 'unknown.x == 1')])).toThrow(
       /rule "bad"/
     )
   })
 
-  it('bool 以外の型を返す式は compile で拒否する', () => {
+  it('rejects expressions returning a non-bool type at compile time', () => {
     expect(() => compileRules([rule('bad', '1 + 2')])).toThrow(
       /must evaluate to bool/
     )
     expect(() => compileRules([rule('bad', 'user.id')])).not.toThrow()
   })
 
-  it('実行時に bool 以外を返す式は評価エラーになる', () => {
+  it('an expression returning a non-bool at runtime is an evaluation error', () => {
     const result = run('user.id', move)
     expect(result.matched).toEqual([])
     expect(result.errors[0]).toMatchObject({ rule: 'r', kind: 'non-boolean' })
   })
 
-  it('disabled ルールは compile 検証のみで評価しない', () => {
+  it('disabled rules are only validated at compile time and not evaluated', () => {
     expect(() => compileRules([rule('bad', 'event.type ==', false)])).toThrow()
     const rules = compileRules([rule('off', 'true', false), rule('on', 'true')])
     const result = evaluateRules(rules, buildContext(move, []))
     expect(result.matched).toEqual(['on'])
   })
 
-  it('一致は設定順で返る', () => {
+  it('matches are returned in configuration order', () => {
     const rules = compileRules([rule('b', 'true'), rule('a', 'true')])
     expect(evaluateRules(rules, buildContext(move, [])).matched).toEqual([
       'b',
@@ -391,7 +391,7 @@ describe('compileRules / evaluateRules', () => {
     ])
   })
 
-  it('式の構造上限を超えると compile が失敗する', () => {
+  it('compile fails when the expression structure limit is exceeded', () => {
     const big = Array.from({ length: 600 }, () => 'true').join(' && ')
     expect(() => compileRules([rule('big', big)])).toThrow(/rule "big"/)
   })
@@ -405,7 +405,7 @@ describe('RuleErrorLog', () => {
     jest.useRealTimers()
   })
 
-  it('getRecent は集計し、1 時間で窓切りする', () => {
+  it('getRecent aggregates and cuts the window at 1 hour', () => {
     const log = new RuleErrorLog()
     const t0 = Date.parse('2026-01-01T00:00:00.000Z')
     log.record('a', 'evaluation', 'e1', t0)
@@ -433,14 +433,14 @@ describe('RuleErrorLog', () => {
     expect(log.getRecent(t0 + 3000 + 60 * 60 * 1000 + 1)).toEqual([])
   })
 
-  it('窓内の新しいエラーに過去の累計を加えない', () => {
+  it('does not add past totals to newer errors within the window', () => {
     const log = new RuleErrorLog()
     log.record('a', 'evaluation', 'old', 1000)
     log.record('a', 'evaluation', 'new', 1000 + 2 * 60 * 60 * 1000)
     expect(log.getRecent(1000 + 2 * 60 * 60 * 1000)[0].count).toBe(1)
   })
 
-  it('warning は (ルール, 種別) ごとに 1 分に 1 回に抑制される', () => {
+  it('warnings are limited to once per minute per (rule, kind)', () => {
     warn.mockClear()
     const log = new RuleErrorLog()
     const t0 = 1_000_000

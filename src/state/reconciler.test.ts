@@ -41,7 +41,7 @@ function tempFilePath(): string {
   )
 }
 
-/** Repository / Coordinator / Reconciler を組み立てる */
+/** Builds a Repository / Coordinator / Reconciler */
 function setup(): {
   repository: UserStateRepository
   coordinator: UserStateCoordinator
@@ -98,7 +98,7 @@ beforeEach(() => {
 })
 
 describe('Reconciler.reconcileAll', () => {
-  it('REST snapshot を observation として compare-and-enqueue する', async () => {
+  it('compare-and-enqueues the REST snapshot as observations', async () => {
     const { coordinator, reconciler } = setup()
     const appendSpy = jest.spyOn(coordinator, 'appendSnapshotObservation')
     mockSnapshot({
@@ -123,7 +123,7 @@ describe('Reconciler.reconcileAll', () => {
     expect(reconciler.getLastRunAt()).not.toBeNull()
   })
 
-  it('snapshot のステータスを observation の profile として追記する', async () => {
+  it('appends the snapshot status as the observation profile', async () => {
     const { coordinator, reconciler } = setup()
     const appendSpy = jest.spyOn(coordinator, 'appendSnapshotObservation')
     const profile = { status: 'busy', statusDescription: '作業中' }
@@ -146,7 +146,7 @@ describe('Reconciler.reconcileAll', () => {
     )
   })
 
-  it('REST snapshot の profile は status-change ではなく初期値として追記する', async () => {
+  it('appends the REST snapshot profile as an initial value, not a status-change', async () => {
     const { coordinator, reconciler } = setup()
     const appendSpy = jest.spyOn(coordinator, 'appendSnapshotObservation')
     const profile = { status: 'busy', statusDescription: '作業中' }
@@ -173,7 +173,7 @@ describe('Reconciler.reconcileAll', () => {
     )
   })
 
-  it('traveling は在席のみ確定した online observation として追記する', async () => {
+  it('appends traveling as an online observation that confirms presence only', async () => {
     const { coordinator, reconciler } = setup()
     const appendSpy = jest.spyOn(coordinator, 'appendSnapshotObservation')
     mockSnapshot({
@@ -190,7 +190,7 @@ describe('Reconciler.reconcileAll', () => {
     )
   })
 
-  it('baseline 中に traveling だったフレンドは silent に record 化され、後続の location で friend-add にならない', async () => {
+  it('a friend that was traveling during baseline is recorded silently and a later location does not produce friend-add', async () => {
     const { repository, coordinator, reconciler, effects } = setup()
     mockSnapshot({
       usr_1: { displayName: 'Alice', location: 'traveling:traveling' },
@@ -213,10 +213,10 @@ describe('Reconciler.reconcileAll', () => {
     expect(repository.get('usr_1')).toMatchObject({ location: 'wrld_a' })
   })
 
-  it('record は無いが seq が進んでいるユーザーの snapshot も drop されない', async () => {
+  it('does not drop the snapshot of a user with no record but an advanced seq', async () => {
     const { repository, coordinator, reconciler } = setup()
     await repository.setBaselineCompleted()
-    // traveling の WebSocket event のみで record が作られていない状態
+    // State where only traveling WebSocket events arrived and no record was created
     coordinator.enqueue('usr_1', 'Alice', {
       type: 'location',
       location: 'traveling:traveling',
@@ -237,7 +237,7 @@ describe('Reconciler.reconcileAll', () => {
     expect(appendSpy).toHaveReturnedWith(true)
   })
 
-  it('record の無いユーザーでも取得中に WebSocket event が届けば snapshot は drop される', async () => {
+  it('drops the snapshot even for a user with no record if a WebSocket event arrives during fetch', async () => {
     const { repository, coordinator, reconciler } = setup()
     await repository.setBaselineCompleted()
     const appendSpy = jest.spyOn(coordinator, 'appendSnapshotObservation')
@@ -256,7 +256,7 @@ describe('Reconciler.reconcileAll', () => {
     expect(appendSpy).toHaveReturnedWith(false)
   })
 
-  it('429 エラーが発生した場合は何も追記せず lastRunAt を更新せず cooldown する', async () => {
+  it('on a 429 error, appends nothing, does not update lastRunAt, and cools down', async () => {
     const { coordinator, reconciler } = setup()
     const appendSpy = jest.spyOn(coordinator, 'appendSnapshotObservation')
     ;(session.getFriendsSnapshot as jest.Mock).mockRejectedValue(
@@ -271,7 +271,7 @@ describe('Reconciler.reconcileAll', () => {
     expect(reconciler.getLastRunAt()).toBeNull()
   })
 
-  it('vrchat が未接続の場合は何もしない', async () => {
+  it('does nothing when vrchat is not connected', async () => {
     const { repository, coordinator } = setup()
     const appendSpy = jest.spyOn(coordinator, 'appendSnapshotObservation')
     const reconciler = new Reconciler(() => null, coordinator, repository)
@@ -281,7 +281,7 @@ describe('Reconciler.reconcileAll', () => {
     expect(appendSpy).not.toHaveBeenCalled()
   })
 
-  it('AC-7: 初回 baseline は通知 0 件で、完了後に baselineCompleted が永続化される', async () => {
+  it('AC-7: the initial baseline produces zero notifications and baselineCompleted is persisted after completion', async () => {
     const { repository, reconciler, effects } = setup()
     mockSnapshot({
       usr_1: { displayName: 'Alice', location: 'wrld_a' },
@@ -302,7 +302,7 @@ describe('Reconciler.reconcileAll', () => {
     expect(reloaded.isBaselineCompleted()).toBe(true)
   })
 
-  it('REST 同期で state と食い違った件数 (drift) をログに出す', async () => {
+  it('logs the number of mismatches with state (drift) found by REST sync', async () => {
     const { repository, coordinator, reconciler } = setup()
     await repository.setBaselineCompleted()
     await repository.commitUserState('usr_1', userState('usr_1', 'online'))
@@ -319,7 +319,7 @@ describe('Reconciler.reconcileAll', () => {
     expect(logs.join('\n')).toContain('friends=2 drift=1')
   })
 
-  it('AC-10: snapshot を適用できたとき drift 件数を返す', async () => {
+  it('AC-10: returns the drift count when the snapshot was applied', async () => {
     const { repository, coordinator, reconciler } = setup()
     await repository.setBaselineCompleted()
     await repository.commitUserState('usr_1', userState('usr_1', 'online'))
@@ -337,7 +337,7 @@ describe('Reconciler.reconcileAll', () => {
     expect(withoutDrift).toBe(0)
   })
 
-  it('AC-10: 未接続・429 cooldown 中・取得失敗のときは null を返す', async () => {
+  it('AC-10: returns null when not connected, cooling down after 429, or the fetch failed', async () => {
     const { repository, coordinator, reconciler } = setup()
     const disconnected = new Reconciler(() => null, coordinator, repository)
     expect(await disconnected.reconcileAll()).toBeNull()
@@ -355,7 +355,7 @@ describe('Reconciler.reconcileAll', () => {
     expect(await failing.reconcileAll()).toBeNull()
   })
 
-  it('AC-10: friend-delete の確認中に 429 が発生したときは null を返す', async () => {
+  it('AC-10: returns null when a 429 occurs while confirming friend-delete', async () => {
     const { repository, reconciler } = setup()
     await repository.setBaselineCompleted()
     await repository.commitUserState('usr_1', userState('usr_1', 'online'))
@@ -367,7 +367,7 @@ describe('Reconciler.reconcileAll', () => {
     expect(await reconciler.reconcileAll()).toBeNull()
   })
 
-  it('AC-7: baseline 完了後、未知ユーザーは friend-add を生成する', async () => {
+  it('AC-7: after the baseline completes, an unknown user produces friend-add', async () => {
     const { repository, coordinator, reconciler, effects } = setup()
     await repository.setBaselineCompleted()
     mockSnapshot({ usr_9: { displayName: 'Zed', location: 'wrld_a' } })
@@ -378,7 +378,7 @@ describe('Reconciler.reconcileAll', () => {
     expect(effects.map((effect) => effect.type)).toEqual(['friend-add'])
   })
 
-  it('AC-7: 一覧から消えて isFriend が false のユーザーは friend-delete を生成する', async () => {
+  it('AC-7: a user missing from the list with isFriend false produces friend-delete', async () => {
     const { repository, coordinator, reconciler, effects } = setup()
     await repository.setBaselineCompleted()
     await repository.commitUserState('usr_1', userState('usr_1'))
@@ -392,7 +392,7 @@ describe('Reconciler.reconcileAll', () => {
     expect(repository.get('usr_1')).toBeUndefined()
   })
 
-  it('AC-7: isFriend が true なら friend-delete を生成しない', async () => {
+  it('AC-7: does not produce friend-delete when isFriend is true', async () => {
     const { repository, coordinator, reconciler, effects } = setup()
     await repository.setBaselineCompleted()
     await repository.commitUserState('usr_1', userState('usr_1'))
@@ -406,7 +406,7 @@ describe('Reconciler.reconcileAll', () => {
     expect(repository.get('usr_1')).toBeDefined()
   })
 
-  it('AC-7: isFriend が失敗した場合は friend-delete を生成しない', async () => {
+  it('AC-7: does not produce friend-delete when isFriend fails', async () => {
     const { repository, coordinator, reconciler, effects } = setup()
     await repository.setBaselineCompleted()
     await repository.commitUserState('usr_1', userState('usr_1'))
@@ -420,7 +420,7 @@ describe('Reconciler.reconcileAll', () => {
     expect(repository.get('usr_1')).toBeDefined()
   })
 
-  it('AC-7: snapshot 取得が部分失敗した場合は差分を適用せず friend-delete も生成しない', async () => {
+  it('AC-7: when the snapshot fetch partially fails, applies no differences and produces no friend-delete', async () => {
     const { repository, coordinator, reconciler, effects } = setup()
     await repository.setBaselineCompleted()
     await repository.commitUserState('usr_1', userState('usr_1'))
@@ -437,12 +437,12 @@ describe('Reconciler.reconcileAll', () => {
     expect(reconciler.getLastRunAt()).toBeNull()
   })
 
-  it('AC-8: REST 取得中に WebSocket observation が届いた場合、その snapshot は追記されない', async () => {
+  it('AC-8: if a WebSocket observation arrives during the REST fetch, that snapshot is not appended', async () => {
     const { repository, coordinator, reconciler, effects } = setup()
     await repository.setBaselineCompleted()
     await repository.commitUserState('usr_1', userState('usr_1'))
     ;(session.getFriendsSnapshot as jest.Mock).mockImplementation(() => {
-      // 取得中に WebSocket 由来の observation が入った状況を再現する
+      // Simulate a WebSocket observation arriving during the fetch
       coordinator.enqueue('usr_1', 'usr_1', {
         type: 'location',
         location: 'wrld_ws',
@@ -465,7 +465,7 @@ describe('Reconciler.reconcileAll', () => {
     ])
   })
 
-  it('persist 失敗で drain が false の間は baselineCompleted を永続化せず、次回に再試行する', async () => {
+  it('while drain is false due to a persist failure, baselineCompleted is not persisted and is retried next time', async () => {
     const { repository, reconciler } = setup()
     mockSnapshot({ usr_1: { displayName: 'Alice', location: 'wrld_a' } })
     const realCommit = repository.commitUserState.bind(repository)
@@ -477,7 +477,7 @@ describe('Reconciler.reconcileAll', () => {
     await reconciler.reconcileAll()
     expect(repository.isBaselineCompleted()).toBe(false)
 
-    // persist-failure は回復可能なので、unhealthy が解消した次回で完了する
+    // persist-failure is recoverable, so it completes on the next run once unhealthy clears
     await new Promise((resolve) => setTimeout(resolve, 50))
     await reconciler.reconcileAll()
     expect(repository.isBaselineCompleted()).toBe(true)

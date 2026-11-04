@@ -6,14 +6,14 @@ describe('loadConfig', () => {
     process.env = { ...saved }
   })
 
-  it('CONFIG_PATH 未設定なら既定パスを返す', () => {
+  it('returns the default path when CONFIG_PATH is unset', () => {
     process.env.VRCHAT_USERNAME = 'u'
     process.env.VRCHAT_PASSWORD = 'p'
     delete process.env.CONFIG_PATH
     expect(loadConfig().configPath).toBe('/data/config.yaml')
   })
 
-  it('CONFIG_PATH を尊重し、TOTP は任意', () => {
+  it('honors CONFIG_PATH and treats TOTP as optional', () => {
     process.env.VRCHAT_USERNAME = 'u'
     process.env.VRCHAT_PASSWORD = 'p'
     process.env.CONFIG_PATH = '/tmp/c.yaml'
@@ -22,7 +22,7 @@ describe('loadConfig', () => {
     expect(config.vrchat.totpSecret).toBeUndefined()
   })
 
-  it('認証情報が無ければエラー', () => {
+  it('throws when credentials are missing', () => {
     delete process.env.VRCHAT_USERNAME
     process.env.VRCHAT_PASSWORD = 'p'
     expect(() => loadConfig()).toThrow('Invalid configuration')

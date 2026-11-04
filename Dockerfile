@@ -23,10 +23,10 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm fetch
 COPY tsconfig.json ./
 COPY src src
 
-# patches は ENTRYPOINT の pnpm start が行う依存関係の検証でも参照されるため、実行時イメージにも残す
+# Keep patches in the runtime image: the dependency check run by `pnpm start` (ENTRYPOINT) also reads them
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --offline
 
-# 環境変数でデータディレクトリを /data に設定
+# Point the data paths at /data via environment variables
 ENV COOKIE_FILE_PATH=/data/vrchat-cookies.json
 ENV STATE_FILE_PATH=/data/friend-states.json
 ENV WORLD_CACHE_FILE_PATH=/data/world-cache.json

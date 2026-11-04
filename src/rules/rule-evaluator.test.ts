@@ -1,7 +1,7 @@
 import { compileRules } from './rule-engine'
 import { RuleEvaluator } from './rule-evaluator'
 
-/** CEL の compile 対象 */
+/** CEL expression to compile */
 function rules(expressions: string[]) {
   return compileRules(
     expressions.map((when, i) => ({
@@ -14,7 +14,7 @@ function rules(expressions: string[]) {
 }
 
 describe('RuleEvaluator', () => {
-  it('Worker へ bigint とコンテキストを渡し、複数イベントも正しく評価する', async () => {
+  it('passes bigint and context to the Worker and evaluates multiple events correctly', async () => {
     const evaluator = new RuleEvaluator()
     try {
       const compiled = rules(['event.hour >= 22', 'user.id == "u"'])
@@ -35,7 +35,7 @@ describe('RuleEvaluator', () => {
     }
   })
 
-  it('危険な正規表現を期限で止め、後続のルールとイベントを継続する', async () => {
+  it('stops a dangerous regex at the deadline and continues with later rules and events', async () => {
     const evaluator = new RuleEvaluator({ timeoutMs: 30 })
     try {
       const compiled = rules([
@@ -60,23 +60,23 @@ describe('RuleEvaluator', () => {
     }
   })
 
-  it('評価依頼の直後に main thread が期限を超えて停止しても、応答済みの評価を期限切れにしない', async () => {
+  it('does not time out an already-answered evaluation when the main thread stalls past the deadline right after the request', async () => {
     const timeoutMs = 200
     const evaluator = new RuleEvaluator({ timeoutMs })
     try {
       const compiled = rules(['user.id == "u"'])
       const context = { user: { id: 'u' } }
-      // Worker の起動と式の parse を済ませ、以降の評価を十分速くしておく
+      // Finish Worker startup and expression parsing so later evaluations are fast enough
       expect(await evaluator.evaluate(compiled, context)).toEqual({
         matched: ['r0'],
         errors: [],
       })
 
-      // 同期 I/O（SQLite の commit など）を模して、postMessage の直後に期限の 3 倍だけ止める
+      // Simulate synchronous I/O (e.g. a SQLite commit) by blocking for 3x the deadline right after postMessage
       setImmediate(() => {
         const end = Date.now() + timeoutMs * 3
         while (Date.now() < end) {
-          // 同期的に待つ
+          // Wait synchronously
         }
       })
       expect(await evaluator.evaluate(compiled, context)).toEqual({
@@ -88,7 +88,7 @@ describe('RuleEvaluator', () => {
     }
   })
 
-  it('元の式がないルールは同期実行に戻らず、評価エラーにする', async () => {
+  it('a rule without its original expression is an evaluation error instead of falling back to synchronous execution', async () => {
     const evaluator = new RuleEvaluator()
     try {
       const result = await evaluator.evaluate(

@@ -1,7 +1,7 @@
 import { isTraveling, parseLocation } from './location'
 import type { Presence, Profile, UserState } from './user-state'
 
-/** WebSocket event / REST snapshot を正規化した観測値。profileBaseline は snapshot 値が遷移通知を起こさないようにする */
+/** Observation normalized from a WebSocket event / REST snapshot. profileBaseline keeps snapshot values from triggering transition notifications */
 export type UserObservation =
   | {
       type: 'online'
@@ -20,7 +20,7 @@ export type UserObservation =
   | { type: 'friend-delete' }
   | { type: 'profile'; profile: Profile; profileBaseline?: boolean }
 
-/** 通知対象の semantic event 種別 */
+/** Semantic event types to notify about */
 export type SemanticEventType =
   | 'online'
   | 'offline'
@@ -30,9 +30,9 @@ export type SemanticEventType =
   | 'status-change'
 
 /**
- * reducer が生成する通知用の semantic effect
+ * Semantic effect for notification produced by the reducer
  *
- * `friend-add` は previous が undefined、`friend-delete` は current が undefined になる。
+ * `previous` is undefined for `friend-add` and `current` is undefined for `friend-delete`.
  */
 export type ReducerEffect =
   | { type: 'no-op' }
@@ -42,34 +42,34 @@ export type ReducerEffect =
       current: UserState | undefined
     }
 
-/** reduce の結果 */
+/** Result of reduce */
 export interface ReduceResult {
-  /** 更新後の state。判断材料が不足し何も記録できない場合、または削除対象の場合は undefined */
+  /** Updated state. undefined when there is not enough information to record anything, or the record is to be deleted */
   nextState: UserState | undefined
-  /** state から record を削除すべきか（`friend-delete` で record が既存の場合） */
+  /** Whether the record should be removed from state (`friend-delete` for an existing record) */
   deleteUser: boolean
-  /** 発火すべき通知 effect */
+  /** Notification effect to fire */
   effect: ReducerEffect
-  /** effect に続けて発火する effect（オンライン化と同時の Location 確定時の `location-change`） */
+  /** Effect fired after `effect` (the `location-change` when a Location is confirmed together with going online) */
   followUp?: ReducerEffect
-  /** ステータス・ステータスメッセージが変わった場合の `status-change`（他の effect と同時に発生しうる） */
+  /** `status-change` when the status or status message changed (can occur together with other effects) */
   statusEffect?: ReducerEffect
 }
 
 /**
- * 観測値から求めた、記録すべき presence と location
+ * Presence and location to record, derived from an observation
  */
 interface Target {
   presence: Presence
-  /** undefined は「現在の location を維持する」を表す */
+  /** undefined means "keep the current location" */
   location: string | null | undefined
 }
 
 /**
- * 観測値から更新後の presence / location を求める
+ * Derives the updated presence / location from an observation
  *
- * @param observation friend-add / friend-delete 以外の観測値
- * @returns 更新後の presence / location
+ * @param observation Observation other than friend-add / friend-delete
+ * @returns Updated presence / location
  */
 function resolveTarget(
   observation: Exclude<
@@ -77,7 +77,7 @@ function resolveTarget(
     { type: 'friend-add' } | { type: 'friend-delete' } | { type: 'profile' }
   >
 ): Target {
-  // online の location は任意。traveling は確定値ではないため無視する
+  // The location of an online observation is optional. traveling is not a confirmed value, so it is ignored
   return observation.type === 'offline'
     ? { presence: 'offline', location: null }
     : {
@@ -91,15 +91,15 @@ function resolveTarget(
 }
 
 /**
- * online 中の location 変化を location-change とすべきかを判定する
+ * Determines whether a location change while online should be a location-change
  *
- * 変更後が可視で、変更前が確定済み（可視・private のいずれでも可）の場合が対象。
- * 変更後が private の場合は、変更前が可視のときだけ対象（private の維持や未確定からの private は対象外）。
- * 変更前が未確定（null）の場合は、pending 経由でのみ location-change とする。
+ * Applies when the new location is visible and the previous one is confirmed (visible or private).
+ * When the new location is private, applies only if the previous one was visible (staying private or going private from unconfirmed does not apply).
+ * When the previous location is unconfirmed (null), location-change is emitted only via pending.
  *
- * @param previous 前回の location
- * @param current 今回の location
- * @returns location-change とすべき場合は true
+ * @param previous Previous location
+ * @param current New location
+ * @returns true if it should be a location-change
  */
 function isLocationChange(
   previous: string | null,
@@ -114,18 +114,18 @@ function isLocationChange(
 }
 
 /**
- * presence / location の状態遷移を計算する（ステータスは扱わない）
+ * Computes the presence / location state transition (status is not handled here)
  *
- * `baseline` が true の間は、state の更新（および削除）だけを行い、通知 effect は生成しない。
- * 戻り値の state に `userId` を含めるため、呼び出し元の userId を第 1 引数で受け取る。
+ * While `baseline` is true, only state updates (and deletions) are applied and no notification effect is produced.
+ * The returned state includes `userId`, so the caller's userId is taken as the first argument.
  *
- * @param userId ユーザー ID
- * @param current 現在の永続 state（未知のユーザーは undefined）
- * @param displayName ユーザーの表示名
- * @param observation 正規化済みの観測値
- * @param baseline enqueue 時に確定した baseline フラグ
- * @param now 現在時刻を返す関数（テスト用に注入可能）
- * @returns 更新後の state・削除要否・発火すべき effect
+ * @param userId User ID
+ * @param current Current persisted state (undefined for an unknown user)
+ * @param displayName User display name
+ * @param observation Normalized observation
+ * @param baseline Baseline flag fixed at enqueue time
+ * @param now Function returning the current time (injectable for tests)
+ * @returns Updated state, whether to delete it, and the effects to fire
  */
 function reducePresence(
   userId: string,
@@ -156,7 +156,7 @@ function reducePresence(
     if (current !== undefined) {
       return { nextState: current, deleteUser: false, effect: noEffect }
     }
-    // 在席状態は不明なため offline で記録する（以降の online 観測で遷移する）
+    // Presence is unknown, so record offline (a later online observation will transition it)
     const next: UserState = {
       userId,
       displayName,
@@ -171,14 +171,14 @@ function reducePresence(
     }
   }
 
-  // traveling は transient observation であり state を変更しない
+  // traveling is a transient observation and does not change state
   if (observation.type === 'location' && isTraveling(observation.location)) {
     return { nextState: current, deleteUser: false, effect: noEffect }
   }
 
   const target = resolveTarget(observation)
 
-  // record 不在ユーザーへの最初の観測は friend-add として扱う（online / location-change は続けて生成しない）
+  // The first observation for a user without a record is treated as friend-add (online / location-change do not follow)
   if (current === undefined) {
     const next: UserState = {
       userId,
@@ -196,20 +196,20 @@ function reducePresence(
 
   const location =
     target.location === undefined
-      ? // online 観測に location が無い場合、online 中なら確定済みの location を維持する
+      ? // When an online observation has no location, keep the confirmed location if already online
         current.presence === 'online'
         ? current.location
         : null
       : target.location
 
-  // online 遷移直後で location が未確定なら、最初の確定 location を location-change として扱う
+  // Right after going online with an unconfirmed location, treat the first confirmed location as a location-change
   const pending =
     location === null &&
     target.presence === 'online' &&
     (current.firstLocationPending === true || current.presence === 'offline')
   const wasPending = current.firstLocationPending === true
 
-  // 変化が無ければ updatedAt も更新せず、同一 state を返す
+  // With no change, return the same state without updating updatedAt
   if (
     wasPending === pending &&
     current.displayName === displayName &&
@@ -236,7 +236,7 @@ function reducePresence(
       current,
       next
     )
-    // オンライン化と同時に公開 Location が確定した場合は location-change も発火する
+    // If a public Location is confirmed together with going online, location-change also fires
     if (target.presence === 'online' && parseLocation(location).visible) {
       followUp = emit('location-change', current, next)
     }
@@ -252,17 +252,17 @@ function reducePresence(
 }
 
 /**
- * ステータスの観測値を反映する
+ * Applies a status observation
  *
- * `offline` はユーザーが自分で選ぶステータスではないため記録せず、直前の値を維持する。
- * 未確認（初回）の項目は通知せず記録だけを行い、確認済みの項目が変わった場合だけ通知する。
+ * `offline` is not a status users choose themselves, so it is not recorded and the previous value is kept.
+ * Unconfirmed (first-seen) fields are only recorded without notifying; a notification fires only when a confirmed field changes.
  *
- * @param base presence / location 反映後の state（record が無い場合は undefined）
- * @param profile 観測したステータスとステータスメッセージ
- * @param baseline baseline 構築中か
- * @param now 現在時刻を返す関数
- * @param profileBaseline REST snapshot の profile か
- * @returns 更新後の state と、変化した場合の `status-change` effect
+ * @param base State after applying presence / location (undefined when there is no record)
+ * @param profile Observed status and status message
+ * @param baseline Whether the baseline is being built
+ * @param now Function returning the current time
+ * @param profileBaseline Whether the profile comes from a REST snapshot
+ * @returns Updated state and the `status-change` effect if something changed
  */
 function applyProfile(
   base: UserState | undefined,
@@ -290,13 +290,13 @@ function applyProfile(
     statusDescription,
     updatedAt: now(),
   }
-  // status は offline 観測では記録されないため、未確認のことがある（その間もメッセージの変更は通知する）
+  // status is not recorded from offline observations, so it may be unconfirmed (message changes are still notified meanwhile)
   const changed =
     (base.status !== undefined && status !== base.status) ||
     (base.statusDescription !== undefined &&
       statusDescription !== base.statusDescription)
   if (baseline || profileBaseline || !changed) return { state: next }
-  // 未確認だった status は変化として扱わないよう、previous 側も新しい値に揃える
+  // Align the previous side with the new value so an unconfirmed status is not treated as a change
   const previous = base.status === undefined ? { ...base, status } : base
   return {
     state: next,
@@ -305,18 +305,18 @@ function applyProfile(
 }
 
 /**
- * WebSocket event / REST snapshot 共通の状態遷移を計算する純粋関数
+ * Pure function computing the state transition shared by WebSocket events and REST snapshots
  *
- * `baseline` が true の間は、state の更新（および削除）だけを行い、通知 effect は生成しない。
- * 戻り値の state に `userId` を含めるため、呼び出し元の userId を第 1 引数で受け取る。
+ * While `baseline` is true, only state updates (and deletions) are applied and no notification effect is produced.
+ * The returned state includes `userId`, so the caller's userId is taken as the first argument.
  *
- * @param userId ユーザー ID
- * @param current 現在の永続 state（未知のユーザーは undefined）
- * @param displayName ユーザーの表示名
- * @param observation 正規化済みの観測値
- * @param baseline enqueue 時に確定した baseline フラグ
- * @param now 現在時刻を返す関数（テスト用に注入可能）
- * @returns 更新後の state・削除要否・発火すべき effect（ステータス変化は `statusEffect`）
+ * @param userId User ID
+ * @param current Current persisted state (undefined for an unknown user)
+ * @param displayName User display name
+ * @param observation Normalized observation
+ * @param baseline Baseline flag fixed at enqueue time
+ * @param now Function returning the current time (injectable for tests)
+ * @returns Updated state, whether to delete it, and the effects to fire (status changes are in `statusEffect`)
  */
 export function reduce(
   userId: string,
@@ -326,7 +326,7 @@ export function reduce(
   baseline: boolean,
   now: () => string = () => new Date().toISOString()
 ): ReduceResult {
-  // profile 観測は presence / location を変えない（record が無いユーザーは無視する）
+  // A profile observation does not change presence / location (ignored for users without a record)
   const result: ReduceResult =
     observation.type === 'profile'
       ? { nextState: current, deleteUser: false, effect: { type: 'no-op' } }

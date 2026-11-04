@@ -1,7 +1,7 @@
 import { FavoritesService } from './favorites-service'
 
 describe('FavoritesService', () => {
-  it('refresh 成功で getGroups と status が更新される', async () => {
+  it('updates getGroups and status on a successful refresh', async () => {
     const fetcher = jest
       .fn()
       .mockResolvedValue(new Map([['usr_1', ['group_0']]]))
@@ -19,7 +19,7 @@ describe('FavoritesService', () => {
     })
   })
 
-  it('refresh 失敗時は last-known を維持し lastError を保持する', async () => {
+  it('keeps last-known groups and records lastError when refresh fails', async () => {
     const fetcher = jest
       .fn()
       .mockResolvedValueOnce(new Map([['usr_1', ['group_1']]]))
@@ -35,7 +35,7 @@ describe('FavoritesService', () => {
     })
   })
 
-  it('start は 1 時間ごとに refresh し、stop で止まる', async () => {
+  it('start refreshes hourly and stop halts it', async () => {
     jest.useFakeTimers()
     try {
       const fetcher = jest.fn().mockResolvedValue(new Map())
@@ -52,7 +52,7 @@ describe('FavoritesService', () => {
       jest.useRealTimers()
     }
   })
-  it('並行 refresh は 1 回の取得を共有し、stop で未完了の取得を中断する', async () => {
+  it('concurrent refreshes share one fetch and stop aborts an unfinished fetch', async () => {
     const pending = Promise.withResolvers<Map<string, string[]>>()
     const fetcher = jest.fn().mockReturnValue(pending.promise)
     const service = new FavoritesService({ fetcher })
@@ -69,7 +69,7 @@ describe('FavoritesService', () => {
     expect(service.getGroups('usr_1')).toEqual([])
   })
 
-  it('取得 timeout は fetcher に abort を伝えて最終成功値を保持する', async () => {
+  it('a fetch timeout aborts the fetcher and keeps the last successful value', async () => {
     jest.useFakeTimers()
     try {
       const fetcher = jest

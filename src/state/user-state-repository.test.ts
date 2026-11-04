@@ -39,14 +39,14 @@ function readStore(filePath: string) {
 }
 
 describe('UserStateRepository', () => {
-  it('ファイルが存在しない場合は空データで初期化される', () => {
+  it('initializes with empty data when the file does not exist', () => {
     const repo = new UserStateRepository(tempFilePath())
     repo.load()
     expect(repo.getAll()).toEqual({})
     expect(repo.isBaselineCompleted()).toBe(false)
   })
 
-  it('schemaVersion 2 と legacy 形式は元のファイルを保持して起動を拒否する', () => {
+  it('schemaVersion 2 and the legacy format keep the original file and refuse to start', () => {
     for (const content of [
       { schemaVersion: 2, users: { u1: aliceState() } },
       { users: { u1: { userId: 'u1', location: 'wrld_a' } } },
@@ -61,7 +61,7 @@ describe('UserStateRepository', () => {
     }
   })
 
-  it('壊れた JSON は元のファイルを保持して起動を拒否する', () => {
+  it('broken JSON keeps the original file and refuses to start', () => {
     const filePath = tempFilePath()
     fs.writeFileSync(filePath, '{not json')
     const repo = new UserStateRepository(filePath)
@@ -71,7 +71,7 @@ describe('UserStateRepository', () => {
     expect(fs.readFileSync(filePath, 'utf8')).toBe('{not json')
   })
 
-  it('環境変数 STATE_FILE_PATH をパスに使う', () => {
+  it('uses the STATE_FILE_PATH environment variable as the path', () => {
     const filePath = tempFilePath()
     process.env.STATE_FILE_PATH = filePath
     try {
@@ -92,7 +92,7 @@ describe('UserStateRepository', () => {
     }
   })
 
-  it('commitUserState は SQLite の transaction で state を永続化する', async () => {
+  it('commitUserState persists state in a SQLite transaction', async () => {
     const filePath = tempFilePath()
     const repo = new UserStateRepository(filePath)
     repo.load()
@@ -112,7 +112,7 @@ describe('UserStateRepository', () => {
     })
   })
 
-  it('setBaselineCompleted は永続化され、再 load で復元される', async () => {
+  it('setBaselineCompleted is persisted and restored on reload', async () => {
     const filePath = tempFilePath()
     const repo = new UserStateRepository(filePath)
     repo.load()
@@ -126,7 +126,7 @@ describe('UserStateRepository', () => {
     expect(reloaded.get('u1')).toBeDefined()
   })
 
-  it('deleteUser は record を削除して永続化し、他ユーザーと baseline は保持する', async () => {
+  it('deleteUser removes and persists the record while keeping other users and the baseline', async () => {
     const filePath = tempFilePath()
     const repo = new UserStateRepository(filePath)
     repo.load()
@@ -143,7 +143,7 @@ describe('UserStateRepository', () => {
     expect(reloaded.isBaselineCompleted()).toBe(true)
   })
 
-  it('同時に複数ユーザーへ commit しても両方の更新が失われない（store-wide lock）', async () => {
+  it('concurrent commits for multiple users lose neither update (store-wide lock)', async () => {
     const filePath = tempFilePath()
     const repo = new UserStateRepository(filePath)
     repo.load()
@@ -161,7 +161,7 @@ describe('UserStateRepository', () => {
     expect(written.baselineCompleted).toBe(true)
   })
 
-  it('同じ turn の複数更新を 1 つの SQLite transaction にまとめる', async () => {
+  it('batches multiple updates in the same turn into one SQLite transaction', async () => {
     const filePath = tempFilePath()
     const repo = new UserStateRepository(filePath)
     repo.load()
@@ -178,7 +178,7 @@ describe('UserStateRepository', () => {
     expect(restored.isBaselineCompleted()).toBe(true)
   })
 
-  it('live writer の lock は復旧 CLI と別プロセスの書き込みを拒否する', () => {
+  it('the live writer lock rejects writes from the recovery CLI and other processes', () => {
     const filePath = tempFilePath()
     const live = new UserStateRepository(filePath, { exclusive: true })
     live.load()
@@ -203,7 +203,7 @@ describe('UserStateRepository', () => {
     ).toBe(true)
   })
 
-  it('プロセス終了時に OS が writer lock を解放する', () => {
+  it('the OS releases the writer lock when the process exits', () => {
     const filePath = tempFilePath()
     const live = new UserStateRepository(filePath, { exclusive: true })
     live.load()
@@ -215,7 +215,7 @@ describe('UserStateRepository', () => {
     recovery.close()
   })
 
-  it('writer process が kill されても SQLite が lock を解放する', async () => {
+  it('SQLite releases the lock even if the writer process is killed', async () => {
     const filePath = tempFilePath()
     const lockPath = `${getUserStateDatabasePath(filePath)}.writer-lock.sqlite`
     const child = spawn(
@@ -244,7 +244,7 @@ setInterval(() => {}, 1000)`,
     repository.close()
   })
 
-  it('既存 JSON を移行し、失敗した transaction は in-memory state に反映しない', async () => {
+  it('migrates existing JSON, and a failed transaction is not reflected in in-memory state', async () => {
     const filePath = tempFilePath()
     fs.writeFileSync(
       filePath,

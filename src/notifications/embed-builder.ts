@@ -11,10 +11,10 @@ import type {
 } from '../rules/rule-context'
 import type { WorldResolveResult } from '../vrchat/world-resolver'
 
-/** Discord Embed の文字数上限 */
+/** Discord Embed character limits */
 export const EMBED_LIMITS = { title: 256, fieldValue: 1024, footer: 2048 }
 
-/** event 種別ごとの見出しと色 */
+/** Title and color per event type (labels are user-facing Discord text) */
 const STYLES: Record<
   NotifiableEffect['type'],
   { emoji: string; label: string; color: number }
@@ -39,7 +39,7 @@ const STYLES: Record<
   },
 }
 
-/** ステータスの表示名 (VRChat 上の表記) */
+/** Display names for statuses (as written in VRChat) */
 const STATUS_LABELS: Record<string, string> = {
   active: 'Online',
   'join me': 'Join Me',
@@ -47,7 +47,7 @@ const STATUS_LABELS: Record<string, string> = {
   busy: 'Do Not Disturb',
 }
 
-/** インスタンス種別の表示名 (VRChat 上の表記) */
+/** Display names for instance types (as written in VRChat) */
 const INSTANCE_TYPE_LABELS: Record<InstanceType, string> = {
   public: 'Public',
   'friends-plus': 'Friends+',
@@ -60,46 +60,46 @@ const INSTANCE_TYPE_LABELS: Record<InstanceType, string> = {
 }
 
 /**
- * 文字数上限を超える場合に末尾を省略記号へ置き換える
+ * Truncates text to the limit, replacing the tail with an ellipsis
  *
- * @param text 対象文字列
- * @param max 上限文字数
- * @returns 切り詰め後の文字列
+ * @param text Target string
+ * @param max Maximum length
+ * @returns The truncated string
  */
 export function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`
 }
 
-/** VRChat Web のページ URL の起点 */
+/** Base URL of VRChat Web pages */
 const VRCHAT_HOME = 'https://vrchat.com/home'
 
 /**
- * Discord の Markdown リンクを組み立てる
+ * Builds a Discord Markdown link
  *
- * @param text リンクの表示文字列（`[` `]` `\` はエスケープする）
- * @param url リンク先 URL
- * @returns Markdown リンク
+ * @param text Link text (`[`, `]` and `\` are escaped)
+ * @param url Link target URL
+ * @returns Markdown link
  */
 function link(text: string, url: string): string {
   return `[${text.replaceAll(/[[\\\]]/g, String.raw`\$&`)}](${url})`
 }
 
 /**
- * ユーザー・グループ ID から VRChat Web のページ URL を求める
+ * Resolves a VRChat Web page URL from a user or group ID
  *
- * @param id `usr_` または `grp_` の ID
- * @returns ページ URL
+ * @param id `usr_` or `grp_` ID
+ * @returns Page URL
  */
 function ownerUrl(id: string): string {
   return `${VRCHAT_HOME}/${id.startsWith('grp_') ? 'group' : 'user'}/${id}`
 }
 
 /**
- * インスタンスオーナーの表示を組み立てる（取得できない場合は ID を表示する）
+ * Builds the instance owner display (falls back to the raw ID when the name is unresolved)
  *
- * @param instance パース済みインスタンス
- * @param owner オーナー名の解決結果
- * @returns ` · 👤 名前` 形式の表示（グループは 👥。オーナーがいない public は空文字）
+ * @param instance Parsed instance
+ * @param owner Owner name resolution result
+ * @returns ` · 👤 name` (` · 👥 name` for groups; empty for public instances without an owner)
  */
 function describeOwner(
   instance: ParsedInstance,
@@ -115,12 +115,12 @@ function describeOwner(
 }
 
 /**
- * Location とワールド・オーナーの解決結果を表示用文字列にする
+ * Formats a Location with its resolved world and owner for display
  *
  * @param location raw Location
- * @param world ワールド解決結果
- * @param owner インスタンスオーナー名の解決結果
- * @returns 表示用文字列
+ * @param world World resolution result
+ * @param owner Instance owner name resolution result
+ * @returns Display string
  */
 function describeLocation(
   location: string | null,
@@ -150,11 +150,11 @@ function describeLocation(
 }
 
 /**
- * 変更前後の値を `前 → 後` 形式にする（空文字は「なし」と表示する）
+ * Formats a before/after pair as `before → after` (empty strings are shown as "なし")
  *
- * @param previous 変更前の値
- * @param current 変更後の値
- * @returns 表示用文字列
+ * @param previous Value before the change
+ * @param current Value after the change
+ * @returns Display string
  */
 function describeChange(
   previous: string | undefined,
@@ -166,13 +166,13 @@ function describeChange(
 }
 
 /**
- * 通知用の Discord Embed を組み立てる
+ * Builds the Discord Embed for a notification
  *
- * @param effect 通知対象の effect
- * @param worlds ワールド解決結果
- * @param ruleNames 一致したルール名（設定順）
- * @param now タイムスタンプ (ISO 8601)
- * @param owners インスタンスオーナー名の解決結果
+ * @param effect Effect to notify about
+ * @param worlds World resolution results
+ * @param ruleNames Matched rule names (in config order)
+ * @param now Timestamp (ISO 8601)
+ * @param owners Instance owner name resolution results
  * @returns Discord Embed
  */
 export function buildEmbed(
@@ -219,7 +219,7 @@ export function buildEmbed(
     case 'status-change': {
       const previous = effect.previous
       const current = effect.current
-      // 変更前が未確認のステータスは「なし → X」と誤解されるため表示しない
+      // Omitted when the previous status is unknown, since "なし → X" would be misleading
       if (
         previous?.status !== undefined &&
         previous.status !== current?.status

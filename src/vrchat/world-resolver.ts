@@ -5,41 +5,42 @@ import { toError } from '../logger-utils'
 
 const logger = Logger.configure('WORLD-RESOLVER')
 
-/** キャッシュファイルのパス（環境変数で上書き可能） */
+/** Cache file path (overridable via the WORLD_CACHE_FILE_PATH environment variable) */
 const WORLD_CACHE_FILE_PATH =
   process.env.WORLD_CACHE_FILE_PATH ?? 'data/world-cache.json'
 
-/** キャッシュの有効期間 */
+/** Cache time-to-live */
 const TTL_MS = 24 * 60 * 60 * 1000
 
-/** 取得のタイムアウト */
+/** Fetch timeout */
 const FETCH_TIMEOUT_MS = 10_000
+/** Backoff before refetching an entry whose capacity is missing, when capacity is required */
 const CAPACITY_RETRY_MS = 5 * 60 * 1000
 
-/** キャッシュエントリ */
+/** Cache entry */
 interface CacheEntry {
   name: string
   capacity?: number
   capacityRetryAfter?: string
-  /** 最終取得時刻 (ISO 8601) */
+  /** Last fetch time (ISO 8601) */
   fetchedAt: string
 }
 
-/** ワールド名の解決結果 */
+/** Result of resolving a world name */
 export interface WorldResolveResult {
-  /** ワールド名（TTL 内または取得成功時のみ設定される） */
+  /** World name (set only when within TTL or the fetch succeeded) */
   name?: string
-  /** ワールドの最大人数（TTL 内または取得成功時のみ設定される） */
+  /** World capacity (set only when within TTL or the fetch succeeded, and known) */
   capacity?: number
-  /** 取得に失敗し、有効なワールド名を提供できない場合に true */
+  /** True when the fetch failed and no valid world name can be provided */
   stale?: boolean
-  /** 過去に取得した最終時刻 (ISO 8601) */
+  /** Last successful fetch time (ISO 8601) */
   lastFetchedAt?: string
 }
 
-/** WorldResolver の生成オプション */
+/** Options for creating a WorldResolver */
 export interface WorldResolverOptions {
-  /** ワールド情報の取得関数 */
+  /** Fetches world information */
   fetcher: (
     worldId: string,
     signal?: AbortSignal
@@ -48,23 +49,24 @@ export interface WorldResolverOptions {
     name: string
     capacity?: number
   }>
-  /** 現在時刻 (epoch ms) を返す関数 */
+  /** Returns the current time (epoch ms) */
   now?: () => number
-  /** キャッシュファイルのパス */
+  /** Cache file path */
   filePath?: string
-  /** ログに出す解決対象の呼称（既定は `world`） */
+  /** Name of the resolved entity used in logs (default: `world`) */
   label?: string
-  /** 最大人数がないキャッシュを再取得する */
+  /** Refetch cache entries that lack capacity */
   requireCapacity?: boolean
-  /** 保持するキャッシュの最大件数 */
+  /** Maximum number of cache entries to keep */
   maxEntries?: number
 }
 
 /**
- * ワールド名など ID から名前を解決するクラス
+ * Resolves a name (e.g. a world name) from an ID.
  *
- * TTL 付きの永続キャッシュを持ち、TTL 超過後に取得へ失敗した場合は
- * 古い名前を返さず stale として扱う。同一 worldId の同時取得は共有する。
+ * Keeps a persistent cache with a TTL. If a fetch fails after the TTL has
+ * expired, the old name is not returned and the result is marked stale.
+ * Concurrent fetches for the same worldId are shared.
  */
 export class WorldResolver {
   private readonly fetcher: WorldResolverOptions['fetcher']
@@ -84,9 +86,9 @@ export class WorldResolver {
   private persistQueue: Promise<void> = Promise.resolve()
 
   /**
-   * WorldResolver を初期化する
+   * Creates a WorldResolver.
    *
-   * @param options 取得関数・現在時刻関数・キャッシュファイルのパス
+   * @param options Fetcher, clock, cache file path and other options
    */
   constructor(options: WorldResolverOptions) {
     this.fetcher = options.fetcher
@@ -100,10 +102,10 @@ export class WorldResolver {
   }
 
   /**
-   * 名前を解決する
+   * Resolves the name.
    *
-   * @param worldId 解決対象の ID
-   * @returns 解決結果
+   * @param worldId ID to resolve
+   * @returns Resolution result
    */
   async resolve(worldId: string): Promise<WorldResolveResult> {
     if (this.stopped) return { stale: true }
@@ -139,11 +141,11 @@ export class WorldResolver {
   }
 
   /**
-   * ワールド情報を取得してキャッシュへ保存する。失敗時は stale を返す
+   * Fetches world information and stores it in the cache. Returns stale on failure.
    *
-   * @param worldId ワールド ID
-   * @param old 既存のキャッシュエントリ
-   * @returns 解決結果
+   * @param worldId World ID
+   * @param old Existing cache entry
+   * @returns Resolution result
    */
   private async fetchAndStore(
     worldId: string,
@@ -195,10 +197,10 @@ export class WorldResolver {
   }
 
   /**
-   * タイムアウト付きでワールド情報を取得する
+   * Fetches world information with a timeout.
    *
-   * @param worldId ワールド ID
-   * @returns 取得したワールド情報
+   * @param worldId World ID
+   * @returns Fetched world information
    */
   private async fetchWithTimeout(
     worldId: string
@@ -229,14 +231,14 @@ export class WorldResolver {
     }
   }
 
-  /** 進行中の取得を停止する。 */
+  /** Stops in-flight fetches and rejects further resolves as stale. */
   stop(): void {
     this.stopped = true
     for (const controller of this.controllers)
       controller.abort(new Error('World resolver stopped'))
   }
 
-  /** キャッシュの保存完了を待つ。 */
+  /** Waits for pending cache writes to finish. */
   async flush(): Promise<void> {
     this.persistTrigger?.()
     await this.persistPending
@@ -244,9 +246,9 @@ export class WorldResolver {
   }
 
   /**
-   * キャッシュを読み込む。ファイルが無い・破損している場合は空で始める
+   * Loads the cache. Starts empty if the file is missing or unreadable.
    *
-   * @returns メモリ上のキャッシュ
+   * @returns In-memory cache
    */
   private loadCache(): Promise<Map<string, CacheEntry>> {
     if (this.cache) return Promise.resolve(this.cache)
@@ -254,7 +256,7 @@ export class WorldResolver {
     return this.cacheLoading
   }
 
-  /** 初期キャッシュの読み込みを共有する。 */
+  /** Reads the cache file once; callers share the initial load via loadCache. */
   private async readCache(): Promise<Map<string, CacheEntry>> {
     const cache = new Map<string, CacheEntry>()
     try {
@@ -298,9 +300,10 @@ export class WorldResolver {
   }
 
   /**
-   * tmp + rename でアトミックに永続化する。失敗してもメモリ上のキャッシュは維持する
+   * Persists atomically via tmp file + rename; writes are batched. The
+   * in-memory cache is kept even if persisting fails.
    *
-   * @param cache 永続化するキャッシュ
+   * @param cache Cache to persist
    */
   private persist(cache: Map<string, CacheEntry>): Promise<void> {
     this.persistRevision++
@@ -346,7 +349,7 @@ export class WorldResolver {
     return this.persistPending
   }
 
-  /** 古いエントリから件数上限を適用する。 */
+  /** Enforces the entry limit by evicting the oldest entries. */
   private trimCache(cache: Map<string, CacheEntry>): void {
     if (cache.size <= this.maxEntries) return
     const oldest = [...cache].toSorted(

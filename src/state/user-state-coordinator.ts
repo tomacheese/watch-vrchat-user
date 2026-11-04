@@ -13,23 +13,23 @@ import type { UserStateRepository } from './user-state-repository'
 
 const logger = Logger.configure('USER-STATE-COORDINATOR')
 
-/** unhealthy 状態の情報 */
+/** Unhealthy state information */
 export interface UnhealthyInfo {
-  /** unhealthy の原因 */
+  /** Cause of the unhealthy state */
   cause: string
-  /** unhealthy になった日時（ISO 8601 形式） */
+  /** When it became unhealthy (ISO 8601) */
   since: string
 }
 
-/** Coordinator の挙動を調整するオプション（テスト用） */
+/** Options tuning Coordinator behavior (for tests) */
 export interface UserStateCoordinatorOptions {
-  /** persist 失敗時の初期リトライ間隔（ミリ秒） */
+  /** Initial retry interval on persist failure (ms) */
   initialBackoffMs?: number
-  /** persist 失敗時の最大リトライ間隔（ミリ秒） */
+  /** Maximum retry interval on persist failure (ms) */
   maxBackoffMs?: number
-  /** 1 ユーザーあたりの queue 最大長 */
+  /** Maximum queue length per user */
   maxQueueSize?: number
-  /** 通知予定を state と同時に永続化できる形式へ変換する */
+  /** Converts effects into a form that can be persisted together with state */
   prepareEffects?: (
     userId: string,
     displayName: string,
@@ -37,30 +37,30 @@ export interface UserStateCoordinatorOptions {
     snapshot: ConfigSnapshot,
     receivedAt?: string
   ) => PersistedEffect[]
-  /** 永続化済み通知の処理を起こす */
+  /** Wakes processing of persisted notifications */
   onCommitted?: () => void
 }
 
-/** per-user queue に積まれる 1 件分の observation */
+/** One observation queued in a per-user queue */
 interface QueueItem {
-  /** 表示名（ユーザー ID と同じ場合は処理時に補完する） */
+  /** Display name (filled in at processing time when it equals the user ID) */
   displayName: string
-  /** 観測値 */
+  /** Observation */
   observation: UserObservation
-  /** enqueue 時点の設定スナップショット（reload をまたいでもこれで評価する） */
+  /** Config snapshot at enqueue time (used for evaluation even across a reload) */
   snapshot: ConfigSnapshot
-  /** enqueue 時点で baseline 構築中だったか（true の間は通知 effect を生成しない） */
+  /** Whether the baseline was being built at enqueue time (no notification effects while true) */
   baseline: boolean
-  /** 受信時刻。永続化 retry や配信遅延でも変更しない */
+  /** Receive time. Unchanged by persist retries or delivery delays */
   receivedAt: string
 }
 
 /**
- * ログ用に state を要約する（nonce 等を含む raw Location は出さない）
- * 不可視 Location は private 以外を hidden とし、想定外の値をそのまま出さない
+ * Summarizes state for logs (never prints the raw Location, which may contain a nonce)
+ * Non-private invisible Locations are reported as hidden so unexpected values are not echoed
  *
- * @param state 要約する state
- * @returns `presence/world:instanceType` 形式の文字列
+ * @param state State to summarize
+ * @returns String of the form `presence/world:instanceType`
  */
 function describeState(state: UserState | undefined): string {
   if (state === undefined) return 'none'
@@ -78,11 +78,11 @@ const DEFAULT_MAX_BACKOFF_MS = 300_000
 const DEFAULT_MAX_QUEUE_SIZE = 1000
 
 /**
- * ユーザーごとに observation を直列処理する single-writer queue
+ * Single-writer queue that processes observations serially per user
  *
- * transport の connection generation を跨いで永続する。REST snapshot は
- * `appendSnapshotObservation` の compare-and-enqueue により、既に受信済みの
- * WebSocket observation を置き換えることなく追記される。
+ * Persists across transport connection generations. REST snapshots are appended via
+ * `appendSnapshotObservation` compare-and-enqueue without replacing WebSocket
+ * observations that were already received.
  */
 export class UserStateCoordinator {
   private readonly queues = new Map<string, QueueItem[]>()
@@ -98,12 +98,12 @@ export class UserStateCoordinator {
   private readonly maxQueueSize: number
 
   /**
-   * UserStateCoordinator を初期化する
+   * Initializes the UserStateCoordinator
    *
-   * @param repository 永続化先の Repository
-   * @param onEffect reduce の結果 effect が no-op 以外のときに呼ばれるコールバック（item に添付された設定スナップショット付き）
-   * @param getSnapshot enqueue 時点の設定スナップショットを取得する関数
-   * @param options リトライ間隔・queue 上限などのオプション
+   * @param repository Repository to persist to
+   * @param onEffect Callback invoked when a reduce result effect is not a no-op (with the config snapshot attached to the item)
+   * @param getSnapshot Function returning the config snapshot at enqueue time
+   * @param options Options such as retry intervals and queue limit
    */
   constructor(
     private readonly repository: UserStateRepository,
@@ -123,20 +123,20 @@ export class UserStateCoordinator {
   }
 
   /**
-   * observation を queue に追加し、処理ループが停止していれば起動する
+   * Adds an observation to the queue and starts the processing loop if it is stopped
    *
-   * `displayName` が `userId` と同一（呼び出し元が表示名を持たない場合の
-   * フォールバック）のときは処理時点で Repository が保持する表示名で補完する。
+   * When `displayName` equals `userId` (the caller has no display name, so it is a
+   * fallback), it is filled in at processing time from the display name the Repository holds.
    *
-   * 設定スナップショットと baseline フラグは enqueue 時点で確定し item に添付する。
+   * The config snapshot and baseline flag are fixed at enqueue time and attached to the item.
    *
-   * queue が上限に達している場合は非通知で drop し unhealthy にする
-   * (known limitation: drop された中間 transition は REST reconciliation でのみ
-   * 最終 state を補正できる)。
+   * When the queue is full, the observation is dropped silently and the user is marked unhealthy
+   * (known limitation: the final state after a dropped intermediate transition can
+   * only be corrected by REST reconciliation).
    *
-   * @param userId ユーザー ID
-   * @param displayName 表示名
-   * @param observation 観測値
+   * @param userId User ID
+   * @param displayName Display name
+   * @param observation Observation
    */
   enqueue(
     userId: string,
@@ -168,16 +168,16 @@ export class UserStateCoordinator {
     this.startProcessingQueue(userId)
   }
 
-  /** 新しい observation の受付を終了する */
+  /** Stops accepting new observations */
   stopAccepting(): void {
     this.accepting = false
   }
 
   /**
-   * 残った queue を期限内に処理し、終了中の永続化失敗は再試行しない
+   * Processes the remaining queue within the deadline; persist failures during shutdown are not retried
    *
-   * @param timeoutMs 終了処理の制限時間
-   * @returns 全 observation を処理できた場合は true
+   * @param timeoutMs Time limit for shutdown processing
+   * @returns true if all observations were processed
    */
   async stop(timeoutMs = 10_000): Promise<boolean> {
     this.stopAccepting()
@@ -215,38 +215,38 @@ export class UserStateCoordinator {
   }
 
   /**
-   * 現在の queue 末尾の seq を取得する（REST snapshot 取得開始前の anchor として使う）
+   * Gets the seq at the tail of the current queue (used as an anchor before starting a REST snapshot fetch)
    *
-   * @param userId ユーザー ID
-   * @returns 現在の seq（未 enqueue の場合は 0）
+   * @param userId User ID
+   * @returns Current seq (0 if nothing was enqueued)
    */
   captureSeq(userId: string): number {
     return this.lastSeq.get(userId) ?? 0
   }
 
   /**
-   * 全ユーザーの現在の seq を複製して取得する（REST snapshot 取得開始前の anchor として使う）
+   * Copies the current seq of all users (used as an anchor before starting a REST snapshot fetch)
    *
-   * record を持たないユーザー（traveling の WebSocket event のみ受信済み等）も含む。
+   * Includes users without a record (e.g. only traveling WebSocket events received).
    *
-   * @returns ユーザー ID から seq への読み取り専用 Map（未 enqueue のユーザーは含まれない）
+   * @returns Read-only Map from user ID to seq (users never enqueued are not included)
    */
   captureAllSeqs(): ReadonlyMap<string, number> {
     return new Map(this.lastSeq)
   }
 
   /**
-   * REST snapshot を compare-and-enqueue で追記する
+   * Appends a REST snapshot via compare-and-enqueue
    *
-   * `expectedSeq` が現在の seq と一致する場合のみ追記する。REST 呼び出し中に
-   * 新しい WebSocket observation が届いていた場合は、より新しい実データを
-   * 古い REST snapshot で上書きしないよう追記せず false を返す。
+   * Appends only if `expectedSeq` matches the current seq. If a newer WebSocket
+   * observation arrived during the REST call, nothing is appended and false is returned
+   * so newer real data is not overwritten by an older REST snapshot.
    *
-   * @param userId ユーザー ID
-   * @param displayName 表示名
-   * @param observation REST から得た観測値
-   * @param expectedSeq `captureSeq` で取得した anchor seq
-   * @returns 追記した場合は true、stale のため drop した場合は false
+   * @param userId User ID
+   * @param displayName Display name
+   * @param observation Observation from REST
+   * @param expectedSeq Anchor seq obtained from `captureSeq`
+   * @returns true if appended, false if dropped as stale
    */
   appendSnapshotObservation(
     userId: string,
@@ -269,13 +269,13 @@ export class UserStateCoordinator {
   }
 
   /**
-   * 指定ユーザーの queue がすべて処理し終わるまで待つ
+   * Waits until the queues of the given users are fully processed
    *
-   * 待機中に対象ユーザーのいずれかが unhealthy（persist-failure / queue-overflow）に
-   * なった場合は、処理完了を保証できないため即座に false を返す。
+   * If any of the users becomes unhealthy (persist-failure / queue-overflow) while waiting,
+   * completion cannot be guaranteed, so false is returned immediately.
    *
-   * @param userIds 待機対象のユーザー ID
-   * @returns 全員の queue が空になった場合は true、unhealthy を検知した場合は false
+   * @param userIds User IDs to wait for
+   * @returns true if all queues became empty, false if an unhealthy user was detected
    */
   async drain(userIds: string[]): Promise<boolean> {
     while (true) {
@@ -292,10 +292,10 @@ export class UserStateCoordinator {
   }
 
   /**
-   * 指定ユーザーの queue が空で処理ループも動いていないかを返す
+   * Returns whether the user's queue is empty and the processing loop is idle
    *
-   * @param userId ユーザー ID
-   * @returns 何も処理中でなければ true
+   * @param userId User ID
+   * @returns true if nothing is being processed
    */
   private isIdle(userId: string): boolean {
     return (
@@ -304,7 +304,7 @@ export class UserStateCoordinator {
     )
   }
 
-  /** drain の待機者を起こして条件を再評価させる */
+  /** Wakes drain waiters so they re-evaluate their condition */
   private notifyDrainWaiters(): void {
     const waiters = [...this.drainWaiters]
     this.drainWaiters.clear()
@@ -314,31 +314,31 @@ export class UserStateCoordinator {
   }
 
   /**
-   * 指定ユーザーの unhealthy 情報を取得する
+   * Gets unhealthy information for the user
    *
-   * @param userId ユーザー ID
-   * @returns unhealthy 情報、健全な場合は undefined
+   * @param userId User ID
+   * @returns Unhealthy information, or undefined if healthy
    */
   getUnhealthy(userId: string): UnhealthyInfo | undefined {
     return this.unhealthy.get(userId)
   }
 
   /**
-   * unhealthy な全ユーザーの情報を取得する
+   * Gets unhealthy information for all unhealthy users
    *
-   * @returns ユーザー ID をキーとした unhealthy 情報のマップ
+   * @returns Map of unhealthy information keyed by user ID
    */
   getAllUnhealthy(): Record<string, UnhealthyInfo> {
     return Object.fromEntries(this.unhealthy)
   }
 
   /**
-   * 指定ユーザーの queue を先頭から順に処理する
+   * Processes the user's queue in order from the head
    *
-   * persist に失敗した observation は queue head に保持したまま
-   * capped exponential backoff で無期限にリトライする。
+   * An observation that fails to persist stays at the queue head and is
+   * retried indefinitely with capped exponential backoff.
    *
-   * @param userId ユーザー ID
+   * @param userId User ID
    */
   private async processQueue(userId: string): Promise<void> {
     if (this.processing.has(userId)) {
@@ -394,8 +394,8 @@ export class UserStateCoordinator {
           }
           queue.shift()
           attempt = 0
-          // queue-overflow は observation を取り戻せない永続的なデータ損失のため、
-          // 後続の commit が成功しても記録を消さない（persist-failure は回復可能なので消してよい）
+          // queue-overflow is permanent data loss (the observation cannot be recovered), so the record is
+          // kept even if later commits succeed (persist-failure is recoverable, so it can be cleared)
           if (this.unhealthy.get(userId)?.cause === 'persist-failure') {
             this.unhealthy.delete(userId)
           }
@@ -412,8 +412,8 @@ export class UserStateCoordinator {
             if (e === undefined || e.type === 'no-op') continue
             await this.onEffect(userId, displayName, e, item.snapshot).catch(
               (error: unknown) => {
-                // 通知失敗はログのみ。persist 済みの state は既に確定しているため、
-                // 通知の再送は行わず次の observation の処理を継続する。
+                // A notification failure is only logged. The state is already committed,
+                // so the notification is not resent and processing continues with the next observation.
                 logger.error(
                   `Failed to dispatch effect for user ${userId}`,
                   toError(error)
@@ -439,8 +439,8 @@ export class UserStateCoordinator {
     } finally {
       this.processing.delete(userId)
       this.notifyDrainWaiters()
-      // sleep 中に enqueue が呼ばれ、ループを抜けた直後に新規アイテムが積まれている
-      // 可能性があるため、queue が空でなければ処理ループを再起動する
+      // An enqueue during sleep may have added an item right after the loop exited,
+      // so restart the processing loop if the queue is not empty
       const queue = this.queues.get(userId)
       if (queue && !this.stopping && queue.length > 0) {
         this.startProcessingQueue(userId)
@@ -449,12 +449,12 @@ export class UserStateCoordinator {
   }
 
   /**
-   * `processQueue` を fire-and-forget で開始する
+   * Starts `processQueue` fire-and-forget
    *
-   * このリポジトリの ESLint 設定は `no-void` を禁止しているため、`no-floating-promises`
-   * を `void` ではなくこの明示的な `.catch` ラッパーで満たす。
+   * This repository's ESLint config forbids `no-void`, so `no-floating-promises`
+   * is satisfied with this explicit `.catch` wrapper instead of `void`.
    *
-   * @param userId ユーザー ID
+   * @param userId User ID
    */
   private startProcessingQueue(userId: string): void {
     this.processQueue(userId).catch((error: unknown) => {
@@ -466,10 +466,10 @@ export class UserStateCoordinator {
   }
 
   /**
-   * 指定ユーザーを unhealthy としてマークする（回復不能な overflow を優先する）
+   * Marks the user as unhealthy (an unrecoverable overflow takes precedence)
    *
-   * @param userId ユーザー ID
-   * @param cause unhealthy の原因
+   * @param userId User ID
+   * @param cause Cause of the unhealthy state
    */
   private markUnhealthy(userId: string, cause: string): void {
     const previous = this.unhealthy.get(userId)
@@ -484,9 +484,9 @@ export class UserStateCoordinator {
   }
 
   /**
-   * 指定ミリ秒だけ待機する
+   * Waits for the given number of milliseconds
    *
-   * @param ms 待機するミリ秒
+   * @param ms Milliseconds to wait
    */
   private async sleep(ms: number): Promise<void> {
     if (this.stopping) return

@@ -21,7 +21,7 @@ describe('parseLocation', () => {
     })
   })
 
-  it('hidden は friends-plus', () => {
+  it('hidden is friends-plus', () => {
     expect(instance('wrld_a:1~hidden(usr_x)~region(jp)~nonce(abc)')).toEqual({
       name: '1',
       type: 'friends-plus',
@@ -39,7 +39,7 @@ describe('parseLocation', () => {
     })
   })
 
-  it('private は invite、canRequestInvite 付きは invite-plus', () => {
+  it('private is invite; with canRequestInvite it is invite-plus', () => {
     expect(instance('wrld_a:1~private(usr_x)')).toMatchObject({
       type: 'invite',
       ownerId: 'usr_x',
@@ -49,7 +49,7 @@ describe('parseLocation', () => {
     })
   })
 
-  it('group の各 accessType', () => {
+  it('each group accessType', () => {
     expect(
       instance('wrld_a:1~group(grp_x)~groupAccessType(public)')
     ).toMatchObject({ type: 'group-public', ownerId: 'grp_x' })
@@ -65,7 +65,7 @@ describe('parseLocation', () => {
     expect(instance('wrld_a:1~ageGate')).toMatchObject({ ageGate: true })
   })
 
-  it('不可視な値', () => {
+  it('invisible values', () => {
     for (const raw of [
       'private',
       'offline',
@@ -77,7 +77,7 @@ describe('parseLocation', () => {
     expect(parseLocation(null)).toEqual({ visible: false })
   })
 
-  it('raw と nonce を含まない', () => {
+  it('does not include raw or nonce', () => {
     const json = JSON.stringify(
       parseLocation('wrld_a:1~hidden(usr_x)~nonce(secret)')
     )
@@ -87,7 +87,7 @@ describe('parseLocation', () => {
 })
 
 describe('isTraveling', () => {
-  it('traveling で始まる値のみ true', () => {
+  it('true only for values starting with traveling', () => {
     expect(isTraveling('traveling')).toBe(true)
     expect(isTraveling('traveling:traveling')).toBe(true)
     expect(isTraveling('wrld_a:1')).toBe(false)

@@ -7,11 +7,11 @@ import type {
 
 const logger = Logger.configure('PIPELINE-SUPERVISOR')
 
-/** Pipeline 接続の状態 */
+/** State of the Pipeline connection */
 export type SupervisorState =
   'stopped' | 'connecting' | 'synchronizing' | 'ready' | 'reconnecting'
 
-/** Pipeline の再接続理由を安全な値に限定する */
+/** Reconnect reasons, restricted to a fixed set of safe values */
 export type ReconnectReason =
   | 'manual'
   | 'raw close'
@@ -21,7 +21,7 @@ export type ReconnectReason =
   | 'ping send failed'
   | 'reconnect attempt failed'
 
-/** 個人情報を含まない、件数上限付きの Pipeline 診断イベント */
+/** Pipeline diagnostic event that contains no personal information; the history is capped */
 export interface PipelineDiagnosticEvent {
   timestamp: string
   event:
@@ -37,40 +37,41 @@ export interface PipelineDiagnosticEvent {
   attempt?: number
   backoffMs?: number
   errorType?: string
-  /** raw close の close code */
+  /** Close code of the raw close */
   closeCode?: number
-  /** raw close の reason（英数字と一部記号のみ・長さ制限付きに整形済み） */
+  /** Reason of the raw close (sanitized: alphanumerics and a few symbols only, length-limited) */
   closeReason?: string
-  /** 再接続トリガー時点で最後の raw message から経過したミリ秒 */
+  /** Milliseconds since the last raw message when the reconnect was triggered */
   msSinceLastMessage?: number
-  /** 再接続トリガー時点で最後の pong から経過したミリ秒 */
+  /** Milliseconds since the last pong when the reconnect was triggered */
   msSinceLastPong?: number
 }
 
-/** PipelineSupervisor の挙動を調整するオプション */
+/** Options that tune the behavior of PipelineSupervisor */
 export interface PipelineSupervisorOptions {
-  /** raw message が一定時間まったく届かない場合に proactive reconnect する閾値（ミリ秒） */
+  /** Threshold (ms) of raw-message silence after which to proactively reconnect */
   staleMessageTimeoutMs?: number
-  /** ping 送信間隔（ミリ秒） */
+  /** Ping interval (ms) */
   pingIntervalMs?: number
-  /** pong 待機タイムアウト（ミリ秒） */
+  /** Pong wait timeout (ms) */
   pongTimeoutMs?: number
-  /** reconnect の初期 backoff（ミリ秒） */
+  /** Initial reconnect backoff (ms) */
   initialBackoffMs?: number
-  /** reconnect の最大 backoff（ミリ秒） */
+  /** Maximum reconnect backoff (ms) */
   maxBackoffMs?: number
   /**
-   * 無音が閾値を超えたときに REST 同期で state の食い違い（drift）を確認する関数
+   * Checks for state drift via a REST sync when silence exceeds the threshold.
    *
-   * 0 を返した場合は再接続しない。1 以上・null（確認できなかった）・例外・timeout の場合は再接続する。
-   * 省略した場合は、無音が閾値を超えた時点で即座に再接続する。
+   * Returning 0 skips the reconnect. A value of 1 or more, null (could not be
+   * verified), an exception or a timeout triggers a reconnect.
+   * If omitted, the supervisor reconnects immediately once silence exceeds the threshold.
    */
   probeDrift?: () => Promise<number | null>
-  /** probeDrift の完了を待つ上限（ミリ秒）。超えた場合は確認できなかったものとして扱う */
+  /** Maximum time (ms) to wait for probeDrift; on timeout the check counts as unverified */
   probeTimeoutMs?: number
 }
 
-/** raw Pipeline message 全体を liveness 判定に使う既定の heuristic（10 分） */
+/** Default heuristic for liveness based on any raw Pipeline message: 10 minutes of silence */
 const DEFAULT_STALE_MESSAGE_TIMEOUT_MS = 10 * 60 * 1000
 const DEFAULT_PROBE_TIMEOUT_MS = 120_000
 const DEFAULT_PING_INTERVAL_MS = 30_000
@@ -80,26 +81,26 @@ const DEFAULT_MAX_BACKOFF_MS = 300_000
 const DIAGNOSTIC_HISTORY_LIMIT = 25
 
 /**
- * upstream のメッセージを露出せず、安全なエラー種別を返す
+ * Returns a safe error type without exposing upstream messages.
  *
- * @param error 種別を確認するエラー
- * @returns 安全化されたエラー種別
+ * @param error Error to classify
+ * @returns Sanitized error type
  */
 function safeErrorType(error: unknown): string {
   const type = error instanceof Error ? error.name : typeof error
   return /^[A-Za-z][A-Za-z0-9]{0,31}$/.test(type) ? type : 'Error'
 }
 
-/** close reason の最大文字数 */
+/** Maximum length of the close reason */
 const CLOSE_REASON_MAX_LENGTH = 64
 
 /**
- * upstream の close reason をログに出せる形へ整形する
+ * Sanitizes an upstream close reason so it is safe to log.
  *
- * 英数字と一部の記号以外は除去し、長さを制限する。
+ * Characters other than alphanumerics and a few symbols are removed, and the length is limited.
  *
- * @param reason raw close の reason
- * @returns 整形済みの reason。空の場合は undefined
+ * @param reason Reason of the raw close
+ * @returns The sanitized reason, or undefined if empty
  */
 function sanitizeCloseReason(reason: Buffer | undefined): string | undefined {
   const text = reason
@@ -110,9 +111,9 @@ function sanitizeCloseReason(reason: Buffer | undefined): string | undefined {
 }
 
 /**
- * Pipeline 接続状態と transport liveness のみを管理するクラス
+ * Manages only the Pipeline connection state and transport liveness.
  *
- * ユーザーの online/offline/location semantics は持たない。
+ * It has no knowledge of user online/offline/location semantics.
  */
 export class PipelineSupervisor {
   private state: SupervisorState = 'stopped'
@@ -140,12 +141,12 @@ export class PipelineSupervisor {
   private readonly maxBackoffMs: number
 
   /**
-   * PipelineSupervisor を初期化する
+   * Creates a PipelineSupervisor.
    *
-   * @param vrchat VRChat クライアント
-   * @param transport raw WebSocket への隔離された transport
-   * @param onSynchronize synchronizing 状態で呼ばれる REST snapshot cutover 処理
-   * @param options liveness/backoff の閾値オプション
+   * @param vrchat VRChat client
+   * @param transport Transport that isolates access to the raw WebSocket
+   * @param onSynchronize REST snapshot cutover run in the synchronizing state
+   * @param options Liveness/backoff threshold options
    */
   constructor(
     private readonly vrchat: VRChat,
@@ -165,13 +166,14 @@ export class PipelineSupervisor {
   }
 
   /**
-   * Pipeline への接続を開始する
+   * Starts connecting to the Pipeline.
    *
-   * cookie は固定値ではなく provider として受け取り、reconnect のたびに再取得する。
-   * 固定値のままだと auth cookie が期限切れ/rotate した場合、以後の reconnect が
-   * 永久に失敗し続け、プロセス再起動でしか復旧できなくなる。
+   * The cookie is taken as a provider rather than a fixed value and is fetched
+   * again on every reconnect. With a fixed value, once the auth cookie expires
+   * or rotates every later reconnect would fail forever and only a process
+   * restart could recover.
    *
-   * @param authCookieProvider Pipeline 認証用の auth cookie を取得する関数
+   * @param authCookieProvider Function that returns the auth cookie for Pipeline authentication
    */
   async start(authCookieProvider: () => Promise<string>): Promise<void> {
     this.authCookieProvider = authCookieProvider
@@ -179,19 +181,19 @@ export class PipelineSupervisor {
   }
 
   /**
-   * Supervisor を停止する
+   * Stops the supervisor.
    */
   stop(): void {
-    this.generation += 1 // 以降のすべての callback を無効化する
+    this.generation += 1 // invalidates every later callback
     this.clearTimers()
     this.state = 'stopped'
     this.transport.close(this.vrchat)
   }
 
   /**
-   * 明示的に reconnect を要求する
+   * Explicitly requests a reconnect.
    *
-   * @param reason reconnect の理由（health 観測用）
+   * @param reason Reason for the reconnect (for health observation)
    */
   requestReconnect(reason: ReconnectReason): void {
     if (this.state === 'stopped' || this.state === 'reconnecting') {
@@ -201,70 +203,70 @@ export class PipelineSupervisor {
   }
 
   /**
-   * 現在の接続状態を取得する
+   * Gets the current connection state.
    *
-   * @returns 現在の接続状態
+   * @returns Current connection state
    */
   getState(): SupervisorState {
     return this.state
   }
 
   /**
-   * 現在の connection generation を取得する
+   * Gets the current connection generation.
    *
-   * @returns 現在の generation
+   * @returns Current generation
    */
   getGeneration(): number {
     return this.generation
   }
 
   /**
-   * 直近で raw message を受信した日時を取得する
+   * Gets the time the last raw message was received.
    *
-   * @returns 直近の raw message 受信日時、未受信の場合は null
+   * @returns Time of the last raw message, or null if none was received
    */
   getLastMessageAt(): Date | null {
     return this.lastMessageAt
   }
 
   /**
-   * 直近で pong を受信した日時を取得する
+   * Gets the time the last pong was received.
    *
-   * @returns 直近の pong 受信日時、未受信の場合は null
+   * @returns Time of the last pong, or null if none was received
    */
   getLastPongAt(): Date | null {
     return this.lastPongAt
   }
 
   /**
-   * 現在の接続以降の reconnect 試行回数を取得する
+   * Gets the number of reconnect attempts since the last successful connection.
    *
-   * @returns reconnect 試行回数
+   * @returns Number of reconnect attempts
    */
   getReconnectAttempts(): number {
     return this.reconnectAttempts
   }
 
   /**
-   * 直近の reconnect 理由を取得する
+   * Gets the most recent reconnect reason.
    *
-   * @returns 直近の reconnect 理由、reconnect 未発生の場合は null
+   * @returns The most recent reconnect reason, or null if no reconnect has occurred
    */
   getLastReconnectReason(): ReconnectReason | null {
     return this.lastReconnectReason
   }
 
   /**
-   * 個人情報を含まない接続診断履歴を取得する
+   * Gets the connection diagnostic history, which contains no personal information.
    *
-   * @returns 直近の診断イベントのコピー
+   * @returns Copy of the recent diagnostic events
    */
   getDiagnosticHistory(): PipelineDiagnosticEvent[] {
     return this.diagnosticHistory.map((event) => ({ ...event }))
   }
 
   /**
-   * 1 回分の接続シーケンスを実行する（connecting -> synchronizing -> ready）
+   * Runs one connection sequence (connecting -> synchronizing -> ready).
    */
   private async connectOnce(): Promise<void> {
     const myGeneration = this.generation
@@ -289,12 +291,12 @@ export class PipelineSupervisor {
         return
       }
 
-      // raw socket が open した時点で liveness 監視を開始する。synchronizing
-      // （REST reconciliation）完了を待ってから開始すると、その間に発生した
-      // silent な切断を検知できない窓ができてしまう。
-      // 新しい接続の基準時刻をリセットしないと、reconnect 後も古い generation の
-      // stale な timestamp が残り、stale-message timeout が即座に再発火してしまう
-      // （reconnect storm）。
+      // Start liveness monitoring as soon as the raw socket opens. Waiting for
+      // synchronizing (REST reconciliation) to finish would leave a window in
+      // which a silent disconnect goes undetected.
+      // The reference time must be reset for the new connection; otherwise the
+      // stale timestamp of the old generation survives the reconnect and the
+      // stale-message timeout fires again immediately (reconnect storm).
       this.lastMessageAt = new Date()
       this.startLivenessTimers(myGeneration)
 
@@ -320,16 +322,16 @@ export class PipelineSupervisor {
   }
 
   /**
-   * 現在の generation に束縛された raw transport コールバック群を構築する
+   * Builds the raw transport callbacks bound to the given generation.
    *
-   * generation が変わった後に発火した callback は無視する（late callback の拒否）。
+   * Callbacks fired after the generation has changed are ignored (late callbacks are rejected).
    *
-   * @param myGeneration このコールバックが有効な generation
-   * @returns transport へ渡すコールバック
+   * @param myGeneration Generation for which these callbacks are valid
+   * @returns Callbacks to pass to the transport
    */
   private buildCallbacks(myGeneration: number): PipelineTransportCallbacks {
     return {
-      // raw open は supervisor 側で liveness 状態を持たないため何もしない
+      // The supervisor keeps no liveness state for raw open, so nothing to do
       // eslint-disable-next-line @typescript-eslint/no-empty-function
       onOpen: () => {},
       onClose: (code, reason) => {
@@ -365,9 +367,9 @@ export class PipelineSupervisor {
   }
 
   /**
-   * stale-message 監視・ping/pong を開始する
+   * Starts stale-message monitoring and ping/pong.
    *
-   * @param myGeneration 監視対象の generation
+   * @param myGeneration Generation being monitored
    */
   private startLivenessTimers(myGeneration: number): void {
     this.staleCheckTimer = setInterval(
@@ -381,8 +383,8 @@ export class PipelineSupervisor {
           return
         }
 
-        // probe が未指定なら従来どおり即座に再接続する。
-        // ready 以外 (接続処理の途中) は REST probe で判断できないため、同様に即座に再接続する
+        // Without a probe, reconnect immediately.
+        // Outside the ready state (mid-connection) a REST probe cannot judge, so reconnect immediately as well
         if (!this.probeDrift || this.state !== 'ready') {
           this.startReconnect('stale message stream')
           return
@@ -418,9 +420,9 @@ export class PipelineSupervisor {
         this.startReconnect('ping send failed', errorType)
         return
       }
-      // 前回 ping の pong 待ちが残っている間は timeout を再設定しない。
-      // ここで毎回リセットすると pingIntervalMs < pongTimeoutMs のとき
-      // timeout が発火する前に常に打ち消され、pong 未達を検知できなくなる。
+      // Do not re-arm the timeout while the previous ping is still awaiting its pong.
+      // Resetting it every time would, when pingIntervalMs < pongTimeoutMs, always
+      // cancel it before it fires, so a missing pong would never be detected.
       if (this.pingTimeoutTimer) return
       this.pingTimeoutTimer = setTimeout(() => {
         if (myGeneration !== this.generation) return
@@ -430,12 +432,12 @@ export class PipelineSupervisor {
   }
 
   /**
-   * 無音が続いたときに REST 同期で drift を確認し、再接続の要否を決める
+   * Checks for drift via a REST sync after prolonged silence and decides whether to reconnect.
    *
-   * drift が 0 のときだけ再接続しない。確認できなかった場合は再接続する。
+   * Reconnects unless drift is exactly 0; an unverified result also reconnects.
    *
-   * @param myGeneration probe を開始した generation
-   * @param probeDrift drift 件数を返す関数（確認できなかった場合は null）
+   * @param myGeneration Generation that started the probe
+   * @param probeDrift Returns the drift count (null if it could not be verified)
    */
   private async runLivenessProbe(
     myGeneration: number,
@@ -478,9 +480,11 @@ export class PipelineSupervisor {
   }
 
   /**
-   * reconnect シーケンスを実行する
+   * Runs the reconnect sequence.
    *
-   * generation を invalidate してから capped exponential backoff を待ち、再接続する。
+   * Invalidates the generation, waits out a capped exponential backoff, then reconnects.
+   *
+   * @param reason Reason for the reconnect
    */
   private async reconnect(reason: ReconnectReason): Promise<void> {
     if (this.state === 'reconnecting' || this.state === 'stopped') {
@@ -512,8 +516,9 @@ export class PipelineSupervisor {
       }, delay)
     })
 
-    // backoff 待機中に stop() が呼ばれ state が変わっている可能性があるため、
-    // 型上は常に 'reconnecting' に見えてもこのチェックは必要（false positive）
+    // stop() may have been called during the backoff and changed the state, so
+    // this check is needed even though the types suggest it is always 'reconnecting'
+    // (the lint rule is a false positive)
     if (
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       this.state !== 'reconnecting' ||
@@ -539,10 +544,10 @@ export class PipelineSupervisor {
   }
 
   /**
-   * `reconnect` を fire-and-forget で開始する
+   * Starts `reconnect` fire-and-forget.
    *
-   * このリポジトリの ESLint 設定は `no-void` を禁止しているため、`no-floating-promises`
-   * を `void` ではなくこの明示的な `.catch` ラッパーで満たす。
+   * This repository's ESLint config forbids `no-void`, so `no-floating-promises`
+   * is satisfied with this explicit `.catch` wrapper instead of `void`.
    */
   private startReconnect(
     reason: ReconnectReason,
@@ -553,7 +558,7 @@ export class PipelineSupervisor {
       return
     }
     this.lastReconnectReason = reason
-    // 切断原因の切り分け用に、無通信の長さを残す
+    // Record how long the connection was silent, to help diagnose the cause of the disconnect
     const now = Date.now()
     this.recordDiagnostic('reconnect-triggered', {
       reason,
@@ -574,10 +579,10 @@ export class PipelineSupervisor {
   }
 
   /**
-   * 個人情報を含まない診断イベントを記録し、履歴を一定件数に保つ
+   * Records a diagnostic event without personal information and caps the history size.
    *
-   * @param event イベント種別
-   * @param details 安全なイベント情報
+   * @param event Event type
+   * @param details Safe event details
    */
   private recordDiagnostic(
     event: PipelineDiagnosticEvent['event'],
@@ -600,7 +605,7 @@ export class PipelineSupervisor {
   }
 
   /**
-   * すべての liveness/ping タイマーを解除する
+   * Clears all liveness/ping timers.
    */
   private clearTimers(): void {
     if (this.backoffTimer) {

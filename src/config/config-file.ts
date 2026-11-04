@@ -1,13 +1,13 @@
 import { parse } from 'yaml'
 
-/** destination 定義 */
+/** Destination definition */
 export interface DestinationConfig {
   type: 'discord-webhook'
-  /** 環境変数展開済みの Webhook URL */
+  /** Webhook URL with environment variables expanded */
   url: string
 }
 
-/** compile 前のルール定義 */
+/** Rule definition before compilation */
 export interface RawRule {
   name: string
   enabled: boolean
@@ -15,7 +15,7 @@ export interface RawRule {
   destinations: string[]
 }
 
-/** 設定ファイルの検証結果 */
+/** Result of validating the config file */
 export interface ParsedConfigFile {
   destinations: Record<string, DestinationConfig>
   rules: RawRule[]
@@ -28,21 +28,21 @@ const MAX_RULES = 256
 const WEBHOOK_PREFIX = 'https://discord.com/api/webhooks/'
 
 /**
- * プレーンなオブジェクトかどうかを判定する
+ * Checks whether a value is a plain object
  *
- * @param value 判定対象
- * @returns プレーンなオブジェクトなら true
+ * @param value Value to check
+ * @returns true if the value is a plain object
  */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /**
- * 許可されていないキーがあればエラーにする
+ * Throws if there is a key that is not allowed
  *
- * @param obj 検査対象
- * @param allowed 許可キー
- * @param where エラーメッセージ用の位置
+ * @param obj Object to inspect
+ * @param allowed Allowed keys
+ * @param where Location used in the error message
  */
 function rejectUnknownKeys(
   obj: Record<string, unknown>,
@@ -57,12 +57,12 @@ function rejectUnknownKeys(
 }
 
 /**
- * destination の URL を検証し、`${ENV_VAR}` を展開する
+ * Validates a destination URL and expands `${ENV_VAR}`
  *
- * @param raw 設定上の URL
- * @param name destination 名
- * @param env 環境変数
- * @returns 展開後の URL
+ * @param raw URL as written in the config
+ * @param name Destination name
+ * @param env Environment variables
+ * @returns The expanded URL
  */
 function resolveUrl(
   raw: unknown,
@@ -97,11 +97,11 @@ function resolveUrl(
 }
 
 /**
- * destinations セクションを検証する
+ * Validates the destinations section
  *
- * @param raw destinations の値
- * @param env 環境変数
- * @returns destination 名から定義への対応
+ * @param raw Value of destinations
+ * @param env Environment variables
+ * @returns Map from destination name to definition
  */
 function parseDestinations(
   raw: unknown,
@@ -128,11 +128,11 @@ function parseDestinations(
 }
 
 /**
- * rules セクションを検証する
+ * Validates the rules section
  *
- * @param raw rules の値
- * @param destinations 定義済み destination
- * @returns ルール一覧
+ * @param raw Value of rules
+ * @param destinations Defined destinations
+ * @returns Rule list
  */
 function parseRules(
   raw: unknown,
@@ -194,14 +194,14 @@ function parseRules(
 }
 
 /**
- * 設定ファイル (YAML) を parse して検証する
+ * Parses and validates the config file (YAML)
  *
- * エラーメッセージには Webhook URL の値を含めない。
+ * Error messages never include the Webhook URL value.
  *
- * @param text YAML 文字列
- * @param env `${ENV_VAR}` 展開に使う環境変数
- * @returns 検証済みの destinations と未 compile のルール一覧
- * @throws 構文または検証エラーの場合
+ * @param text YAML string
+ * @param env Environment variables used for `${ENV_VAR}` expansion
+ * @returns Validated destinations and uncompiled rules
+ * @throws On syntax or validation errors
  */
 export function parseConfigFile(
   text: string,
@@ -214,10 +214,10 @@ export function parseConfigFile(
   }
   let doc: unknown
   try {
-    // 警告は process.emitWarning 経由でソース行（URL を含み得る）を出力するため抑止する
+    // Suppressed because warnings are emitted via process.emitWarning with the source line (which may contain a URL)
     doc = parse(text, { logLevel: 'error' })
   } catch (error) {
-    // yaml のエラーメッセージはソース行を含み URL が漏れ得るため、位置のみ示す
+    // yaml error messages include the source line and could leak a URL, so only the position is reported
     const line = (error as { linePos?: { line: number }[] }).linePos?.[0]?.line
     throw new Error(
       `Failed to parse config YAML${line === undefined ? '' : ` (line ${line})`}`

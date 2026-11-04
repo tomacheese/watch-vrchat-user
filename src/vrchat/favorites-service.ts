@@ -3,23 +3,23 @@ import { toError } from '../logger-utils'
 
 const logger = Logger.configure('FAVORITES-SERVICE')
 
-/** 定期更新の間隔 */
+/** Interval between periodic refreshes */
 const REFRESH_INTERVAL_MS = 60 * 60 * 1000
 
-/** FavoritesService の生成オプション */
+/** Options for creating a FavoritesService */
 export interface FavoritesServiceOptions {
-  /** お気に入りグループの取得関数 */
+  /** Fetches favorite groups, keyed by user ID */
   fetcher: (signal?: AbortSignal) => Promise<Map<string, string[]>>
-  /** 更新のタイムアウト（ミリ秒） */
+  /** Refresh timeout in milliseconds */
   timeoutMs?: number
-  /** 現在時刻 (epoch ms) を返す関数 */
+  /** Returns the current time (epoch ms) */
   now?: () => number
 }
 
 /**
- * フレンドのお気に入りグループを保持し、定期更新するサービス
+ * Holds each friend's favorite groups and refreshes them periodically.
  *
- * 更新に失敗した場合は最後に成功した内容を維持する。
+ * A failed refresh keeps the last successful result.
  */
 export class FavoritesService {
   private readonly fetcher: FavoritesServiceOptions['fetcher']
@@ -33,9 +33,9 @@ export class FavoritesService {
   private readonly timeoutMs: number
 
   /**
-   * FavoritesService を初期化する
+   * Creates a FavoritesService.
    *
-   * @param options 取得関数・現在時刻関数
+   * @param options Fetcher, optional clock and timeout
    */
   constructor(options: FavoritesServiceOptions) {
     this.fetcher = options.fetcher
@@ -43,7 +43,7 @@ export class FavoritesService {
     this.timeoutMs = options.timeoutMs ?? 30_000
   }
 
-  /** お気に入りグループを再取得する。失敗時は last-known を維持する */
+  /** Refetches favorite groups. Concurrent calls share one refresh; on failure the last-known groups are kept */
   refresh(): Promise<void> {
     this.refreshPromise ??= this.fetchGroups().finally(() => {
       this.refreshPromise = undefined
@@ -51,7 +51,6 @@ export class FavoritesService {
     return this.refreshPromise
   }
 
-  /** 中断可能な更新を実行する。 */
   private async fetchGroups(): Promise<void> {
     const controller = new AbortController()
     this.controller = controller
@@ -84,7 +83,7 @@ export class FavoritesService {
     }
   }
 
-  /** 定期更新を開始する（初回の refresh は呼び出し側が行う） */
+  /** Starts periodic refresh (the caller performs the initial refresh) */
   start(): void {
     if (this.timer) return
     this.timer = setInterval(() => {
@@ -95,7 +94,7 @@ export class FavoritesService {
     this.timer.unref()
   }
 
-  /** 定期更新を停止する */
+  /** Stops periodic refresh and aborts any in-flight refresh */
   stop(): void {
     this.controller?.abort(new Error('Favorites service stopped'))
     if (!this.timer) {
@@ -107,16 +106,16 @@ export class FavoritesService {
   }
 
   /**
-   * ユーザーが属するお気に入りグループ名を返す
+   * Returns the favorite group names the user belongs to.
    *
-   * @param userId ユーザー ID
-   * @returns グループ名の配列（未所属は空配列）
+   * @param userId User ID
+   * @returns Group names (empty array if the user is in none)
    */
   getGroups(userId: string): string[] {
     return [...(this.groups.get(userId) ?? [])]
   }
 
-  /** 最終更新時刻と直近のエラーを返す */
+  /** Returns the last successful update time and the latest error */
   getStatus(): { lastUpdatedAt: string | null; lastError: string | null } {
     return { lastUpdatedAt: this.lastUpdatedAt, lastError: this.lastError }
   }

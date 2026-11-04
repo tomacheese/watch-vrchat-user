@@ -9,69 +9,69 @@ import type {
 
 const logger = Logger.configure('HEALTH')
 
-/** unhealthy なユーザー 1 件分の情報 */
+/** Information about one unhealthy user */
 export interface UnhealthyUserSnapshot {
-  /** ユーザー ID */
+  /** User ID */
   userId: string
-  /** unhealthy の原因 */
+  /** Cause of the unhealthy state */
   cause: string
-  /** unhealthy になった日時（ISO 8601 形式） */
+  /** When the user became unhealthy (ISO 8601) */
   since: string
 }
 
-/** health の総合状態 */
+/** Overall health status */
 export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy'
 
-/** health endpoint が公開する観測データ */
+/** Observation data exposed by the health endpoint */
 export interface HealthSnapshot {
-  /** Pipeline supervisor の状態 */
+  /** State of the Pipeline supervisor */
   supervisorState: SupervisorState
-  /** baseline が保存済みか */
+  /** Whether the baseline has been saved */
   baselineCompleted?: boolean
-  /** 直近の REST 同期障害 */
+  /** Most recent REST synchronization failure */
   lastReconciliationError?: string | null
-  /** 通知予定と配信障害 */
+  /** Pending notifications and delivery failures */
   delivery?: import('../notifications/notification-outbox').DeliveryStatus
-  /** raw WebSocket の readyState */
+  /** readyState of the raw WebSocket */
   rawReadyState: number
-  /** 現在の connection generation */
+  /** Current connection generation */
   generation: number
-  /** 最後に raw message を受信した日時 */
+  /** When the last raw message was received */
   lastMessageAt: string | null
-  /** 最後に pong を受信した日時 */
+  /** When the last pong was received */
   lastPongAt: string | null
-  /** 最後に REST reconciliation を実行した日時 */
+  /** When REST reconciliation last ran */
   lastReconciliationAt: string | null
-  /** reconnect の試行回数 */
+  /** Number of reconnect attempts */
   reconnectAttempts: number
-  /** 直近の reconnect 理由 */
+  /** Most recent reconnect reason */
   lastReconnectReason: string | null
-  /** 個人情報を含まない直近の接続診断イベント */
+  /** Recent connection diagnostic events, without personal information */
   reconnectHistory: PipelineDiagnosticEvent[]
-  /** unhealthy なユーザーの一覧 */
+  /** List of unhealthy users */
   unhealthyUsers: UnhealthyUserSnapshot[]
-  /** 設定ファイルの読み込み状態 */
+  /** Config file load state */
   config: {
     loadedAt: string | null
     lastReloadError: string | null
     lastReloadFailedAt: string | null
   }
-  /** 直近のルール評価エラー（ルール名ごとの集計） */
+  /** Recent rule evaluation errors, aggregated per rule name */
   ruleErrors: {
     rule: string
     count: number
     lastAt: string
     lastError: string
   }[]
-  /** Favorites 取得状態 */
+  /** Favorites fetch state */
   favorites: { lastUpdatedAt: string | null; lastError: string | null }
 }
 
 /**
- * snapshot から総合状態を判定する
+ * Determines the overall status from a snapshot.
  *
- * @param snapshot 観測データ
- * @returns 総合状態
+ * @param snapshot Observation data
+ * @returns Overall status
  */
 export function evaluateStatus(snapshot: HealthSnapshot): HealthStatus {
   if (
@@ -97,24 +97,24 @@ export function evaluateStatus(snapshot: HealthSnapshot): HealthStatus {
 }
 
 /**
- * localhost のみでアクセス可能な health endpoint を提供するクラス
+ * Serves a health endpoint reachable from localhost only (overridable via env).
  *
- * 「プロセスは生きている」と「Pipeline が健全」を区別できるよう、
- * supervisor state・raw readyState・generation・各種タイムスタンプ・
- * reconnect の直近履歴・per-user unhealthy を個別に観測可能にする。
+ * To distinguish "the process is alive" from "the Pipeline is healthy", the
+ * supervisor state, raw readyState, generation, timestamps, recent reconnect
+ * history and per-user unhealthy state are each observable.
  */
 export class HealthService {
   private server: http.Server | null = null
 
   /**
-   * HealthService を初期化する
+   * Creates a HealthService.
    *
-   * @param getSnapshot 最新の観測データを取得する関数
+   * @param getSnapshot Function that returns the latest observation data
    */
   constructor(private readonly getSnapshot: () => HealthSnapshot) {}
 
   /**
-   * health endpoint サーバーを開始する
+   * Starts the health endpoint server.
    */
   start(): void {
     const port = process.env.HEALTH_PORT
@@ -139,9 +139,9 @@ export class HealthService {
   }
 
   /**
-   * 実際に listen しているポート番号を取得する（`HEALTH_PORT=0` の場合の OS 割当ポート含む）
+   * Gets the port actually being listened on (including the OS-assigned port when `HEALTH_PORT=0`).
    *
-   * @returns ポート番号
+   * @returns Port number
    */
   getListeningPort(): number {
     const address = this.server?.address() as AddressInfo | null
@@ -149,7 +149,7 @@ export class HealthService {
   }
 
   /**
-   * health endpoint サーバーを停止する
+   * Stops the health endpoint server.
    */
   stop(): void {
     if (!this.server) return
@@ -160,9 +160,9 @@ export class HealthService {
   }
 
   /**
-   * health check リクエストを処理する
+   * Handles a health check request.
    *
-   * @param response HTTP レスポンス
+   * @param response HTTP response
    */
   private handleHealthCheck(response: http.ServerResponse): void {
     let snapshot: HealthSnapshot

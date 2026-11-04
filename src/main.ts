@@ -7,7 +7,7 @@ import { toError } from './logger-utils'
 const logger = Logger.configure('MAIN')
 
 /**
- * エントリポイント
+ * Entry point
  */
 async function main(): Promise<void> {
   const config = loadConfig()

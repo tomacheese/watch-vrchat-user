@@ -24,8 +24,8 @@ function run(
   return reduce('u1', current, 'Alice', observation, baseline, FIXED_NOW)
 }
 
-describe('reduce (spec §7 遷移表)', () => {
-  it('1. offline -> online（online 観測）は online のみ', () => {
+describe('reduce (spec §7 transition table)', () => {
+  it('1. offline -> online (online observation) yields online only', () => {
     const current = state()
     const result = run(current, { type: 'online' })
     expect(result.deleteUser).toBe(false)
@@ -41,21 +41,21 @@ describe('reduce (spec §7 遷移表)', () => {
     })
   })
 
-  it('1. offline -> online（location 観測）は online と location-change', () => {
+  it('1. offline -> online (location observation) yields online and location-change', () => {
     const result = run(state(), { type: 'location', location: A })
     expect(result.effect).toMatchObject({ type: 'online' })
     expect(result.followUp).toMatchObject({ type: 'location-change' })
     expect(result.nextState).toMatchObject({ presence: 'online', location: A })
   })
 
-  it('1. online 観測に location があれば state に載せ、location-change も発火する', () => {
+  it('1. an online observation with a location stores it in state and also fires location-change', () => {
     const result = run(state(), { type: 'online', location: A })
     expect(result.effect).toMatchObject({ type: 'online' })
     expect(result.followUp).toMatchObject({ type: 'location-change' })
     expect(result.nextState).toMatchObject({ location: A })
   })
 
-  it('2. online -> offline は offline のみで location を null にする', () => {
+  it('2. online -> offline yields offline only and sets location to null', () => {
     const current = state({ presence: 'online', location: A })
     const result = run(current, { type: 'offline' })
     expect(result.effect).toEqual({
@@ -69,7 +69,7 @@ describe('reduce (spec §7 遷移表)', () => {
     })
   })
 
-  it('3. 両方 visible で raw 値が異なれば location-change', () => {
+  it('3. location-change when both are visible and the raw values differ', () => {
     const current = state({ presence: 'online', location: A })
     const result = run(current, { type: 'location', location: B })
     expect(result.effect).toEqual({
@@ -79,7 +79,7 @@ describe('reduce (spec §7 遷移表)', () => {
     })
   })
 
-  it('4. 公開 -> private と private -> 公開はどちらも location-change', () => {
+  it('4. public -> private and private -> public are both location-change', () => {
     const current = state({ presence: 'online', location: A })
     const toPrivate = run(current, { type: 'location', location: 'private' })
     expect(toPrivate.effect).toEqual({
@@ -94,7 +94,7 @@ describe('reduce (spec §7 遷移表)', () => {
     expect(back.nextState).toMatchObject({ location: B })
   })
 
-  it('4. private の維持と未確定 location からの private は no-op', () => {
+  it('4. staying private and going private from an unconfirmed location are no-op', () => {
     const stay = run(state({ presence: 'online', location: 'private' }), {
       type: 'location',
       location: 'private',
@@ -108,28 +108,28 @@ describe('reduce (spec §7 遷移表)', () => {
     expect(fromUnknown.effect).toEqual({ type: 'no-op' })
   })
 
-  it('4. 未確定 location からの確定は no-op（state のみ更新）', () => {
+  it('4. confirming from an unconfirmed location is no-op (state only updated)', () => {
     const current = state({ presence: 'online', location: null })
     const result = run(current, { type: 'location', location: A })
     expect(result.effect).toEqual({ type: 'no-op' })
     expect(result.nextState).toMatchObject({ location: A })
   })
 
-  it('4. 同一 location は no-op で state を変更しない', () => {
+  it('4. the same location is no-op and leaves state unchanged', () => {
     const current = state({ presence: 'online', location: A })
     const result = run(current, { type: 'location', location: A })
     expect(result.effect).toEqual({ type: 'no-op' })
     expect(result.nextState).toBe(current)
   })
 
-  it('4. online 中の重複 online 観測は location を維持し no-op', () => {
+  it('4. a duplicate online observation while online keeps the location and is no-op', () => {
     const current = state({ presence: 'online', location: A })
     const result = run(current, { type: 'online' })
     expect(result.effect).toEqual({ type: 'no-op' })
     expect(result.nextState).toBe(current)
   })
 
-  it('5. traveling は state 不変で no-op（A -> traveling -> B は A -> B）', () => {
+  it('5. traveling leaves state unchanged and is no-op (A -> traveling -> B behaves as A -> B)', () => {
     const current = state({ presence: 'online', location: A })
     const traveling = run(current, {
       type: 'location',
@@ -146,13 +146,13 @@ describe('reduce (spec §7 遷移表)', () => {
     })
   })
 
-  it('5. record 不在への traveling は state を作らない', () => {
+  it('5. traveling for a missing record does not create state', () => {
     const result = run(undefined, { type: 'location', location: 'traveling' })
     expect(result.effect).toEqual({ type: 'no-op' })
     expect(result.nextState).toBeUndefined()
   })
 
-  it('6. record 不在 + baseline=false は friend-add のみ', () => {
+  it('6. missing record + baseline=false yields friend-add only', () => {
     for (const observation of [
       { type: 'online' },
       { type: 'offline' },
@@ -171,7 +171,7 @@ describe('reduce (spec §7 遷移表)', () => {
     ).toMatchObject({ presence: 'online', location: A })
   })
 
-  it('7. friend-add observation で record 不在は friend-add', () => {
+  it('7. a friend-add observation with a missing record yields friend-add', () => {
     const result = run(undefined, { type: 'friend-add' })
     expect(result.effect).toMatchObject({
       type: 'friend-add',
@@ -185,7 +185,7 @@ describe('reduce (spec §7 遷移表)', () => {
     })
   })
 
-  it('8. friend-add observation で record 既存は no-op', () => {
+  it('8. a friend-add observation with an existing record is no-op', () => {
     const current = state({ presence: 'online', location: A })
     const result = run(current, { type: 'friend-add' })
     expect(result.effect).toEqual({ type: 'no-op' })
@@ -193,7 +193,7 @@ describe('reduce (spec §7 遷移表)', () => {
     expect(result.deleteUser).toBe(false)
   })
 
-  it('9. friend-delete で record 既存は friend-delete と deleteUser', () => {
+  it('9. friend-delete with an existing record yields friend-delete and deleteUser', () => {
     const current = state({ presence: 'online', location: A })
     const result = run(current, { type: 'friend-delete' })
     expect(result.effect).toEqual({
@@ -205,13 +205,13 @@ describe('reduce (spec §7 遷移表)', () => {
     expect(result.nextState).toBeUndefined()
   })
 
-  it('10. friend-delete で record 不在は no-op', () => {
+  it('10. friend-delete with a missing record is no-op', () => {
     const result = run(undefined, { type: 'friend-delete' })
     expect(result.effect).toEqual({ type: 'no-op' })
     expect(result.deleteUser).toBe(false)
   })
 
-  it('11. baseline=true は通知 effect を生成せず state のみ更新する', () => {
+  it('11. baseline=true produces no notification effect and only updates state', () => {
     const online = run(state(), { type: 'online' }, true)
     expect(online.effect).toEqual({ type: 'no-op' })
     expect(online.nextState).toMatchObject({ presence: 'online' })
@@ -234,8 +234,8 @@ describe('reduce (spec §7 遷移表)', () => {
   })
 })
 
-describe('reduce (online 後の最初の location)', () => {
-  it('location 未確定の online 後、最初の可視 location は location-change になる', () => {
+describe('reduce (first location after online)', () => {
+  it('after an online with an unconfirmed location, the first visible location becomes location-change', () => {
     const online = run(state(), { type: 'online' })
     expect(online.nextState?.firstLocationPending).toBe(true)
     const result = run(online.nextState, { type: 'location', location: A })
@@ -243,17 +243,17 @@ describe('reduce (online 後の最初の location)', () => {
     expect(result.nextState?.firstLocationPending).toBeUndefined()
   })
 
-  it('location が確定した online は pending にならない', () => {
+  it('an online with a confirmed location does not become pending', () => {
     const result = run(state(), { type: 'online', location: A })
     expect(result.effect).toMatchObject({ type: 'online' })
     expect(result.nextState?.firstLocationPending).toBeUndefined()
   })
 })
 
-describe('reduce (ステータス / ステータスメッセージ)', () => {
+describe('reduce (status / status message)', () => {
   const join = { status: 'join me', statusDescription: 'ダンス募集' }
 
-  it('未確認のユーザーには通知せず記録だけを行う', () => {
+  it('only records for an unconfirmed user without notifying', () => {
     const current = state({ presence: 'online', location: A })
     const result = run(current, { type: 'profile', profile: join })
     expect(result.effect).toEqual({ type: 'no-op' })
@@ -261,7 +261,7 @@ describe('reduce (ステータス / ステータスメッセージ)', () => {
     expect(result.nextState).toMatchObject(join)
   })
 
-  it('ステータスが変わると status-change を返す', () => {
+  it('returns status-change when the status changes', () => {
     const current = state({
       presence: 'online',
       location: A,
@@ -281,7 +281,7 @@ describe('reduce (ステータス / ステータスメッセージ)', () => {
     expect(result.effect).toEqual({ type: 'no-op' })
   })
 
-  it('ステータスメッセージだけが変わっても status-change を返す', () => {
+  it('returns status-change even when only the status message changes', () => {
     const current = state({ status: 'active', statusDescription: 'a' })
     const result = run(current, {
       type: 'profile',
@@ -290,7 +290,7 @@ describe('reduce (ステータス / ステータスメッセージ)', () => {
     expect(result.statusEffect?.type).toBe('status-change')
   })
 
-  it('変化が無ければ同一 state を返し effect を出さない', () => {
+  it('returns the same state and no effect when nothing changed', () => {
     const current = state({ status: 'active', statusDescription: 'a' })
     const result = run(current, {
       type: 'profile',
@@ -300,7 +300,7 @@ describe('reduce (ステータス / ステータスメッセージ)', () => {
     expect(result.statusEffect).toBeUndefined()
   })
 
-  it('status が offline のときは直前のステータスを維持する', () => {
+  it('keeps the previous status when status is offline', () => {
     const current = state({ status: 'busy', statusDescription: 'a' })
     const result = run(current, {
       type: 'offline',
@@ -310,7 +310,7 @@ describe('reduce (ステータス / ステータスメッセージ)', () => {
     expect(result.statusEffect).toBeUndefined()
   })
 
-  it('offline 観測でメッセージだけ記録された後の最初の実ステータスは通知しない', () => {
+  it('does not notify the first real status after only the message was recorded from an offline observation', () => {
     const offline = run(state({ presence: 'online', location: A }), {
       type: 'offline',
       profile: { status: 'offline', statusDescription: 'a' },
@@ -325,7 +325,7 @@ describe('reduce (ステータス / ステータスメッセージ)', () => {
     expect(result.nextState).toMatchObject({ status: 'active' })
   })
 
-  it('status が未確認でも、確認済みのメッセージが変われば status-change を返す', () => {
+  it('returns status-change when a confirmed message changes even if status is unconfirmed', () => {
     const current = state({ statusDescription: 'a' })
     const result = run(current, {
       type: 'profile',
@@ -339,7 +339,7 @@ describe('reduce (ステータス / ステータスメッセージ)', () => {
     expect(result.nextState?.status).toBeUndefined()
   })
 
-  it('REST snapshot は未確認のprofile項目だけ初期化し、status-change を返さない', () => {
+  it('a REST snapshot initializes only unconfirmed profile fields and returns no status-change', () => {
     const current = state({ status: 'active' })
     const result = run(current, {
       type: 'profile',
@@ -354,7 +354,7 @@ describe('reduce (ステータス / ステータスメッセージ)', () => {
     })
   })
 
-  it('REST snapshot は確認済みのprofile項目を上書きしない', () => {
+  it('a REST snapshot does not overwrite confirmed profile fields', () => {
     const current = state({ status: 'active', statusDescription: 'a' })
     const result = run(current, {
       type: 'profile',
@@ -366,7 +366,7 @@ describe('reduce (ステータス / ステータスメッセージ)', () => {
     expect(result.nextState).toBe(current)
   })
 
-  it('status が初めて確認されるのと同時のメッセージ変更では、status は変化として扱わない', () => {
+  it('when a message change coincides with the first status confirmation, status is not treated as a change', () => {
     const result = run(state({ statusDescription: 'a' }), {
       type: 'profile',
       profile: { status: 'active', statusDescription: 'b' },
@@ -377,7 +377,7 @@ describe('reduce (ステータス / ステータスメッセージ)', () => {
     })
   })
 
-  it('空文字のメッセージも確認済みとして、変われば通知する', () => {
+  it('an empty-string message also counts as confirmed and notifies when it changes', () => {
     const result = run(state({ statusDescription: '' }), {
       type: 'profile',
       profile: { status: 'offline', statusDescription: 'x' },
@@ -385,7 +385,7 @@ describe('reduce (ステータス / ステータスメッセージ)', () => {
     expect(result.statusEffect?.type).toBe('status-change')
   })
 
-  it('メッセージも未確認の最初の観測は通知しない', () => {
+  it('the first observation with the message also unconfirmed does not notify', () => {
     const result = run(state(), {
       type: 'profile',
       profile: { status: 'active', statusDescription: 'a' },
@@ -397,27 +397,27 @@ describe('reduce (ステータス / ステータスメッセージ)', () => {
     })
   })
 
-  it('baseline 中は記録だけを行い通知しない', () => {
+  it('during baseline, only records and does not notify', () => {
     const current = state({ status: 'active', statusDescription: 'a' })
     const result = run(current, { type: 'profile', profile: join }, true)
     expect(result.statusEffect).toBeUndefined()
     expect(result.nextState).toMatchObject(join)
   })
 
-  it('online 遷移と同時のステータス変更は両方の effect を返す', () => {
+  it('a status change together with an online transition returns both effects', () => {
     const current = state({ status: 'active', statusDescription: 'a' })
     const result = run(current, { type: 'online', profile: join })
     expect(result.effect.type).toBe('online')
     expect(result.statusEffect?.type).toBe('status-change')
   })
 
-  it('record が無いユーザーへの profile 観測は無視する', () => {
+  it('a profile observation for a user without a record is ignored', () => {
     const result = run(undefined, { type: 'profile', profile: join })
     expect(result.nextState).toBeUndefined()
     expect(result.statusEffect).toBeUndefined()
   })
 
-  it('friend-add と同時に観測したステータスは記録だけを行う', () => {
+  it('a status observed together with friend-add is only recorded', () => {
     const result = run(undefined, { type: 'friend-add', profile: join })
     expect(result.effect.type).toBe('friend-add')
     expect(result.statusEffect).toBeUndefined()
@@ -426,7 +426,7 @@ describe('reduce (ステータス / ステータスメッセージ)', () => {
 })
 
 describe('combined profile effects', () => {
-  it('online と followUp は同時に観測した profile を含む', () => {
+  it('online and followUp include the profile observed at the same time', () => {
     const result = run(
       state({ status: 'active', statusDescription: 'before' }),
       {
@@ -444,7 +444,7 @@ describe('combined profile effects', () => {
     })
   })
 
-  it('未知ユーザーの friend-add も初回 profile を含む', () => {
+  it('friend-add for an unknown user also includes the initial profile', () => {
     const result = run(undefined, {
       type: 'online',
       profile: { status: 'busy', statusDescription: 'working' },

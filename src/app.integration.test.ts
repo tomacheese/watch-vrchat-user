@@ -39,7 +39,7 @@ function readStateStore(filePath: string) {
 const MAIN_URL = 'https://discord.com/api/webhooks/1/main'
 const DANCE_URL = 'https://discord.com/api/webhooks/2/dance'
 
-/** Issue の 4 例に相当する設定 */
+/** Config covering the four examples from the issue */
 const CONFIG_YAML = `version: 1
 destinations:
   main:
@@ -155,8 +155,8 @@ describe('App integration', () => {
           })
         return Promise.resolve(new Response(null, { status: 204 }))
       })
-    // VRChat SDK の pipeline は Node 流の EventEmitter API を持つため、
-    // fake もそれに合わせる（EventTarget では on()/emit() の形が一致しない）。
+    // The VRChat SDK pipeline exposes a Node-style EventEmitter API,
+    // so the fake matches it (the on()/emit() shape differs from EventTarget).
     // eslint-disable-next-line unicorn/prefer-event-target
     const emitter = new EventEmitter()
     const removeAllListeners = emitter.removeAllListeners.bind(emitter)
@@ -221,7 +221,7 @@ describe('App integration', () => {
 
   afterEach(async () => {
     await Promise.all(apps.splice(0).map(async (app) => app.stop()))
-    // 進行中の state 永続化が終わってから一時ディレクトリを消す
+    // Remove the temp directory only after in-flight state persistence finishes
     await new Promise((resolve) => setTimeout(resolve, 100))
     fetchMock.mockRestore()
     delete process.env.HEALTH_PORT
@@ -231,7 +231,7 @@ describe('App integration', () => {
     fs.rmSync(dir, { recursive: true, force: true })
   })
 
-  /** baseline 完了（永続化済み）まで待つ */
+  /** Waits until the baseline is complete (persisted) */
   async function waitForBaseline(): Promise<void> {
     await waitFor(() => {
       try {
@@ -243,12 +243,12 @@ describe('App integration', () => {
     })
   }
 
-  it('AC-1〜AC-4: WebSocket event が rule に従って destination へ振り分けられる', async () => {
+  it('AC-1 to AC-4: WebSocket events are routed to destinations according to the rules', async () => {
     const app = new App(config())
     apps.push(app)
     await app.start()
     await waitForBaseline()
-    // baseline 中の通知は抑止される
+    // Notifications during the baseline are suppressed
     expect(mockSent).toHaveLength(0)
 
     pipeline.emit('friend-location', {
@@ -267,7 +267,7 @@ describe('App integration', () => {
     pipeline.emit('friend-online', user('usr_c'))
 
     await waitFor(() => mockSent.length >= 7)
-    // 余分な通知が無いことを確認するため少し待つ
+    // Wait briefly to confirm no extra notifications arrive
     await new Promise((resolve) => setTimeout(resolve, 100))
 
     const rulesFor = (url: string): string[] =>
@@ -275,8 +275,8 @@ describe('App integration', () => {
         .filter((m) => m.url === url)
         .map((m) => m.footer)
         .toSorted((a, b) => a.localeCompare(b))
-    // AC-1/AC-2: 特定ユーザーの location-change / online は main のみ
-    // AC-4: group_0 のフレンドの online は main
+    // AC-1/AC-2: location-change / online of a specific user go to main only
+    // AC-4: online of a group_0 friend goes to main
     expect(rulesFor(MAIN_URL)).toEqual([
       '検知ルール: favorite-group-0-presence',
       '検知ルール: specific-user-location',
@@ -284,7 +284,7 @@ describe('App integration', () => {
       '検知ルール: specific-user-presence',
       '検知ルール: world-capacity',
     ])
-    // AC-3: 「ダンス」を含む World への移動は dance（usr_a と usr_b の 2 件）
+    // AC-3: Moves to a World containing "ダンス" go to dance (two: usr_a and usr_b)
     expect(rulesFor(DANCE_URL)).toEqual([
       '検知ルール: dance-world',
       '検知ルール: dance-world',
@@ -298,7 +298,7 @@ describe('App integration', () => {
     await app.stop()
   })
 
-  it('Favorites の初回取得に失敗しても起動を継続し、health は degraded (200) になる', async () => {
+  it('startup continues and health is degraded (200) when the initial Favorites fetch fails', async () => {
     ;(session.getFriendFavoriteGroups as jest.Mock).mockRejectedValue(
       new Error('Rate limit error (429)')
     )
@@ -318,7 +318,7 @@ describe('App integration', () => {
     await app.stop()
   })
 
-  it('Favorites 取得に成功していれば health は healthy (200) になる', async () => {
+  it('health is healthy (200) when the Favorites fetch succeeds', async () => {
     const app = new App(config())
     apps.push(app)
     await app.start()
@@ -330,7 +330,7 @@ describe('App integration', () => {
     await app.stop()
   })
 
-  it('設定ファイルが不正な場合は start() が reject する', async () => {
+  it('start() rejects on an invalid config file', async () => {
     fs.writeFileSync(path.join(dir, 'config.yaml'), 'version: 1\nrules: 1\n')
     const app = new App(config())
     apps.push(app)
@@ -340,7 +340,7 @@ describe('App integration', () => {
     await app.stop()
   })
 
-  it('raw close で reconnect し、reconnect 後も queue の内容を保持する', async () => {
+  it('reconnects on raw close and keeps queued content after reconnecting', async () => {
     const app = new App(config())
     apps.push(app)
     await app.start()
@@ -350,15 +350,15 @@ describe('App integration', () => {
     await waitFor(() => app.getUserState('usr_a')?.presence === 'offline')
     capturedCallbacks[0].onClose()
 
-    // App は PipelineSupervisor を既定 backoff (initialBackoffMs=1000ms) で
-    // 生成するため、固定 50ms 待機では reconnect 前に検証してしまう。
+    // App creates PipelineSupervisor with the default backoff (initialBackoffMs=1000ms),
+    // so a fixed 50ms wait would assert before the reconnect happens.
     await waitFor(() => capturedCallbacks.length > 1, 3000)
 
     expect(capturedCallbacks.length).toBeGreaterThan(1)
 
     await app.stop()
   })
-  it('初回同期失敗では起動完了にせず、保存前の baseline を維持する', async () => {
+  it('a failed initial sync does not complete startup and keeps the baseline unsaved', async () => {
     ;(session.getFriendsSnapshot as jest.Mock).mockRejectedValue(
       new Error('REST unavailable')
     )
@@ -376,7 +376,7 @@ describe('App integration', () => {
     expect(mockSent).toEqual([])
   })
 
-  it('Discord 障害中でも次の state を保存し、停止後も通知予定を保持する', async () => {
+  it('keeps saving state during a Discord outage and retains pending notifications after stop', async () => {
     fetchMock.mockImplementation(() =>
       Promise.resolve(new Response(null, { status: 503 }))
     )

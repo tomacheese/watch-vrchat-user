@@ -11,14 +11,14 @@ import {
 
 jest.mock('keyv-file')
 
-// private constructor を経由せず getAuthCookie() 単体をテストするための最小限のアクセサ型
+// Minimal accessor type for testing getAuthCookie() alone without going through the private constructor
 interface SessionTestAccessor {
   keyvAdapter: KeyvFile
   getAuthCookie: () => Promise<string | undefined>
 }
 
 describe('VRChatSession.getAuthCookie', () => {
-  it('保存済み Cookie から auth cookie を抽出する', async () => {
+  it('extracts the auth cookie from the stored cookies', async () => {
     const mockGet = jest
       .fn()
       .mockResolvedValue(
@@ -37,7 +37,7 @@ describe('VRChatSession.getAuthCookie', () => {
     expect(cookie).toBe('authcookie_123')
   })
 
-  it('Cookie データが存在しない場合は undefined を返す', async () => {
+  it('returns undefined when no cookie data exists', async () => {
     const mockGet = jest.fn().mockResolvedValue(undefined)
     ;(KeyvFile as unknown as jest.Mock).mockImplementation(() => ({
       get: mockGet,
@@ -58,21 +58,21 @@ describe('isFriend', () => {
     return { getFriendStatus } as unknown as VRChat
   }
 
-  it('フレンドの場合は true を返す', async () => {
+  it('returns true for a friend', async () => {
     const vrchat = fakeVrchat(
       jest.fn().mockResolvedValue({ data: { isFriend: true } })
     )
     await expect(isFriend(vrchat, 'usr_1')).resolves.toBe(true)
   })
 
-  it('フレンドでない場合は false を返す', async () => {
+  it('returns false for a non-friend', async () => {
     const vrchat = fakeVrchat(
       jest.fn().mockResolvedValue({ data: { isFriend: false } })
     )
     await expect(isFriend(vrchat, 'usr_1')).resolves.toBe(false)
   })
 
-  it('API 呼び出し自体が失敗した場合は false を返さず例外を投げる', async () => {
+  it('throws instead of returning false when the API call itself fails', async () => {
     const vrchat = fakeVrchat(
       jest.fn().mockResolvedValue({ error: { message: 'network error' } })
     )
@@ -92,7 +92,7 @@ function friends(prefix: string, count: number, location: string): unknown[] {
   }))
 }
 
-/** online 側だけ items をページングして返し、offline 側は空にする fake */
+/** Fake that pages through items for the online side only and returns nothing for offline */
 function onlineOnlyFake(items: unknown[]): jest.Mock {
   return jest.fn().mockImplementation((options: PagedQuery) =>
     Promise.resolve({
@@ -107,7 +107,7 @@ function onlineOnlyFake(items: unknown[]): jest.Mock {
 }
 
 describe('getFriendsSnapshot', () => {
-  it('online と offline の 2 系統を取得して統合する', async () => {
+  it('fetches and merges the online and offline lists', async () => {
     const getFriends = jest.fn().mockImplementation((options: PagedQuery) =>
       Promise.resolve({
         data: [
@@ -130,7 +130,7 @@ describe('getFriendsSnapshot', () => {
     })
   })
 
-  it('ステータスとステータスメッセージを profile として載せる', async () => {
+  it('includes the status and status message as the profile', async () => {
     const getFriends = jest.fn().mockImplementation((options: PagedQuery) =>
       Promise.resolve({
         data: options.query.offline
@@ -155,7 +155,7 @@ describe('getFriendsSnapshot', () => {
     })
   })
 
-  it('両方に居る場合は online 側を採用する', async () => {
+  it('uses the online entry when a user is in both', async () => {
     const getFriends = jest.fn().mockImplementation((options: PagedQuery) =>
       Promise.resolve({
         data: [
@@ -173,7 +173,7 @@ describe('getFriendsSnapshot', () => {
     expect(snapshot.get('usr_1')?.location).toBe('wrld_a:1')
   })
 
-  it('ちょうど 100 件のページの次ページも取得する', async () => {
+  it('also fetches the next page after a page of exactly 100 items', async () => {
     const getFriends = onlineOnlyFake(friends('on', 100, 'wrld_a:1'))
     const snapshot = await getFriendsSnapshot({
       getFriends,
@@ -185,7 +185,7 @@ describe('getFriendsSnapshot', () => {
     expect(onlineCalls).toHaveLength(2)
   })
 
-  it('100 件を超える場合は複数ページを結合する', async () => {
+  it('merges multiple pages when there are more than 100 items', async () => {
     const getFriends = onlineOnlyFake(friends('on', 150, 'wrld_a:1'))
     const snapshot = await getFriendsSnapshot({
       getFriends,
@@ -193,7 +193,7 @@ describe('getFriendsSnapshot', () => {
     expect(snapshot.size).toBe(150)
   })
 
-  it('いずれかの取得が失敗した場合は部分結果を返さず throw する', async () => {
+  it('throws without returning a partial result when any fetch fails', async () => {
     const getFriends = jest
       .fn()
       .mockImplementation((options: PagedQuery) =>
@@ -208,7 +208,7 @@ describe('getFriendsSnapshot', () => {
     ).rejects.toThrow('boom')
   })
 
-  it('2 ページ目の失敗でも throw する', async () => {
+  it('throws even when the second page fails', async () => {
     const page1 = friends('on', 100, 'wrld_a:1')
     const getFriends = jest.fn().mockImplementation((options: PagedQuery) => {
       return options.query.offline
@@ -224,7 +224,7 @@ describe('getFriendsSnapshot', () => {
     ).rejects.toThrow('page2 failed')
   })
 
-  it('429 の場合は Rate limit error (429) を含む例外を投げる', async () => {
+  it('throws an error containing Rate limit error (429) on 429', async () => {
     const getFriends = jest
       .fn()
       .mockResolvedValue({ error: { message: 'Too Many Requests (429)' } })
@@ -235,7 +235,7 @@ describe('getFriendsSnapshot', () => {
 })
 
 describe('getWorldInfo', () => {
-  it('ワールド情報を返す', async () => {
+  it('returns world information', async () => {
     const getWorld = jest.fn().mockResolvedValue({
       data: { id: 'wrld_a', name: 'W', thumbnailImageUrl: 'http://t' },
     })
@@ -248,7 +248,7 @@ describe('getWorldInfo', () => {
     })
   })
 
-  it('失敗時は throw し、429 は Rate limit error (429) を含む', async () => {
+  it('throws on failure, and 429 includes Rate limit error (429)', async () => {
     const getWorld = jest
       .fn()
       .mockResolvedValueOnce({ error: { message: 'not found' } })
@@ -262,7 +262,7 @@ describe('getWorldInfo', () => {
 })
 
 describe('getFriendFavoriteGroups', () => {
-  it('group_0 から group_3 のタグをユーザーごとに集約する', async () => {
+  it('aggregates group_0 to group_3 tags per user', async () => {
     const getFavorites = jest.fn().mockResolvedValue({
       data: [
         { favoriteId: 'usr_1', tags: ['group_0'], type: 'friend' },
@@ -280,7 +280,7 @@ describe('getFriendFavoriteGroups', () => {
     })
   })
 
-  it('ちょうど 100 件のページの次ページも取得する', async () => {
+  it('also fetches the next page after a page of exactly 100 items', async () => {
     const items = Array.from({ length: 100 }, (_, i) => ({
       favoriteId: `usr_${i}`,
       tags: ['group_0'],
@@ -297,7 +297,7 @@ describe('getFriendFavoriteGroups', () => {
     expect(getFavorites).toHaveBeenCalledTimes(2)
   })
 
-  it('部分失敗では部分 map を返さず throw する', async () => {
+  it('throws without returning a partial map on partial failure', async () => {
     const items = Array.from({ length: 100 }, (_, i) => ({
       favoriteId: `usr_${i}`,
       tags: ['group_0'],
@@ -314,7 +314,7 @@ describe('getFriendFavoriteGroups', () => {
 })
 
 describe('getInstanceOwnerInfo', () => {
-  it('usr_ はユーザーの表示名を返す', async () => {
+  it('returns the display name for usr_', async () => {
     const getUser = jest
       .fn()
       .mockResolvedValue({ data: { id: 'usr_a', displayName: 'Alice' } })
@@ -326,7 +326,7 @@ describe('getInstanceOwnerInfo', () => {
     expect(getGroup).not.toHaveBeenCalled()
   })
 
-  it('grp_ はグループ名を返し、名前が無ければ throw する', async () => {
+  it('returns the group name for grp_ and throws if there is no name', async () => {
     const getGroup = jest
       .fn()
       .mockResolvedValueOnce({ data: { id: 'grp_a', name: 'Group' } })
@@ -341,7 +341,7 @@ describe('getInstanceOwnerInfo', () => {
     )
   })
 
-  it('API エラー時は throw する', async () => {
+  it('throws on an API error', async () => {
     const getUser = jest
       .fn()
       .mockResolvedValue({ error: { message: 'not found' } })
@@ -390,7 +390,7 @@ describe('VRChatSession REST authentication recovery', () => {
     fs.rmSync(directory, { recursive: true, force: true })
   })
 
-  it('失効時は並行する Cookie 検証と login を共有し、SDK Pipeline を作り直さない', async () => {
+  it('on expiry, concurrent cookie checks share one login and the SDK Pipeline is not recreated', async () => {
     let loginCount = 0
     let revoked = false
     fetchSpy.mockImplementation(async (input: Request) => {
@@ -426,7 +426,7 @@ describe('VRChatSession REST authentication recovery', () => {
     authenticate.mockRestore()
   })
 
-  it('REST 401 も再認証後に元の API を 1 回だけ再試行する', async () => {
+  it('also retries the original API once after reauthenticating on a REST 401', async () => {
     let loginCount = 0
     let worldCount = 0
     fetchSpy.mockImplementation(async (input: Request) => {
@@ -469,7 +469,7 @@ describe('VRChatSession REST authentication recovery', () => {
     authenticate.mockRestore()
   })
 
-  it('遅れて届いた旧 Cookie の 401 は再認証を重複させない', async () => {
+  it('a late 401 for an old cookie does not trigger a duplicate reauthentication', async () => {
     let loginCount = 0
     let oldRequests = 0
     const started = Promise.withResolvers<undefined>()
@@ -514,7 +514,7 @@ describe('VRChatSession REST authentication recovery', () => {
     expect(loginCount).toBe(2)
   })
 
-  it('stop は実際の fetch の signal を中断する', async () => {
+  it('stop aborts the signal of the actual fetch', async () => {
     fetchSpy.mockImplementation((input: Request) =>
       Promise.resolve(
         Response.json(
@@ -527,7 +527,7 @@ describe('VRChatSession REST authentication recovery', () => {
         )
       )
     )
-    // Cookie がない復元確認は未認証として返す。
+    // A restore check without a cookie is reported as unauthenticated.
     fetchSpy.mockImplementationOnce(() =>
       Promise.resolve(
         Response.json(

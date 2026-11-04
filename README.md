@@ -1,76 +1,79 @@
 # watch-vrchat-user
 
-VRChat の全フレンドの状態変化を監視し、YAML 設定ファイルに書いた CEL ルールに一致したものを Discord に通知するアプリケーションです。
+An application that watches state changes of all your VRChat friends and sends a Discord notification for every change that matches a CEL rule written in a YAML configuration file.
 
-## 機能
+## Features
 
-- 全フレンドの状態 (オンライン / オフライン / Location / ステータス / ステータスメッセージ) をリアルタイムで追跡し、永続化
-- オンライン復帰後に最初に確認した Location を `location-change` として通知対象にする
-- 「通知するか」と「どの Discord Webhook へ通知するか」を CEL ルールで柔軟に指定 (1 イベントが複数ルールに一致した場合は、一致した全 destination へ通知)
-- 同一 destination に複数ルールが一致した場合は 1 通にまとめ、Embed の footer に一致した全ルール名を表示
-- Embed のユーザー名・ワールド名・インスタンス表記 (`Friends+ #2` など)・インスタンスオーナーは VRChat Web のリンクになります。インスタンス表記のリンクはそのインスタンスの起動 URL で、Friends+ などでは識別用の乱数 (nonce) を含みます。通知先のチャンネルは他人が見られない場所にしてください
-- 設定ファイルの hot reload (不正な設定への reload は失敗し、直前の正常な設定で稼働を継続)
-- World 情報の取得 (24 時間キャッシュ) と Favorite Friends (`group_0`〜`group_3`) の取得 (1 時間ごとに更新)
-- セッションの永続化と認証切れからの復旧 (TOTP 設定時は 2FA を自動入力)
-- 通知予定と配信結果の永続化。再起動後も未処理の通知を継続し、送達不明な通知は明示的な復旧を待つ
+- Tracks and persists the state of all friends in real time (online / offline / Location / status / status message)
+- Treats the first Location confirmed after a friend comes online as a `location-change` event
+- CEL rules decide both whether to notify and which Discord webhook to notify (when one event matches several rules, every matched destination is notified)
+- When several rules match the same destination, they are merged into one message and the Embed footer lists all matched rule names
+- The user name, world name, instance label (such as `Friends+ #2`) and instance owner in an Embed link to VRChat Web. The instance label links to the launch URL of that instance, which contains a random identifier (nonce) for Friends+ and similar instance types. Send notifications only to channels that nobody else can see
+- Hot reload of the configuration file (reloading an invalid configuration fails and the last known good configuration keeps running)
+- World information lookup (cached for 24 hours) and Favorite Friends (`group_0` to `group_3`) lookup (refreshed hourly)
+- Session persistence and recovery from expired authentication (2FA is entered automatically when a TOTP secret is configured)
+- Persistent notification outbox and delivery results: pending notifications continue after a restart, and notifications whose delivery is uncertain wait for explicit recovery
 
-## 必要条件
+## Requirements
 
-- Node.js 24.21.0 以降 (`.node-version` に合わせる。built-in SQLite を使用)
-- pnpm 12.8.2 (`package.json` の `packageManager` に合わせる)
-- VRChat アカウント
-- Discord Webhook URL
+- Node.js (the version is pinned in `.node-version`; the built-in `node:sqlite` module is used)
+- pnpm (the version is pinned by `packageManager` in `package.json`)
+- A VRChat account
+- A Discord webhook URL
 
-## セットアップ
+## Setup
 
-### 1. 依存パッケージのインストール
+### 1. Install dependencies
 
 ```bash
 pnpm install
 ```
 
-### 2. 環境変数の設定
+### 2. Set environment variables
 
-`.env` ファイルを作成し、以下の環境変数を設定してください。ローカル実行時は起動時に `.env` を読み込みます。既に設定済みの環境変数が優先されます。
+Create a `.env` file and set the following environment variables. When running locally, `.env` is loaded at startup; environment variables that are already set take precedence.
 
 ```env
-# ローカル実行時の通知設定ファイル
+# Notification configuration file for local runs
 CONFIG_PATH=data/config.yaml
 
-# VRChat 認証情報
+# VRChat credentials
 VRCHAT_USERNAME=your_vrchat_username
 VRCHAT_PASSWORD=your_vrchat_password
-VRCHAT_TOTP_SECRET=your_totp_secret  # オプション: TOTP シークレット（設定すると 2FA を自動入力）
+VRCHAT_TOTP_SECRET=your_totp_secret  # Optional: TOTP secret (2FA codes are entered automatically when set)
 
-# 設定ファイル内の ${ENV_VAR} から参照する Discord Webhook URL (config.example.yaml の例)
+# Discord webhook URLs referenced from ${ENV_VAR} in the configuration file (the config.example.yaml example)
 DISCORD_WEBHOOK_MAIN=https://discord.com/api/webhooks/xxx/yyy
 DISCORD_WEBHOOK_DANCE=https://discord.com/api/webhooks/xxx/zzz
 
-# エラー通知設定
-SENTRY_DSN=https://xxx@yyy.example.com/1  # オプション: GlitchTip/Sentry の DSN（未設定の場合、エラー通知は無効化される）
+# Error reporting
+SENTRY_DSN=https://xxx@yyy.example.com/1  # Optional: GlitchTip/Sentry DSN (error reporting is disabled when unset)
 ```
 
-その他の環境変数は次のとおりです (いずれも任意)。
+Other environment variables (all optional):
 
-| 環境変数                | 既定値 (Docker)                                        | 説明                                                              |
-| ----------------------- | ------------------------------------------------------ | ----------------------------------------------------------------- |
-| `CONFIG_PATH`           | `/data/config.yaml`                                    | 通知ルール設定ファイル (YAML) のパス                              |
-| `STATE_FILE_PATH`       | `data/friend-states.json` (`/data/friend-states.json`) | 既存 JSON state の移行元。稼働 DB は同じ場所の `.sqlite` ファイル |
-| `WORLD_CACHE_FILE_PATH` | `data/world-cache.json` (`/data/world-cache.json`)     | World 情報キャッシュの保存先                                      |
-| `OWNER_CACHE_FILE_PATH` | `data/owner-cache.json` (`/data/owner-cache.json`)     | インスタンスオーナー名キャッシュの保存先                          |
+| Environment variable    | Default (Docker)                                       | Description                                                                                            |
+| ----------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `CONFIG_PATH`           | `/data/config.yaml`                                    | Path of the notification rule configuration file (YAML)                                                |
+| `COOKIE_FILE_PATH`      | `data/vrchat-cookies.json` (`/data/vrchat-cookies.json`) | Where the VRChat session cookies are stored                                                          |
+| `STATE_FILE_PATH`       | `data/friend-states.json` (`/data/friend-states.json`) | Migration source for an existing JSON state; the live database is the `.sqlite` file at the same place |
+| `WORLD_CACHE_FILE_PATH` | `data/world-cache.json` (`/data/world-cache.json`)     | Where the world information cache is stored                                                            |
+| `OWNER_CACHE_FILE_PATH` | `data/owner-cache.json` (`/data/owner-cache.json`)     | Where the instance owner name cache is stored                                                          |
+| `HEALTH_HOST`           | `127.0.0.1`                                            | Bind address of the health check server                                                                |
+| `HEALTH_PORT`           | `3000`                                                 | Port of the health check server                                                                        |
 
-> **注意**: `VRCHAT_TOTP_SECRET` を設定しない場合、初回起動時に 2FA コードの手動入力が必要です。
+> **Note**: If `VRCHAT_TOTP_SECRET` is not set, you must enter the 2FA code manually on the first start.
 
-### 3. 設定ファイルの作成
+### 3. Create the configuration file
 
-`config.example.yaml` を `data/config.yaml` としてコピーし、ルールを編集してください。設定ファイルが存在しない、または不正な状態で起動した場合、起動は失敗します。
+Copy `config.example.yaml` to `data/config.yaml` and edit the rules. Startup fails if the configuration file is missing or invalid.
 
 ```bash
 mkdir -p data
 cp config.example.yaml data/config.yaml
 ```
 
-## 設定ファイル
+## Configuration file
 
 ```yaml
 version: 1
@@ -89,61 +92,61 @@ rules:
     destinations: [main]
 ```
 
-- `version` は `1` 固定です。
-- `destinations` はキーが destination 名で、`type` は `discord-webhook` のみです。`url` は直書きするか、値全体を `${ENV_VAR}` にすると環境変数から展開されます (展開されるのは `destinations.*.url` の値全体が `${NAME}` の場合のみ。環境変数が未定義なら設定エラー)。展開後の URL は `https://discord.com/api/webhooks/` で始まる必要があります。
-- `rules[].name` は必須で、設定内で一意にします。`enabled` は省略すると `true` です。`destinations` は 1 個以上で、定義済みの destination 名のみ指定できます。`when` は boolean を返す CEL 式です (4096 文字以内)。
-- 未知のキーはエラーになります (typo 検出)。`enabled: false` のルールも構文の検証は行われますが、評価はされません。
-- Webhook URL は秘密情報です。設定ファイルに直書きせず、`${ENV_VAR}` で環境変数から渡すことを推奨します。ログや health には出力されません。再起動後の未処理通知には受理時点の URL が必要なため、展開済み URL は `friend-states.sqlite` に保存されます。バックアップも秘密情報として扱ってください。
+- `version` is fixed to `1`.
+- Each key under `destinations` is a destination name, and `type` can only be `discord-webhook`. `url` is either written directly or, when the whole value is `${ENV_VAR}`, expanded from the environment (expansion applies only when the entire value of `destinations.*.url` is `${NAME}`; an undefined variable is a configuration error). The expanded URL must start with `https://discord.com/api/webhooks/`.
+- `rules[].name` is required and must be unique within the configuration. `enabled` defaults to `true`. `destinations` needs at least one entry and may only name destinations that are defined. `when` is a CEL expression that returns a boolean (at most 4096 characters).
+- Unknown keys are errors (typo detection). Rules with `enabled: false` are still syntax-checked but never evaluated.
+- Webhook URLs are secrets. Do not write them directly in the configuration file; pass them through `${ENV_VAR}` instead. They are never written to logs or health output. Pending notifications need the URL that was valid when they were accepted, so the expanded URL is stored in `friend-states.sqlite`. Treat backups as secrets too.
 
-### semantic event
+### Semantic events
 
-`event.type` は次の 6 種のいずれかです。
+`event.type` is one of the following six values.
 
-| `event.type`      | 意味                                                                                                                                                                                 |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `online`          | フレンドがオフラインからオンラインになった                                                                                                                                           |
-| `offline`         | フレンドがオンラインからオフラインになった                                                                                                                                           |
-| `location-change` | オンライン中のフレンドの Location が、公開された別の Location に変わった、または公開 Location から private に変わった (private からの復帰、オンライン化と同時の Location 確定を含む) |
-| `friend-add`      | フレンドが追加された                                                                                                                                                                 |
-| `friend-delete`   | フレンドが削除された                                                                                                                                                                 |
-| `status-change`   | フレンドのステータス (Join Me / Online / Ask Me / Do Not Disturb) またはステータスメッセージが変わった                                                                               |
+| `event.type`      | Meaning                                                                                                                                                                                                                                                  |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `online`          | The friend went from offline to online                                                                                                                                                                                                                   |
+| `offline`         | The friend went from online to offline                                                                                                                                                                                                                   |
+| `location-change` | The Location of an online friend changed to a different public Location, or changed from a public Location to private (including a return from private and a Location confirmed at the same time as the friend comes online)                             |
+| `friend-add`      | A friend was added                                                                                                                                                                                                                                       |
+| `friend-delete`   | A friend was removed                                                                                                                                                                                                                                     |
+| `status-change`   | The friend's status (Join Me / Online / Ask Me / Do Not Disturb) or status message changed                                                                                                                                                               |
 
-- `location-change` は、変更後の Location が**公開**されている (World を特定できる) 場合に発生します。変更前は公開 Location または private のいずれでもかまいません。公開 Location から private への遷移でも発生し、このとき `current.location` は `{ visible: false }` になります (`current.location.visible` を条件に含めていないルールにも一致する点に注意してください)。オフラインからオンラインになると同時に公開 Location が確定した場合は、`online` に続けて `location-change` も発生します (両方に一致するルールは 2 回通知されます)。private の維持、Location 未確定からの確定 (オンライン直後の最初の確定を除く) や未確定からの private では発生しません。
-- `status-change` は、WebSocket の `friend-update` や presence / Location event に付いた profile でステータスとステータスメッセージのどちらかが変わると発生します (どちらが変わったかは `previous` / `current` の `status` / `statusDescription` を比べてください)。Friends API の REST snapshot は未確認の profile 項目を初期化する場合だけ使い、確認済みの値を上書きしたり status-change を生成したりしません。ステータスの値は `join me` / `active` / `ask me` / `busy` です (`active` が Online、`busy` が Do Not Disturb)。オンライン化などの他のイベントと同時に検知した場合は、そのイベントに続けて発生します。ステータスとメッセージは項目ごとに、確認済みの値からの変化だけを通知します。各項目の初回の観測 (アップグレード直後を含む) は通知せず記録だけを行うため、変更の通知は次の変化から始まります。`offline` のステータスは記録せず直前の値を維持するため、オフラインのユーザーはステータスが未確認のことがありますが、その間もメッセージの変更は通知されます (Embed には変わった項目だけを表示します)。
-- 後追い調査のため、state が変化するたびに `State changed: user=... <前> -> <後> effects=...` を、ルール評価のたびに `Matched rules:` または `No rule matched:` をログ (info) に出力します。通知されなかった遷移も、このログで追えます。
-- WebSocket 再接続の原因調査のため、再接続のたびに `reconnect-triggered` の診断ログへ、raw close の `closeCode` / `closeReason` (英数字と一部記号のみ・64 文字まで)、最後のメッセージ・pong からの経過ミリ秒 (`msSinceLastMessage` / `msSinceLastPong`) を出力します。REST 同期のたびに `Reconciliation snapshot applied: friends=N drift=M` を出力し、`drift` は WebSocket で届かなかった差分の目安になります。
-- WebSocket が 10 分間無言になった場合 (接続が `ready` のときのみ)、すぐには再接続せず、まず Friends API との同期で差分を確認します。差分が 0 件なら再接続せず (`Pipeline liveness probe: drift=0 action=keep ...`)、差分がある場合・同期できなかった場合・120 秒以内に完了しなかった場合は再接続します (`Pipeline liveness probe: drift=<N> action=reconnect ...` / `unverified action=reconnect ...`)。この確認は無言が続く間 10 分ごとに最大 1 回で、結果はログのみに出力され `/health` の診断履歴には含まれません。
-- WebSocket の `traveling` (移動中) は Location の確定や在席遷移には使いません。付属する profile のステータス変更は通常どおり追跡します。REST 同期では移動中もオンラインとして扱い、確定済みの Location を維持します。
-- 初回起動 (state ファイルが無い場合) は、現在の全フレンドの状態を **通知なしで** 記録する baseline 構築を行います。Favorite group の変更や設定の reload による、過去のイベントの再評価や遡及通知は行われません。
-- WebSocket の status-change 検知は `friend-update` や presence / Location event に付属する profile を使います。Friends API 同期は未確認の profile 項目だけを初期化し、その後は online / offline / Location の状態を照合します。
+- `location-change` fires when the new Location is **public** (the world can be identified). The previous Location may be either public or private. It also fires on a transition from a public Location to private; in that case `current.location` is `{ visible: false }` (note that this also matches rules that do not check `current.location.visible`). When a public Location is confirmed at the same time as the friend goes from offline to online, `location-change` follows `online` (a rule that matches both notifies twice). It does not fire when the Location stays private, when a Location is confirmed after being unknown (except the first confirmation right after the friend comes online), or when it goes from unknown to private.
+- `status-change` fires when the status or the status message changes in a profile that arrives with a WebSocket `friend-update` or a presence / Location event (compare `status` / `statusDescription` in `previous` and `current` to see which one changed). The Friends API REST snapshot is used only to initialize profile fields that have not been observed yet; it never overwrites confirmed values and never produces `status-change`. Status values are `join me` / `active` / `ask me` / `busy` (`active` is Online, `busy` is Do Not Disturb). When it is detected together with another event such as `online`, it follows that event. Status and message are tracked per field and only a change from a confirmed value is notified. The first observation of each field (including right after upgrading) is recorded without a notification, so notifications start from the next change. The `offline` status is not recorded and the previous value is kept, so an offline user may have an unconfirmed status, but message changes are still notified in that case (the Embed shows only the field that changed).
+- For after-the-fact investigation, every state change is logged (info) as `State changed: user=... <before> -> <after> effects=...`, and every rule evaluation as `Matched rules:` or `No rule matched:`. Transitions that produced no notification can be traced through these logs.
+- To investigate WebSocket reconnects, each reconnect writes a `reconnect-triggered` diagnostic log containing the raw close `closeCode` / `closeReason` (alphanumerics and a few symbols only, up to 64 characters) and the milliseconds since the last message and pong (`msSinceLastMessage` / `msSinceLastPong`). Every REST synchronization logs `Reconciliation snapshot applied: friends=N drift=M`, where `drift` is a rough measure of the differences that did not arrive over the WebSocket.
+- When the WebSocket stays silent for 10 minutes (only while the connection is `ready`), the application does not reconnect immediately but first compares against the Friends API. With 0 differences it keeps the connection (`Pipeline liveness probe: drift=0 action=keep ...`); with differences, when synchronization is impossible, or when the check does not finish within 120 seconds, it reconnects (`Pipeline liveness probe: drift=<N> action=reconnect ...` / `unverified action=reconnect ...`). The check runs at most once every 10 minutes while the silence continues, and its result is only logged, not included in the `/health` diagnostic history.
+- The WebSocket `traveling` state is not used to confirm a Location or to change presence. A status change in the attached profile is still tracked as usual. REST synchronization treats a traveling friend as online and keeps the confirmed Location.
+- On the first start (no state file), a baseline of the current state of all friends is recorded **without notifications**. Changing Favorite groups or reloading the configuration never re-evaluates past events or sends retroactive notifications.
+- WebSocket `status-change` detection uses the profile attached to `friend-update` and presence / Location events. Friends API synchronization only initializes unconfirmed profile fields and otherwise reconciles online / offline / Location state.
 
-### CEL 変数
+### CEL variables
 
-| 変数                           | 内容                                                                                                                                                    |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `event.type`                   | 上記 6 種のいずれか                                                                                                                                     |
-| `event.month` / `event.day`    | イベントの受信時刻の月 (1〜12) と日 (1〜31)                                                                                                             |
-| `event.weekday`                | イベントの受信時刻の曜日 (0=日〜6=土)                                                                                                                   |
-| `event.hour` / `event.minute`  | イベントの受信時刻の時 (0〜23) と分 (0〜59)。夜間の条件は `event.hour >= 22 \|\| event.hour < 6` のように書く                                           |
-| (時刻の共通事項)               | 配信が遅延しても時刻は保存済みの `createdAt` を使い、配信時刻には変わりません。時刻の変数はアプリのローカルタイムゾーン (本番コンテナは JST) で解釈する |
-| `user.id` / `user.displayName` | 対象フレンドのユーザー ID と表示名                                                                                                                      |
-| `previous` / `current`         | イベント前後の状態。`friend-add` では `previous == null`、`friend-delete` では `current == null`                                                        |
+| Variable                       | Content                                                                                                                                                                       |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `event.type`                   | One of the six values above                                                                                                                                                   |
+| `event.month` / `event.day`    | Month (1-12) and day (1-31) of the time the event was received                                                                                                                |
+| `event.weekday`                | Day of the week of the time the event was received (0 = Sunday to 6 = Saturday)                                                                                               |
+| `event.hour` / `event.minute`  | Hour (0-23) and minute (0-59) of the time the event was received. A night-time condition looks like `event.hour >= 22 \|\| event.hour < 6`                                    |
+| (about time variables)         | Even if delivery is delayed, the stored `createdAt` is used instead of the delivery time. Time variables are interpreted in the application's local time zone (JST in the production container) |
+| `user.id` / `user.displayName` | User ID and display name of the friend concerned                                                                                                                              |
+| `previous` / `current`         | State before and after the event. `previous == null` for `friend-add` and `current == null` for `friend-delete`                                                                |
 
-`previous` / `current` は次のフィールドを持ちます。
+`previous` / `current` have the following fields:
 
-- `presence`: `"online"` または `"offline"`
-- `status` / `statusDescription`: ステータス (`join me` / `active` / `ask me` / `busy`) とステータスメッセージ。未観測の場合は空文字
-- `favoriteGroups`: 所属する Favorite group の一覧 (`group_0`〜`group_3`)
-- `location`: offline のときは `null`。online でも Location 未確定の場合は `null` になるため、在席判定は `presence` で行ってください。private などの非公開 Location は `{ visible: false }`。公開 Location は次の構造です。
+- `presence`: `"online"` or `"offline"`
+- `status` / `statusDescription`: status (`join me` / `active` / `ask me` / `busy`) and status message. Empty strings when not observed yet
+- `favoriteGroups`: the Favorite groups the friend belongs to (`group_0` to `group_3`)
+- `location`: `null` when offline. It is also `null` for an online friend whose Location is not confirmed, so use `presence` to check whether a friend is present. Non-public Locations such as private are `{ visible: false }`. A public Location has the following structure:
   - `location.visible`: `true`
-  - `location.world.id`: World ID
-  - `location.world.name`: World 名 (World 情報が有効な場合のみ存在。取得できない場合、参照したルールは評価エラーとなり、そのルールだけが不一致扱いになる)
-  - `location.world.capacity`: World の最大人数 (World 情報が有効な場合のみ存在。取得できない場合、参照したルールは評価エラーとなり、そのルールだけが不一致扱いになる)
+  - `location.world.id`: world ID
+  - `location.world.name`: world name (present only when world information is available; when it cannot be fetched, a rule that references it fails to evaluate and only that rule is treated as not matching)
+  - `location.world.capacity`: maximum capacity of the world (present only when world information is available; same failure behavior as `world.name`)
   - `location.instance.name` / `type` / `ownerId` / `region` / `ageGate`
 
-`location.instance.type` は次の 8 種です。
+`location.instance.type` is one of the following eight values:
 
-| `type`          | 意味                 |
+| `type`          | Meaning              |
 | --------------- | -------------------- |
 | `public`        | Public               |
 | `friends-plus`  | Friends+             |
@@ -152,29 +155,29 @@ rules:
 | `invite`        | Invite               |
 | `group-public`  | Group Public         |
 | `group-plus`    | Group+               |
-| `group-members` | Group (メンバーのみ) |
+| `group-members` | Group (members only) |
 
-### ルールの例
+### Rule examples
 
-`config.example.yaml` には次の 4 例が含まれています。`usr_...` の値は実際のユーザー ID に置き換えてください。
+`config.example.yaml` contains the following examples (plus a status message example). Replace the `usr_...` values with real user IDs.
 
 ```yaml
 rules:
-  # 特定ユーザーの Location 変更のみ通知
+  # Notify only about Location changes of a specific user
   - name: specific-user-location
     when: |
       event.type == "location-change" &&
       user.id == "usr_00000000-0000-0000-0000-000000000000"
     destinations: [main]
 
-  # 特定ユーザーのオンライン / オフラインのみ通知
+  # Notify only about online / offline of a specific user
   - name: specific-user-presence
     when: |
       (event.type == "online" || event.type == "offline") &&
       user.id == "usr_00000000-0000-0000-0000-000000000000"
     destinations: [main]
 
-  # World 名に「ダンス」を含む World への移動を通知
+  # Notify when someone moves to a world whose name contains "ダンス" (dance)
   - name: dance-world
     when: |
       event.type == "location-change" &&
@@ -183,7 +186,7 @@ rules:
       current.location.world.name.contains("ダンス")
     destinations: [dance]
 
-  # Favorite group group_0 のフレンドのオンライン / オフラインを通知
+  # Notify about online / offline of friends in Favorite group group_0
   - name: favorite-group-0-presence
     when: |
       (event.type == "online" || event.type == "offline") &&
@@ -192,126 +195,116 @@ rules:
     destinations: [main]
 ```
 
-### hot reload
+### Hot reload
 
-設定ファイルを保存すると、数秒の遅延の後に自動で再読み込みされます。再読み込み後の設定は、以降に検知したイベントから適用されます。未処理通知には受理時点の設定を保存するため、reload 後も当時のルールと通知先で処理します。Webhook を変更・無効化した場合は、古い通知先の未処理通知も確認してください。不正な設定 (YAML の構文エラー、未知のキー、不正な CEL 式など) への reload は失敗し、直前の正常な設定 (last-known-good) で稼働を継続します。失敗は health の `config` に反映されます。ただし、起動時に設定が不正な場合は起動に失敗します。
+When the configuration file is saved, it is reloaded automatically after a short delay of a few seconds. The reloaded configuration applies to events detected afterwards. Pending notifications keep the configuration from when they were accepted, so they are still processed with the rules and destinations of that time. If you change or disable a webhook, also check the pending notifications of the old destination. Reloading an invalid configuration (YAML syntax error, unknown key, invalid CEL expression, and so on) fails and the last known good configuration keeps running. The failure is reflected in the `config` field of the health output. If the configuration is invalid at startup, startup fails.
 
-CEL 評価はルールごとに時間制限を設けて実行します。制限超過や評価エラーのルールは不一致として記録し、他のルールの評価を続けます。
+Each rule is evaluated with a time limit. A rule that exceeds the limit or fails to evaluate is recorded and treated as not matching, and evaluation of the other rules continues.
 
-## 使用方法
+## Usage
 
-### 開発モード
+### Development mode
 
 ```bash
 pnpm dev
 ```
 
-### 本番モード
+### Production mode
 
 ```bash
 pnpm start
 ```
 
-### Docker を使用する場合
+### Using Docker
 
-`./data` が `/data` にマウントされるため、`./data/config.yaml` を用意してください。設定ファイルの `${ENV_VAR}` から参照する環境変数は、`compose.yaml` の `environment` に追加してコンテナへ渡します (同梱の `compose.yaml` は `DISCORD_WEBHOOK_MAIN` と `DISCORD_WEBHOOK_DANCE` を渡す例です)。
+`./data` is mounted at `/data`, so prepare `./data/config.yaml`. Environment variables referenced as `${ENV_VAR}` from the configuration file must be added to `environment` in `compose.yaml` so that they reach the container (the bundled `compose.yaml` passes `DISCORD_WEBHOOK_MAIN` and `DISCORD_WEBHOOK_DANCE` as an example).
 
 ```bash
 docker compose up -d
 ```
 
-ログを確認:
+Follow the logs:
 
 ```bash
 docker compose logs -f
 ```
 
-### ヘルスチェック
+### Health check
 
-`HEALTH_HOST` (既定 `127.0.0.1`) と `HEALTH_PORT` (既定 `3000`) の `/health` が JSON を返します。`baselineCompleted` (初回同期の完了)、`config` (設定の読み込み状態)、`ruleErrors` (ルール評価エラー)、`favorites` (Favorite Friends の更新状態)、REST 同期結果、`delivery` (未処理・送達不明・配信停止の件数) を含みます。
+`/health` on `HEALTH_HOST` (default `127.0.0.1`) and `HEALTH_PORT` (default `3000`) returns JSON. It includes `baselineCompleted` (whether the initial synchronization is done), `config` (configuration loading state), `ruleErrors` (rule evaluation errors), `favorites` (Favorite Friends refresh state), the REST synchronization result, and `delivery` (counts of pending, uncertain and blocked notifications).
 
-- `healthy`: 正常
-- `degraded` (HTTP 200): 設定の reload、ルール評価、Favorite Friends、REST 同期、通知配信に異常がある、または未処理通知が 60 秒以上滞留している。配信停止・送達不明の通知は復旧が必要
-- `unhealthy` (HTTP 503): WebSocket 接続が ready でない、初回 baseline が未完了、またはユーザー単位の異常がある
+- `healthy`: normal
+- `degraded` (HTTP 200): there is a problem with configuration reload, rule evaluation, Favorite Friends, REST synchronization or notification delivery, or a pending notification has been stuck for 60 seconds or more. Blocked and uncertain notifications need recovery
+- `unhealthy` (HTTP 503): the WebSocket connection is not ready, the initial baseline is not completed, or there is a per-user problem
 
-Pipeline の接続診断はログに記録され、`/health` では直近 25 件を確認できます。接続理由、再接続試行、結果を確認できます。診断イベントにはユーザー情報、Location、Cookie、Webhook URL、raw event payload は含まれません。
+Pipeline connection diagnostics are written to the log, and `/health` shows the latest 25 entries (reason, reconnect attempt and result). Diagnostic events contain no user information, Location, cookies, webhook URLs or raw event payloads.
 
-## データの永続化
+## Data persistence
 
-以下のファイルが `data/` ディレクトリに保存されます。
+The following files are stored in the `data/` directory.
 
-- `vrchat-cookies.json` - VRChat セッション Cookie
-- `friend-states.sqlite` - 全フレンドの state、未処理通知、設定 snapshot、通知先ごとの配信結果
-- `friend-states.json` - 旧バージョンの JSON store。初回起動時に検証して SQLite へ一度だけ移行し、元ファイルは保持します
-- `world-cache.json` - World 情報のキャッシュ (24 時間 TTL)
-- `owner-cache.json` - インスタンスオーナー (ユーザー名・グループ名) のキャッシュ (24 時間 TTL)
-- `config.yaml` - 通知ルール設定ファイル (利用者が用意する)
+- `vrchat-cookies.json` - VRChat session cookies
+- `friend-states.sqlite` - state of all friends, pending notifications, configuration snapshots and per-destination delivery results
+- `friend-states.json` - JSON store of older versions. It is validated and migrated to SQLite exactly once on first start, and the original file is kept
+- `world-cache.json` - world information cache (24-hour TTL)
+- `owner-cache.json` - instance owner (user name / group name) cache (24-hour TTL)
+- `config.yaml` - notification rule configuration file (provided by you)
 
-state と通知予定は同じ SQLite transaction で確定します。通知先の配信状態は該当 row だけを更新し、同じ設定 snapshot を outbox item ごとに複製しません。設定ファイルは 1 MiB、destination は 64 件、rule は 256 件までです。outbox は 10,000 件、未処理の設定 snapshot は 32 件まで保持します。終了時は新しいイベントの受付を止め、状態更新と通知配信にはそれぞれ最大 5 秒の待機時間を設けます。終了処理全体が 15 秒を超えた場合は異常終了し、次回起動時に保存データから復旧します。保存済みの未処理通知は次回起動時に引き継がれます。SQLite database とその lock database は所有者のみ読み書きできる権限 (`0600`) で保存されます。Location の nonce、ステータスメッセージ、Webhook URL を含むため、`data/` とそのバックアップを共有・公開しないでください。
+State and pending notifications are committed in the same SQLite transaction. The delivery state of a destination updates only its own row, and the same configuration snapshot is not copied for every outbox item. The configuration file is limited to 1 MiB, 64 destinations and 256 rules. The outbox keeps at most 10,000 items and 32 configuration snapshots that are still in use. On shutdown, the application stops accepting new events and waits up to 5 seconds each for state updates and for notification delivery. If the whole shutdown takes longer than 15 seconds, the process exits abnormally and recovers from the stored data on the next start. Stored pending notifications are carried over to the next start. The SQLite database and its lock database are stored with owner-only read/write permissions (`0600`). They contain Location nonces, status messages and webhook URLs, so do not share or publish `data/` or its backups.
 
-### 通知の復旧
+### Notification recovery
 
-通知はユーザー単位の順序で処理します。Discord の rate limit (429) とサーバーエラー (5xx) は待機して再試行します。恒久的なクライアントエラー (4xx) は `blocked`、タイムアウト・通信途絶など送達を確認できない場合は `uncertain` として保存します。POST 前に送信中であることを記録するため、送信中のまま終了した通知も再起動後は `uncertain` になります。重複配信を防ぐため、送達不明な通知を自動再送しません。先頭の通知が `blocked` または `uncertain` の場合、そのユーザーの後続通知は復旧まで待機します。
+Notifications are processed in per-user order. Discord rate limits (429) and server errors (5xx) are retried after waiting. Permanent client errors (4xx) are stored as `blocked`, and cases where delivery cannot be confirmed, such as timeouts and lost connections, are stored as `uncertain`. Because the application records that a notification is being sent before the POST, a notification that was still being sent at shutdown also becomes `uncertain` after the restart. To avoid duplicate delivery, uncertain notifications are never retried automatically. When the first notification of a user is `blocked` or `uncertain`, that user's later notifications wait until it is recovered.
 
-復旧コマンドはアプリを停止してから実行してください。同じ state store に対するアプリと復旧コマンドの同時実行は SQLite の exclusive lock で拒否されます。`.env` の `STATE_FILE_PATH` が稼働時と同じ移行元パスを指すことを確認します。
+Run the recovery commands only while the application is stopped. Running the application and a recovery command against the same state store at the same time is rejected by the SQLite exclusive lock. Make sure `STATE_FILE_PATH` in `.env` points to the same migration source path as the running application.
 
 ```bash
 pnpm outbox list
 pnpm outbox retry <id> <destination>
 pnpm outbox discard <id> <destination>
 
-# 通知準備の失敗を再試行 / イベント全体を破棄
+# Retry a notification preparation failure / discard the whole event
 pnpm outbox retry <id>
 pnpm outbox discard <id>
 ```
 
-`list` で通知 ID と通知先ごとの状態を確認します。Discord 側のチャンネルも確認し、未配信と判断できる通知だけを `retry` で再送対象に戻してください。`uncertain` の再送は重複する可能性があります。既に届いた通知や不要な通知は `discard` でその通知先の処理を終了します。他の通知先に未処理があれば、その状態は保持されます。通知先がまだ作成されていない準備段階の失敗は、通知先を指定しない `retry <id>` で再評価します。通知先を指定しない `discard <id>` はイベント全体を破棄し、そのイベントの残りの通知先にも配信しません。
+Use `list` to see the notification IDs and the state of each destination. Also check the Discord channel, and put back for retry with `retry` only notifications that you are sure were not delivered; retrying an `uncertain` notification may produce a duplicate. Use `discard` to finish processing of that destination for a notification that already arrived or is not needed. The state of other destinations that are still pending is kept. A preparation failure that happened before destinations were created is re-evaluated by `retry <id>` without a destination. `discard <id>` without a destination discards the whole event and does not deliver it to its remaining destinations either.
 
-Docker では `docker compose stop app` で停止し、同じボリュームを使って実行します。復旧が終わったら `docker compose start app` で再開します。
+With Docker, stop the application with `docker compose stop app` and run the command with the same volume. Resume with `docker compose start app` when recovery is done.
 
 ```bash
 docker compose run --rm --entrypoint pnpm app outbox list
 ```
 
-### state ファイルの互換性と破損時の対応
+### State file compatibility and recovery from corruption
 
-`friend-states.json` の schema 3 は SQLite へ一度だけ移行します。以前の schema 3 ファイルに `outbox` がなくても読み込めます。SQLite は内部 schema version 1 を使います。不正な JSON、不正な record、schema 2、破損した SQLite など未対応の形式が既存ファイルにある場合は、空データで上書きせず起動を停止します。SQLite が作成された後も元の JSON は更新されません。
+Schema 3 of `friend-states.json` is migrated to SQLite exactly once. A schema 3 file written by an older version without `outbox` can still be loaded. SQLite uses internal schema version 1. If an existing file has an unsupported format (invalid JSON, an invalid record, schema 2, a corrupted SQLite database, and so on), startup stops instead of overwriting it with empty data. The original JSON is not updated even after the SQLite database has been created.
 
-アプリを停止し、SQLite database (`friend-states.sqlite`) と移行元 JSON を保全してください。正常なバックアップがない場合は state を作り直さないでください。作り直すと、既存 state・未処理通知・配信結果は復元できません。バックアップ取得後の変更を戻す場合は Discord 側の配信状況も確認します。
+Stop the application and preserve the SQLite database (`friend-states.sqlite`) and the migration source JSON. Do not recreate the state unless you have a healthy backup: recreating it makes the existing state, pending notifications and delivery results unrecoverable. When you restore changes made after the backup was taken, also check the delivery status on the Discord side.
 
-## 旧バージョンからの移行
+## Migration from an older version
 
-旧バージョンの環境変数による指定は廃止され、後方互換はありません。
+The old environment-variable based settings were removed and there is no backward compatibility.
 
-1. 旧 `DISCORD_WEBHOOK_URL` (廃止) を、新しい環境変数 (例: `DISCORD_WEBHOOK_MAIN`) に移し、`destinations` の `url: ${DISCORD_WEBHOOK_MAIN}` から参照します。
-2. 旧 `TARGET_USER_IDS` (廃止) の各ユーザーについて、`user.id == "usr_..."` を条件にしたルールを追加します (上記「ルールの例」の 1・2 番目)。
-3. 旧 `LOCATION_FILE_PATH` (廃止) は不要です。旧 `user-locations.json` は新バージョンに引き継がれません。新バージョンは `friend-states.json` があれば SQLite (`friend-states.sqlite`) へ移行し、なければ SQLite store を作成します。
-4. 初回起動では、現在の全フレンドの状態を通知なしで記録する baseline を構築します。この間と直後に、既存の状態を理由とした通知は送られません。
+1. Move the old `DISCORD_WEBHOOK_URL` (removed) to a new environment variable (for example `DISCORD_WEBHOOK_MAIN`) and reference it from `url: ${DISCORD_WEBHOOK_MAIN}` in `destinations`.
+2. For each user in the old `TARGET_USER_IDS` (removed), add a rule whose condition is `user.id == "usr_..."` (see the first and second rules in "Rule examples" above).
+3. The old `LOCATION_FILE_PATH` (removed) is no longer needed. The old `user-locations.json` is not carried over. The new version migrates `friend-states.json` to SQLite (`friend-states.sqlite`) if it exists, and creates a SQLite store otherwise.
+4. The first start builds a baseline by recording the current state of all friends without notifications. During this time and right after it, no notification is sent based on the existing state.
 
-### rollback
+### Rollback
 
-切り替え前にアプリを停止し、`data/` 全体をバックアップしてください。SQLite へ移行した後に旧 JSON-only イメージへ戻すと、旧版は移行後の SQLite の変更を読みません。ロールバックには切り替え前のバックアップを復元し、旧環境変数 (`DISCORD_WEBHOOK_URL` / `TARGET_USER_IDS`) を戻してください。旧 `user-locations.json` は新バージョンから変更されません。未処理通知の配信結果も新 SQLite に保存されるため、ロールバック前に Discord 側の配信状況を確認してください。
+Stop the application before switching and back up the whole `data/` directory. If you go back to an old JSON-only image after migrating to SQLite, the old version does not read the changes made in SQLite after the migration. To roll back, restore the backup taken before the switch and bring back the old environment variables (`DISCORD_WEBHOOK_URL` / `TARGET_USER_IDS`). The old `user-locations.json` is not modified by the new version. The delivery results of pending notifications are stored in the new SQLite database, so check the delivery status on the Discord side before rolling back.
 
-## 開発
+## Development
 
-### Lint
-
-```bash
-pnpm lint
-```
-
-### Lint & Fix
+See [AGENTS.md](AGENTS.md) for the architecture and conventions.
 
 ```bash
-pnpm fix
+pnpm lint   # prettier check + eslint + tsc
+pnpm fix    # prettier write + eslint --fix
+pnpm test   # jest with coverage
 ```
 
-### テスト
-
-```bash
-pnpm test
-```
-
-## ライセンス
+## License
 
 The project is licensed under the [MIT License](LICENSE).

@@ -170,8 +170,8 @@ importers:
   .:
     dependencies:
       '@book000/node-utils':
-        specifier: 1.26.10
-        version: 1.26.10
+        specifier: 1.26.12
+        version: 1.26.12
       '@marcbachmann/cel-js':
         specifier: 8.0.0
         version: 8.0.0
@@ -412,8 +412,8 @@ packages:
     peerDependencies:
       eslint: 10.14.0
 
-  '@book000/node-utils@1.26.10':
-    resolution: {integrity: sha512-0IivH5CilLpiXKAZjGRXwlgq6z2bmxmueeSDc0UuHsVhN2cjONIi0BaGZ8SnnzZY/RKJRd1a/3VD8s7/eJVZlQ==}
+  '@book000/node-utils@1.26.12':
+    resolution: {integrity: sha512-Pn2v6Ola9s/mQfnn0spu84SSy/F8Spsg5oqy+V+ZwNrt86aU9/BAXASnNsPyamhHZFPAu6mkjnq/8XRnmIXKDw==}
 
   '@cacheable/memory@2.2.0':
     resolution: {integrity: sha512-CTLKqLItRCEixEAewD3/j9DB3/o96gpTPD4eJ1v+DGOlxZRZncRQkGYqqnAGCscYd6RNeXfGeiuCphsPtqyIfQ==}
@@ -3580,7 +3580,7 @@ snapshots:
       - ts-declaration-location
       - typescript
 
-  '@book000/node-utils@1.26.10':
+  '@book000/node-utils@1.26.12':
     dependencies:
       '@sentry/node': 11.11.0
       cycle: 1.0.3

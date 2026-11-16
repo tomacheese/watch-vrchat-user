@@ -355,6 +355,7 @@ describe('VRChatSession REST authentication recovery', () => {
   let directory: string
   let session: VRChatSession | undefined
   let fetchSpy: jest.SpyInstance
+  let originalCookieFilePath: string | undefined
   const config = {
     vrchat: {
       username: 'test-user',
@@ -371,11 +372,16 @@ describe('VRChatSession REST authentication recovery', () => {
     const { KeyvFile: RealKeyvFile } =
       jest.requireActual<typeof import('keyv-file')>('keyv-file')
     directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vrchat-session-test-'))
+    originalCookieFilePath = process.env.COOKIE_FILE_PATH
+    process.env.COOKIE_FILE_PATH = path.join(
+      directory,
+      'nested',
+      'cookies.json'
+    )
     ;(KeyvFile as unknown as jest.Mock).mockImplementation(
       (options: object) =>
         new RealKeyvFile({
           ...options,
-          filename: path.join(directory, 'cookies.json'),
         })
     )
     fetchSpy = jest.spyOn(globalThis, 'fetch')
@@ -386,9 +392,43 @@ describe('VRChatSession REST authentication recovery', () => {
     await session?.flush()
     session = undefined
     fetchSpy.mockRestore()
+    if (originalCookieFilePath === undefined)
+      delete process.env.COOKIE_FILE_PATH
+    else process.env.COOKIE_FILE_PATH = originalCookieFilePath
     const fs = jest.requireActual<typeof import('node:fs')>('node:fs')
     fs.rmSync(directory, { recursive: true, force: true })
   })
+
+  it.each([false, true])(
+    'restricts a custom cookie file before authentication (existing: %s)',
+    async (existing) => {
+      const fs = jest.requireActual<typeof import('node:fs')>('node:fs')
+      const path = jest.requireActual<typeof import('node:path')>('node:path')
+      const filename = path.join(directory, 'nested', 'cookies.json')
+      if (existing) {
+        fs.mkdirSync(path.dirname(filename), { recursive: true, mode: 0o755 })
+        fs.writeFileSync(filename, '{"cache":[],"lastExpire":0}')
+        fs.chmodSync(filename, 0o644)
+      }
+      fetchSpy.mockImplementation(async (input: Request) => {
+        await Promise.resolve()
+        expect(fs.statSync(filename).mode & 0o777).toBe(0o600)
+        return input.headers.has('authorization')
+          ? Response.json(
+              { id: 'usr_test', displayName: 'Test' },
+              { headers: { 'set-cookie': 'auth=test; Max-Age=3600; Path=/' } }
+            )
+          : Response.json(
+              { error: { message: 'Unauthorized', status_code: 401 } },
+              { status: 401 }
+            )
+      })
+      session = await VRChatSession.create(config)
+      await session.flush()
+      expect(fs.statSync(filename).mode & 0o777).toBe(0o600)
+      expect(fs.readFileSync(filename, 'utf8')).toContain('auth')
+    }
+  )
 
   it('on expiry, concurrent cookie checks share one login and the SDK Pipeline is not recreated', async () => {
     let loginCount = 0

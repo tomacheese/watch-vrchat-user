@@ -198,8 +198,8 @@ importers:
         version: 2.9.1
     devDependencies:
       '@book000/eslint-config':
-        specifier: 1.16.124
-        version: 1.16.124(eslint@10.14.0(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3)
+        specifier: 1.16.125
+        version: 1.16.125(eslint@10.14.0(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3)
       '@types/jest':
         specifier: 30.0.0
         version: 30.0.0
@@ -416,8 +416,8 @@ packages:
   '@bcoe/v8-coverage@0.2.3':
     resolution: {integrity: sha512-0hYQ8SB4Db5zvZB4axdMHGwEaQjkZzFjQiN9LVYvIFB2nSUHW9tYpxWriPrWDASIxiaXax83REcLxuSdnGPZtw==}
 
-  '@book000/eslint-config@1.16.124':
-    resolution: {integrity: sha512-8j8WkaHyFORfeO+di9sFcCX9S3Hf8kT7XrqQ/T+Xmcg0ZCry4yFCkergPki/+LsjjfBVxlyXG1eSWJxqEuvfYg==}
+  '@book000/eslint-config@1.16.125':
+    resolution: {integrity: sha512-Wnab6p01tP6Rzxf1Jox6qIBYaRg8pYAlhUQVSHJmOrHA3RuOFZ2cxpvymMJIu0aZ7Ey5vvcB3FOwYRdF/eRCdw==}
     peerDependencies:
       eslint: 10.14.0
 
@@ -3575,7 +3575,7 @@ snapshots:
 
   '@bcoe/v8-coverage@0.2.3': {}
 
-  '@book000/eslint-config@1.16.124(eslint@10.14.0(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3)':
+  '@book000/eslint-config@1.16.125(eslint@10.14.0(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3)':
     dependencies:
       '@typescript-eslint/parser': 8.72.2(eslint@10.14.0(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3)
       eslint: 10.14.0(supports-color@8.1.1)

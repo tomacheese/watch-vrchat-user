@@ -1,5 +1,7 @@
 import { Logger } from '@book000/node-utils'
 import * as readline from 'node:readline'
+import { mkdir, open } from 'node:fs/promises'
+import path from 'node:path'
 import { KeyvFile } from 'keyv-file'
 import { VRChat } from 'vrchat'
 import type { Config } from '../config'
@@ -7,10 +9,6 @@ import type { Profile } from '../state/user-state'
 
 const logger = Logger.configure('VRCHAT-SESSION')
 const REQUEST_TIMEOUT_MS = 30_000
-
-/** Cookie file path (overridable via the COOKIE_FILE_PATH environment variable) */
-const COOKIE_FILE_PATH =
-  process.env.COOKIE_FILE_PATH ?? 'data/vrchat-cookies.json'
 
 /**
  * Prompts for a 2FA code via readline.
@@ -201,8 +199,20 @@ export class VRChatSession {
   ): Promise<VRChatSession> {
     logger.info('Initializing VRChat session...')
 
+    const cookieFilePath =
+      process.env.COOKIE_FILE_PATH ?? 'data/vrchat-cookies.json'
+    await mkdir(path.dirname(cookieFilePath), { recursive: true, mode: 0o700 })
+    const cookieFile = await open(cookieFilePath, 'a+', 0o600)
+    try {
+      await cookieFile.chmod(0o600)
+      const stats = await cookieFile.stat()
+      if (stats.size === 0)
+        await cookieFile.writeFile('{"cache":[],"lastExpire":0}')
+    } finally {
+      await cookieFile.close()
+    }
     const keyvAdapter = new KeyvFile({
-      filename: COOKIE_FILE_PATH,
+      filename: cookieFilePath,
       writeDelay: 100,
     })
     const controller = new AbortController()

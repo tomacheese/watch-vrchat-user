@@ -133,8 +133,9 @@ export class NotificationOutbox {
         entry.deliveries.every(
           (delivery) =>
             !(
-              delivery.status === 'pending' &&
-              (delivery.nextAttemptAt ?? 0) <= Date.now()
+              delivery.status === 'sending' ||
+              (delivery.status === 'pending' &&
+                (delivery.nextAttemptAt ?? 0) <= Date.now())
             )
         )
       )
@@ -231,6 +232,19 @@ export class NotificationOutbox {
       await this.repository.updatePendingEffect(entry)
     }
     const deliveries = [...(entry.deliveries ?? [])]
+    if (deliveries.some((delivery) => delivery.status === 'sending')) {
+      for (const [index, delivery] of deliveries.entries()) {
+        if (delivery.status === 'sending') {
+          deliveries[index] = {
+            ...delivery,
+            status: 'uncertain',
+            lastError: 'Delivery result could not be persisted',
+          }
+        }
+      }
+      await this.repository.updatePendingEffect({ ...entry, deliveries })
+      this.lastError = null
+    }
     for (const [index, delivery] of deliveries.entries()) {
       if (!this.running) break
       if (

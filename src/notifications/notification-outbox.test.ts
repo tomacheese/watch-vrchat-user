@@ -285,6 +285,43 @@ describe('NotificationOutbox', () => {
     expect(send).toHaveBeenCalledTimes(1)
   })
 
+  it('recovers a failed delivery-result save as uncertain without resending', async () => {
+    const first = intent()
+    first.deliveries = [
+      { name: 'a', embed: { title: 'a' }, status: 'pending', attempts: 0 },
+    ]
+    await repository.commitUserState('u', state, [first, intent()])
+    const save = repository.updatePendingEffect.bind(repository)
+    const update = jest.spyOn(repository, 'updatePendingEffect')
+    let storageAvailable = false
+    update.mockImplementation(async (entry) => {
+      if (!storageAvailable && entry.deliveries?.[0].status !== 'sending') {
+        throw new Error('Storage unavailable')
+      }
+      await save(entry)
+    })
+    const { outbox, send } = setup()
+    await outbox.start()
+    await waitFor(() => outbox.getStatus().lastError !== null)
+    expect(repository.getPendingEffects()[0].deliveries?.[0].status).toBe(
+      'sending'
+    )
+    expect(send).toHaveBeenCalledTimes(1)
+
+    storageAvailable = true
+    outbox.wake()
+    await waitFor(() => outbox.getStatus().uncertain === 1)
+    outbox.wake()
+    const reloaded = new UserStateRepository(file)
+    reloaded.load()
+    expect(reloaded.getPendingEffects()).toHaveLength(2)
+    expect(reloaded.getPendingEffects()[0].deliveries?.[0].status).toBe(
+      'uncertain'
+    )
+    expect(send).toHaveBeenCalledTimes(1)
+    reloaded.close()
+  })
+
   it('a sending entry at restart is changed to uncertain and not retried', async () => {
     const entry = intent()
     entry.deliveries = [

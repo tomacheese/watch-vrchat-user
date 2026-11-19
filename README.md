@@ -231,7 +231,7 @@ docker compose logs -f
 
 ### Health check
 
-`/health` on `HEALTH_HOST` (default `127.0.0.1`) and `HEALTH_PORT` (default `3000`) returns JSON. It includes `baselineCompleted` (whether the initial synchronization is done), `config` (configuration loading state), `ruleErrors` (rule evaluation errors), `favorites` (Favorite Friends refresh state), the REST synchronization result, and `delivery` (counts of pending, uncertain and blocked notifications).
+`/health` on `HEALTH_HOST` (default `127.0.0.1`) and `HEALTH_PORT` (default `3000`) returns JSON. It includes `baselineCompleted` (whether the initial synchronization is done), `config` (configuration loading state), `ruleErrors` (rule evaluation errors), `favorites` (Favorite Friends refresh state), the REST synchronization result, and `delivery` (counts of pending, uncertain and blocked notifications). If the health server cannot listen (for example the port is already in use), startup fails and the application shuts down.
 
 - `healthy`: normal
 - `degraded` (HTTP 200): there is a problem with configuration reload, rule evaluation, Favorite Friends, REST synchronization or notification delivery, or a pending notification has been stuck for 60 seconds or more. Blocked and uncertain notifications need recovery

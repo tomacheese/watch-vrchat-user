@@ -1,13 +1,35 @@
 import * as http from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { HealthService, type HealthSnapshot } from './health-service'
 
-async function waitForListening(service: HealthService): Promise<number> {
-  for (let i = 0; i < 100; i++) {
-    const port = service.getListeningPort()
-    if (port !== 0) return port
-    await new Promise((resolve) => setTimeout(resolve, 5))
-  }
-  throw new Error('HealthService did not start listening in time')
+const mockLog = jest.fn<undefined, unknown[]>()
+const mockError = jest.fn<undefined, unknown[]>()
+jest.mock('@book000/node-utils', () => ({
+  Logger: {
+    configure: () => ({
+      info: (...args: unknown[]) => {
+        mockLog(...args)
+      },
+      warn: (...args: unknown[]) => {
+        mockLog(...args)
+      },
+      error: (...args: unknown[]) => {
+        mockError(...args)
+      },
+      debug: (...args: unknown[]) => {
+        mockLog(...args)
+      },
+    }),
+  },
+}))
+
+/** Occupies a free localhost port and returns the server and its port. */
+async function occupyPort(): Promise<{ server: http.Server; port: number }> {
+  const server = http.createServer()
+  await new Promise<void>((resolve) => {
+    server.listen(0, '127.0.0.1', resolve)
+  })
+  return { server, port: (server.address() as AddressInfo).port }
 }
 
 function fetchJson(port: number): Promise<{ status: number; body: unknown }> {
@@ -53,8 +75,8 @@ describe('HealthService', () => {
   it('returns 200 when healthy', async () => {
     process.env.HEALTH_PORT = '0'
     const service = new HealthService(() => healthySnapshot)
-    service.start()
-    const port = await waitForListening(service)
+    await service.start()
+    const port = service.getListeningPort()
 
     const { status, body } = await fetchJson(port)
     expect(status).toBe(200)
@@ -69,8 +91,8 @@ describe('HealthService', () => {
       ...healthySnapshot,
       supervisorState: 'reconnecting',
     }))
-    service.start()
-    const port = await waitForListening(service)
+    await service.start()
+    const port = service.getListeningPort()
 
     const { status } = await fetchJson(port)
     expect(status).toBe(503)
@@ -90,8 +112,8 @@ describe('HealthService', () => {
         },
       ],
     }))
-    service.start()
-    const port = await waitForListening(service)
+    await service.start()
+    const port = service.getListeningPort()
 
     const { status } = await fetchJson(port)
     expect(status).toBe(503)
@@ -104,8 +126,8 @@ describe('HealthService', () => {
     const service = new HealthService(() => {
       throw new Error('Pipeline raw WebSocket is not available')
     })
-    service.start()
-    const port = await waitForListening(service)
+    await service.start()
+    const port = service.getListeningPort()
 
     const { status } = await fetchJson(port)
     expect(status).toBe(503)
@@ -153,8 +175,8 @@ describe('HealthService', () => {
         ...healthySnapshot,
         ...patch,
       }))
-      service.start()
-      const port = await waitForListening(service)
+      await service.start()
+      const port = service.getListeningPort()
 
       const { status, body } = await fetchJson(port)
       expect(status).toBe(200)
@@ -171,13 +193,67 @@ describe('HealthService', () => {
       supervisorState: 'reconnecting',
       favorites: { lastUpdatedAt: null, lastError: 'x' },
     }))
-    service.start()
-    const port = await waitForListening(service)
+    await service.start()
+    const port = service.getListeningPort()
 
     const { status, body } = await fetchJson(port)
     expect(status).toBe(503)
     expect((body as { status: string }).status).toBe('unhealthy')
 
     service.stop()
+  })
+
+  describe('start failures', () => {
+    beforeEach(() => {
+      mockError.mockClear()
+    })
+
+    it('rejects with the host and port when the port is occupied', async () => {
+      const { server, port } = await occupyPort()
+      try {
+        process.env.HEALTH_PORT = String(port)
+        const service = new HealthService(() => healthySnapshot)
+
+        await expect(service.start()).rejects.toThrow(
+          new RegExp(
+            String.raw`^Failed to start health check server on 127\.0\.0\.1:${port}: .*listen EADDRINUSE`
+          )
+        )
+        expect(service.getListeningPort()).toBe(0)
+        expect(() => {
+          service.stop()
+        }).not.toThrow()
+      } finally {
+        server.close()
+      }
+    })
+
+    it('rejects instead of throwing synchronously on an invalid port', async () => {
+      process.env.HEALTH_PORT = '99999'
+      const service = new HealthService(() => healthySnapshot)
+
+      await expect(service.start()).rejects.toThrow(
+        'Failed to start health check server on 127.0.0.1:99999'
+      )
+      expect(service.getListeningPort()).toBe(0)
+    })
+
+    it('logs a server error emitted after a successful start without throwing', async () => {
+      process.env.HEALTH_PORT = '0'
+      const service = new HealthService(() => healthySnapshot)
+      await service.start()
+      try {
+        const { server } = service as unknown as { server: http.Server }
+        const failure = new Error('socket exploded')
+
+        expect(() => server.emit('error', failure)).not.toThrow()
+        expect(mockError).toHaveBeenCalledWith(
+          'Health check server error',
+          failure
+        )
+      } finally {
+        service.stop()
+      }
+    })
   })
 })

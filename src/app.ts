@@ -183,7 +183,8 @@ export class App {
     favorites.start()
 
     this.healthService = new HealthService(() => this.buildHealthSnapshot())
-    this.healthService.start()
+    await this.healthService.start()
+    this.assertRunning()
 
     logger.info('Application started. Listening for events...')
   }

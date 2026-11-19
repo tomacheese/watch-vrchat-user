@@ -115,26 +115,59 @@ export class HealthService {
 
   /**
    * Starts the health endpoint server.
+   *
+   * Never throws synchronously. A server error after the returned promise has
+   * resolved is logged and does not stop the server.
+   *
+   * @returns Resolves once the server is listening
+   * @throws If the server cannot listen (for example the port is in use or invalid)
    */
-  start(): void {
+  start(): Promise<void> {
     const port = process.env.HEALTH_PORT
       ? Number.parseInt(process.env.HEALTH_PORT, 10)
       : 3000
     const host = process.env.HEALTH_HOST ?? '127.0.0.1'
 
-    this.server = http.createServer((request, response) => {
-      if (request.url === '/health') {
-        this.handleHealthCheck(response)
-      } else {
-        response.writeHead(404, { 'Content-Type': 'text/plain' })
-        response.end('Not Found')
+    return new Promise<void>((resolve, reject) => {
+      let listening = false
+      const fail = (cause: unknown): void => {
+        this.server = null
+        reject(
+          new Error(
+            `Failed to start health check server on ${host}:${port}: ${toError(cause).message}`,
+            { cause }
+          )
+        )
       }
-    })
 
-    this.server.listen(port, host, () => {
-      logger.info(
-        `Health check server listening on http://${host}:${this.getListeningPort()}/health`
-      )
+      const server = http.createServer((request, response) => {
+        if (request.url === '/health') {
+          this.handleHealthCheck(response)
+        } else {
+          response.writeHead(404, { 'Content-Type': 'text/plain' })
+          response.end('Not Found')
+        }
+      })
+      this.server = server
+      server.on('error', (error) => {
+        if (listening) {
+          logger.error('Health check server error', toError(error))
+        } else {
+          fail(error)
+        }
+      })
+
+      try {
+        server.listen(port, host, () => {
+          listening = true
+          logger.info(
+            `Health check server listening on http://${host}:${this.getListeningPort()}/health`
+          )
+          resolve()
+        })
+      } catch (error) {
+        fail(error)
+      }
     })
   }
 

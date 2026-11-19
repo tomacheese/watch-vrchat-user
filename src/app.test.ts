@@ -1,11 +1,16 @@
 import * as fs from 'node:fs'
+import * as http from 'node:http'
+import type { AddressInfo } from 'node:net'
 import * as os from 'node:os'
 import path from 'node:path'
 import { App } from './app'
 import { VRChatSession } from './vrchat/session'
 import { PipelineSupervisor } from './vrchat/pipeline-supervisor'
 import { Reconciler } from './state/reconciler'
-import { getUserStateDatabasePath } from './state/user-state-repository'
+import {
+  getUserStateDatabasePath,
+  UserStateRepository,
+} from './state/user-state-repository'
 import type { Config } from './config'
 
 jest.mock('./vrchat/session')
@@ -151,5 +156,32 @@ describe('App.start', () => {
       )
     ).toBe(true)
     expect(app.getHealthPort()).toBe(0)
+  })
+
+  it('rejects startup and releases the writer lock when the health port is occupied', async () => {
+    const occupier = http.createServer()
+    await new Promise<void>((resolve) => {
+      occupier.listen(0, '127.0.0.1', resolve)
+    })
+    try {
+      const { port } = occupier.address() as AddressInfo
+      process.env.HEALTH_PORT = String(port)
+      const app = new App(config())
+
+      await expect(app.start()).rejects.toThrow(
+        `Failed to start health check server on 127.0.0.1:${port}`
+      )
+      expect(app.getHealthPort()).toBe(0)
+
+      const repository = new UserStateRepository(undefined, {
+        exclusive: true,
+      })
+      expect(() => {
+        repository.load()
+      }).not.toThrow()
+      repository.close()
+    } finally {
+      occupier.close()
+    }
   })
 })

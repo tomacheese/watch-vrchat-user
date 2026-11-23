@@ -211,8 +211,7 @@ export class App {
   /**
    * Stops the application
    *
-   * Swallows synchronous exceptions here and never rejects, so the `.catch`/`.finally`
-   * of the shutdown handler (main.ts) always run.
+   * Rejects if shutdown or persistence fails, after attempting resource cleanup.
    */
   stop(): Promise<void> {
     this.stopPromise ??= this.stopServices()
@@ -221,38 +220,49 @@ export class App {
 
   /** After stopping intake, saves state and in-flight delivery results within the deadline */
   private async stopServices(): Promise<void> {
-    this.stopping = true
-    this.abortController.abort(new Error('Application stopped'))
-    if (this.reconcileTimer) clearInterval(this.reconcileTimer)
-    this.reconcileTimer = null
-    this.configManager?.stop()
-    this.coordinator?.stopAccepting()
-    this.router?.detach()
-    this.reconciler?.stop()
-    this.favorites?.stop()
-    this.session?.stop()
-    for (const resolver of this.resolvers) resolver.stop()
     try {
-      this.supervisor?.stop()
-    } catch (error) {
-      logger.error('Error while stopping supervisor', toError(error))
-    }
-    const [drained, deliverySaved] = await Promise.all([
-      this.coordinator?.stop(5000) ?? Promise.resolve(true),
-      this.outbox?.stop(5000) ?? Promise.resolve(true),
-    ])
-    await this.evaluator?.stop()
-    await Promise.all([
-      this.repository?.flush(),
-      this.session?.flush(),
-      ...this.resolvers.map(async (resolver) => resolver.flush()),
-    ])
-    this.repository?.close()
-    this.healthService?.stop()
-    if (!drained || !deliverySaved)
-      logger.error(
-        'Shutdown did not drain all observations; persisted notifications remain available'
+      this.stopping = true
+      this.abortController.abort(new Error('Application stopped'))
+      if (this.reconcileTimer) clearInterval(this.reconcileTimer)
+      this.reconcileTimer = null
+      this.configManager?.stop()
+      this.coordinator?.stopAccepting()
+      this.router?.detach()
+      this.reconciler?.stop()
+      this.favorites?.stop()
+      this.session?.stop()
+      for (const resolver of this.resolvers) resolver.stop()
+      try {
+        this.supervisor?.stop()
+      } catch (error) {
+        logger.error('Error while stopping supervisor', toError(error))
+      }
+      const [drained, deliverySaved] = await Promise.all([
+        this.coordinator?.stop(5000) ?? Promise.resolve(true),
+        this.outbox?.stop(5000) ?? Promise.resolve(true),
+      ])
+      await this.evaluator?.stop()
+      const results = await Promise.allSettled([
+        Promise.try(() => this.repository?.flush()),
+        Promise.try(() => this.session?.flush()),
+        ...this.resolvers.map(async (resolver) => resolver.flush()),
+      ])
+      const failures = results.flatMap((result) =>
+        result.status === 'rejected' ? [result.reason as unknown] : []
       )
+      if (failures.length > 0)
+        throw new AggregateError(failures, 'Shutdown persistence failed')
+      if (!drained || !deliverySaved)
+        logger.error(
+          'Shutdown did not drain all observations; persisted notifications remain available'
+        )
+    } finally {
+      try {
+        this.repository?.close()
+      } finally {
+        this.healthService?.stop()
+      }
+    }
   }
 
   /** Prevents an asynchronous startup from restarting services after a stop */

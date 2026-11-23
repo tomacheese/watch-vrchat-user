@@ -26,12 +26,14 @@ async function main(): Promise<void> {
     deadline.unref()
     app
       .stop()
+      .then(() => {
+        clearTimeout(deadline)
+      })
       .catch((error: unknown) => {
         logger.error('Error during shutdown', toError(error))
         process.exitCode = 1
       })
       .finally(() => {
-        clearTimeout(deadline)
         Logger.closeAll()
         process.exitCode ??= 0
       })

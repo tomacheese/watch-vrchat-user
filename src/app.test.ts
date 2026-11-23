@@ -138,6 +138,43 @@ describe('App.start', () => {
 
     await expect(app.stop()).resolves.toBeUndefined()
   })
+  it('releases the writer lock and health listener when a flush fails', async () => {
+    const app = new App(config())
+    await app.start()
+    const port = app.getHealthPort()
+    const session = (await (VRChatSession.create as jest.Mock).mock.results[0]
+      .value) as { flush: jest.Mock }
+    session.flush.mockRejectedValue(new Error('cookie persistence failed'))
+    const flush = jest.spyOn(UserStateRepository.prototype, 'flush')
+    const close = jest.spyOn(UserStateRepository.prototype, 'close')
+
+    try {
+      await expect(app.stop()).rejects.toThrow('Shutdown persistence failed')
+      expect(flush).toHaveBeenCalled()
+      expect(close).toHaveBeenCalled()
+      expect(app.getHealthPort()).toBe(0)
+
+      const repository = new UserStateRepository(undefined, { exclusive: true })
+      repository.load()
+      repository.close()
+
+      const server = http.createServer()
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject)
+        server.listen(port, '127.0.0.1', resolve)
+      })
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) reject(error)
+          else resolve()
+        })
+      })
+    } finally {
+      flush.mockRestore()
+      close.mockRestore()
+    }
+  })
+
   it('rejects startup and releases the writer lock when the initial REST sync fails', async () => {
     ;(Reconciler as unknown as jest.Mock).mockImplementation(function (this: {
       reconcileAll: jest.Mock
